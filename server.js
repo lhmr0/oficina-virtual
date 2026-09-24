@@ -118,7 +118,7 @@ r('PUT', '/api/me', 'observador', ({ user, body }) => {
 });
 
 // ---------- catálogos ----------
-const agentPublic = a => ({ id: a.id, key: a.key, name: a.name, color: a.color, adapter: a.adapter, models: J(a.models, []), efforts: J(a.efforts, []),
+const agentPublic = a => ({ id: a.id, key: a.key, name: a.name, color: a.color, adapter: a.adapter, models: J(a.models, []), efforts: J(a.efforts, []), prices: J(a.prices, {}),
   default_model: a.default_model, default_effort: a.default_effort, enabled: !!a.enabled, status: a.status, quota_reset_at: a.quota_reset_at, max_concurrent: a.max_concurrent });
 const RANKS = [[0, 'Iniciado'], [3, 'Padawan'], [10, 'Caballero Jedi'], [25, 'Maestro Jedi'], [60, 'Gran Maestro']];
 const rank = n => RANKS.filter(([m]) => n >= m).at(-1)[1];
@@ -571,11 +571,11 @@ r('POST', '/api/queue/resume', 'admin', ({ user }) => { R.resumeQueue(user.id); 
 r('POST', '/api/backup', 'admin', ({ user }) => { const f = S.backup(); log(user.id, 'sistema', null, 'respaldo', { f }); return { file: f }; });
 
 // ---------- Configuración (admin) ----------
-const AGENT_FIELDS = ['name', 'exe', 'pre_args', 'extra_args', 'models', 'efforts', 'default_model', 'default_effort', 'enabled', 'max_concurrent', 'timeout_min', 'quota_patterns', 'color', 'adapter'];
-r('GET', '/api/agents', 'admin', () => all('select * from agents order by id').map(a => ({ ...a, pre_args: J(a.pre_args, []), extra_args: J(a.extra_args, []), models: J(a.models, []), efforts: J(a.efforts, []), quota_patterns: J(a.quota_patterns, []), last_test: J(a.last_test) })));
+const AGENT_FIELDS = ['name', 'exe', 'pre_args', 'extra_args', 'models', 'efforts', 'default_model', 'default_effort', 'enabled', 'max_concurrent', 'timeout_min', 'quota_patterns', 'prices', 'color', 'adapter'];
+r('GET', '/api/agents', 'admin', () => all('select * from agents order by id').map(a => ({ ...a, pre_args: J(a.pre_args, []), extra_args: J(a.extra_args, []), models: J(a.models, []), efforts: J(a.efforts, []), prices: J(a.prices, {}), quota_patterns: J(a.quota_patterns, []), last_test: J(a.last_test) })));
 function agentPatch(body) {
   const p = {};
-  for (const k of AGENT_FIELDS) if (body[k] !== undefined) p[k] = Array.isArray(body[k]) ? JSON.stringify(body[k]) : typeof body[k] === 'boolean' ? +body[k] : body[k];
+  for (const k of AGENT_FIELDS) if (body[k] !== undefined) p[k] = body[k] !== null && typeof body[k] === 'object' ? JSON.stringify(body[k]) : typeof body[k] === 'boolean' ? +body[k] : body[k];
   if (p.adapter) need(R.ADAPTERS[p.adapter], 'Adaptador inválido');
   if (p.quota_patterns) for (const x of J(p.quota_patterns, [])) { try { new RegExp(x); } catch { throw new HttpError(400, 'Regex inválida: ' + x); } }
   return p;

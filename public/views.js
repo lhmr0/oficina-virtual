@@ -12,7 +12,8 @@ const agentsOn = () => S.boot.agents.filter(a => a.enabled);
 
 // ---------- selector agente / modelo / esfuerzo ----------
 // un <select> y no <input list>: el datalist filtra por el valor actual y solo mostraba el modelo por defecto
-const modelOpts = (a, cur) => { const ms = a?.models || [], c = cur || a?.default_model || ''; return opts((c && !ms.includes(c) ? [c, ...ms] : ms).map(m => [m, m]), c, ms.length || c ? null : '—'); };
+const price = (a, m) => { const p = a?.prices?.[m]; return p ? ` · $${p[0]} / $${p[1]}` : ''; }; // USD por 1M tokens entrada / salida
+const modelOpts = (a, cur) => { const ms = a?.models || [], c = cur || a?.default_model || ''; return opts((c && !ms.includes(c) ? [c, ...ms] : ms).map(m => [m, m + price(a, m)]), c, ms.length || c ? null : '—'); };
 function agentPicker(p, sel = {}, { modes = true, blank = false } = {}) {
   const a = agent(sel.agent_id) || (blank ? null : agentsOn()[0]);
   return `<div class="field-row">
@@ -841,6 +842,7 @@ const config = {
         <div class="field-row"><div><label class="l">Args previos (JSON)</label><input name="pre_args" value="${h(JSON.stringify(a.pre_args))}"></div><div><label class="l">Args extra (JSON, al final)</label><input name="extra_args" value="${h(JSON.stringify(a.extra_args))}"></div></div>
         <label class="l">Modelos (separados por coma)</label><div class="row" style="flex-wrap:nowrap"><input name="models" value="${h(a.models.join(', '))}"><button class="btn sm" data-detect="${a.id}" type="button">Detectar</button></div>
         <div class="field-row"><div><label class="l">Esfuerzos</label><input name="efforts" value="${h(a.efforts.join(', '))}"></div><div><label class="l">Modelo por defecto</label><input name="default_model" value="${h(a.default_model)}"></div><div><label class="l">Esfuerzo por defecto</label><input name="default_effort" value="${h(a.default_effort)}"></div></div>
+        <label class="l">Precios USD por 1M tokens (modelo = entrada / salida / caché, uno por línea)</label><textarea name="prices" rows="4">${h(Object.entries(a.prices || {}).map(([m, p]) => `${m} = ${p.join(' / ')}`).join('\n'))}</textarea>
         <label class="l">Patrones de cuota agotada (regex, uno por línea)</label><textarea name="quota_patterns" rows="3">${h(a.quota_patterns.join('\n'))}</textarea>
         <div class="row"><button class="btn y">Guardar</button><button class="btn" type="button" data-test="${a.id}">Probar</button>${a.last_test ? `<small>${a.last_test.ok ? '✔' : '✘'} ${ago(a.last_test.at)}</small>` : ''}</div></form>`).join('') +
         `<details class="panel"><summary class="pixel" style="font-size:9px;cursor:pointer">+ Agregar agente</summary><form id="newAg"><div class="field-row"><div><label class="l">Clave</label><input name="key" required></div><div><label class="l">Nombre</label><input name="name"></div>
@@ -899,7 +901,7 @@ const config = {
       try {
         if (fm.dataset.agent) {
           let pre, extra; try { pre = JSON.parse(f.pre_args || '[]'); extra = JSON.parse(f.extra_args || '[]'); } catch { return fail('Args deben ser JSON, p. ej. ["--flag"]'); }
-          await put('/api/agents/' + fm.dataset.agent, { ...f, pre_args: pre, extra_args: extra, models: list(f.models), efforts: list(f.efforts), quota_patterns: list(f.quota_patterns.replace(/,/g, '\u0000')).map(x => x.replace(/\u0000/g, ',')), max_concurrent: +f.max_concurrent, timeout_min: +f.timeout_min });
+          await put('/api/agents/' + fm.dataset.agent, { ...f, pre_args: pre, extra_args: extra, models: list(f.models), efforts: list(f.efforts), prices: Object.fromEntries(f.prices.split('\n').map(l => l.split('=')).filter(x => x.length === 2 && x[0].trim()).map(([m, v]) => [m.trim(), v.split('/').map(Number).filter(n => !isNaN(n))])), quota_patterns: list(f.quota_patterns.replace(/,/g, '\u0000')).map(x => x.replace(/\u0000/g, ',')), max_concurrent: +f.max_concurrent, timeout_min: +f.timeout_min });
           holo('Agente guardado'); await loadBoot();
         } else if (fm.id === 'newMachine') {
           const m = await post('/api/machines', f);

@@ -384,6 +384,22 @@ function gitRepo(name) {
   });
   worker?.kill();
 
+  await t('precios por modelo: sembrados, editables y costo estimado del run', async () => {
+    const cx = (await api('GET', '/api/agents')).find(a => a.key === 'codex');
+    assert.deepEqual(cx.prices['gpt-5.6-terra'], [2, 12, 0.2]);
+    await api('PUT', '/api/agents/' + fake, { prices: { m1: [1000000, 2000000] } }); // $1 por token de entrada, $2 de salida
+    assert.deepEqual((await api('GET', '/api/agents')).find(a => a.id === fake).prices, { m1: [1000000, 2000000] });
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Costo', prompt: 'x', agent_id: fake })).id;
+    const orig = R.ADAPTERS.fake.parse;
+    R.ADAPTERS.fake.parse = (l, st, out) => { orig(l, st, out); st.tin = 3; st.tcache = 1; st.tout = 1; };
+    try {
+      await api('POST', `/api/tasks/${id}/run`, {});
+      await until(() => task(id).status === 'revision', 15000, 'revisión');
+    } finally { R.ADAPTERS.fake.parse = orig; }
+    // 2 de entrada × $1 + 1 en caché × $0.1 (10 % por defecto) + 1 de salida × $2
+    assert.equal(+one('select cost_usd from runs where task_id=?', id).cost_usd.toFixed(4), 4.1);
+  });
+
   await t('fin de run aunque un hijo huérfano retenga stdout (hooks del CLI)', async () => {
     const H = require('./hostops').create({ dataDir: path.join(TMP, 'orf') });
     const child = `require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},20000)'],{stdio:'inherit'}).unref();console.log('[[LISTO]] ok')`;

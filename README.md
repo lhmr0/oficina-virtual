@@ -23,7 +23,7 @@ Requisitos: Node 22+, git, y los CLIs de los agentes instalados y con sesión in
 | **Consejo Jedi** | Informe de lo hecho → uno o varios agentes proponen mejoras por "lentes" → tablero de propuestas → tareas. |
 | **Archivos Jedi** | Historial de chats, tareas, ejecuciones, relevos, notificaciones, bitácora, consejos, papelera. Búsqueda global y CSV. |
 | **Puente de Mando** | Estado de todo: versión y salud de cada agente, límites (los que informa el CLI + medidos + manuales), procesos, carpetas git, sistema. Orden 66. |
-| **Configuración** | Máquinas (agentes de campo), agentes (comando, modelos, esfuerzos, concurrencia, patrones de cuota), áreas y cadena de relevo, usuarios/roles, límites, automatización, plantillas, perfil. |
+| **Configuración** | Máquinas (agentes de campo), agentes (comando, modelos, **precios por modelo** en USD/1M tokens tomados de las páginas oficiales, esfuerzos, concurrencia, patrones de cuota), áreas y cadena de relevo, usuarios/roles, límites, automatización, plantillas, perfil. |
 
 ## Cómo trabaja un agente
 

@@ -77,7 +77,7 @@ const ADAPTERS = {
       if (o.type === 'result') {
         st.final = o.result ?? ''; st.cost = o.total_cost_usd || 0; st.done = true;
         const u = o.usage || {};
-        st.tin = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0); st.tout = u.output_tokens || 0;
+        st.tin = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0); st.tcache = u.cache_read_input_tokens || 0; st.tout = u.output_tokens || 0;
         if (o.is_error) st.error = o.result || o.subtype;
       }
     },
@@ -103,7 +103,7 @@ const ADAPTERS = {
         else if (it.type === 'file_change') out(`📝 ${JSON.stringify(it.changes || '').slice(0, 200)}`);
         else if (it.type === 'error') out('⚠ ' + it.message);
       }
-      if (o.type === 'turn.completed') { st.error = null; st.tin = o.usage?.input_tokens || 0; st.tout = o.usage?.output_tokens || 0; }
+      if (o.type === 'turn.completed') { st.error = null; st.tin = o.usage?.input_tokens || 0; st.tcache = o.usage?.cached_input_tokens || 0; st.tout = o.usage?.output_tokens || 0; }
       if (o.type === 'turn.failed') st.error = o.error?.message || 'turn.failed';
       if (o.type === 'error') st.error = o.message;
       const rl = o.rate_limits || o.msg?.rate_limits || o.info?.rate_limits;
@@ -132,7 +132,7 @@ const ADAPTERS = {
       if (o.event === 'result') {
         const r = o.result || {};
         st.final = r.response || ''; st.sessionId = r.conversation_id || st.sessionId;
-        st.tin = r.usage?.input_tokens || 0; st.tout = r.usage?.output_tokens || 0;
+        st.tcache = r.usage?.cache_read_tokens || 0; st.tin = (r.usage?.input_tokens || 0) + st.tcache; st.tout = r.usage?.output_tokens || 0; // agy informa la caché aparte
         if (r.status && r.status !== 'SUCCESS') st.error = r.error || r.status;
       }
     },
@@ -320,6 +320,9 @@ async function start(item, mid) {
   out(`■ fin: ${end_reason} (exit ${code})${errText ? ' · ' + errText.slice(0, 300) : ''}`);
   fs.closeSync(logf);
 
+  // costo: el que informa el CLI (Claude) o estimado con la tabla de precios del agente (caché al 10 % si no hay precio propio)
+  const pr = J(ag.prices, {})[cc.model || ag.default_model];
+  if (!st.cost && pr) st.cost = ((st.tin - (st.tcache || 0)) * pr[0] + (st.tcache || 0) * (pr[2] ?? pr[0] / 10) + st.tout * pr[1]) / 1e6;
   if (st.sessionId && st.sessionId !== cc.session_id) update('conversations', c.id, { session_id: st.sessionId });
   update('runs', runId, { ended_at: now(), exit_code: code, end_reason, tokens_in: st.tin, tokens_out: st.tout, cost_usd: st.cost });
   saveLimits(ag.id, st.limits);

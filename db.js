@@ -86,6 +86,7 @@ const addCol = (t, c, def) => { if (!db.prepare(`pragma table_info(${t})`).all()
 addCol('project_folders', 'machine_id', 'integer');
 addCol('conversations', 'machine_id', 'integer');
 addCol('users', 'email', 'text');
+addCol('agents', 'prices', "text default '{}'");
 fs.mkdirSync(path.join(DATA0, 'attachments'), { recursive: true });
 
 const now = () => new Date().toISOString();
@@ -155,5 +156,19 @@ if (!one('select 1 from agents limit 1')) {
     ['Análisis', 'Analizar requerimiento', 'Analiza el requerimiento: alcance, riesgos, dependencias, y propone un plan en pasos concretos. No modifiques archivos.']];
   for (const [an, title, prompt] of tpl) insert('templates', { area_id: areas.find(a => a.name === an).id, title, prompt });
 }
+// Precio API en USD por 1M tokens: [entrada, salida, entrada en caché]. Fuentes oficiales, consultadas 2026-09-24:
+// claude: platform.claude.com/docs/en/about-claude/pricing (sonnet=Sonnet 5, opus=Opus 5.5, haiku=Haiku 4.5, fable=Fable 5.1)
+// codex: developers.openai.com/api/docs/pricing (contexto corto) · antigravity: ai.google.dev/gemini-api/docs/pricing (Flash: precio hasta 31/12/2026)
+// commandcode: api-docs.deepseek.com (hora pico), platform.kimi.ai, docs.z.ai, alibabacloud.com model-studio (Singapur)
+// Con suscripción (Claude Max, ChatGPT, etc.) no pagas esto: sirve como costo equivalente para comparar. Editable en Configuración → Agentes.
+const PRICES = {
+  claude: { sonnet: [2, 10, 0.2], opus: [4, 20, 0.2], haiku: [1, 5, 0.1], fable: [10, 50, 0.25] },
+  codex: { 'gpt-5.6-terra': [2, 12, 0.2], 'gpt-5.6-sol': [4, 20, 0.4], 'gpt-5.6-luna': [0.2, 1.2, 0.02], 'gpt-5.5': [5, 30, 0.5], 'gpt-6-luna': [0.1, 0.5, 0.01], 'gpt-6-sol': [2, 10, 0.2] },
+  antigravity: { 'gemini-3.8-flash-high': [0.75, 3.75], 'gemini-3.8-flash-medium': [0.75, 3.75], 'gemini-3.8-flash-low': [0.75, 3.75], 'gemini-3.1-pro-high': [2, 12], 'gemini-3.1-pro-low': [2, 12],
+    'claude-sonnet-4-6': [3, 15, 0.3], 'claude-opus-4-6-thinking': [5, 25, 0.5] },
+  commandcode: { 'deepseek/deepseek-v4-flash': [0.3, 1.2, 0.006], 'deepseek/deepseek-v4-pro': [1.32, 3.96, 0.044], 'moonshotai/kimi-k3': [3, 15, 0.3], 'zai-org/glm-5.3': [1.4, 4.4, 0.26], 'qwen/qwen3.8-max': [2, 6] },
+};
+for (const a of all("select id, key from agents where prices is null or prices in ('', '{}')")) if (PRICES[a.key]) update('agents', a.id, { prices: JSON.stringify(PRICES[a.key]) });
+
 
 module.exports = { db, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting };
