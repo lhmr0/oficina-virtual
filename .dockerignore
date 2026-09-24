@@ -1,0 +1,6 @@
+.git
+data
+worker.json
+*.log
+.ijfw
+.serena

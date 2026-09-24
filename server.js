@@ -744,5 +744,7 @@ function startServer(port = PORT) {
   const bind = process.env.OFICINA_BIND || '127.0.0.1';
   return new Promise(res => server.listen(port, bind, () => { console.log(`★ Oficina Virtual en http://${bind}:${port} (login: ${AUTH}, ejecución local: ${host.LOCAL_EXEC ? 'sí' : 'no'})`); res(server); }));
 }
-if (require.main === module) startServer();
+// CLI: `node server.js crear-maquina "PC Oficina"` imprime solo el token (para crear worker.json sin pasar por la web)
+if (require.main === module && process.argv[2] === 'crear-maquina') { process.stdout.write(host.createMachine(process.argv[3] || 'PC', null).token + '\n'); process.exit(0); }
+else if (require.main === module) startServer();
 module.exports = { server, startServer, hashPw, checkPw };
