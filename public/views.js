@@ -11,11 +11,13 @@ const PRI = { alta: '▲ alta', media: '■ media', baja: '▼ baja' };
 const agentsOn = () => S.boot.agents.filter(a => a.enabled);
 
 // ---------- selector agente / modelo / esfuerzo ----------
+// un <select> y no <input list>: el datalist filtra por el valor actual y solo mostraba el modelo por defecto
+const modelOpts = (a, cur) => { const ms = a?.models || [], c = cur || a?.default_model || ''; return opts((c && !ms.includes(c) ? [c, ...ms] : ms).map(m => [m, m]), c, ms.length || c ? null : '—'); };
 function agentPicker(p, sel = {}, { modes = true, blank = false } = {}) {
   const a = agent(sel.agent_id) || (blank ? null : agentsOn()[0]);
   return `<div class="field-row">
     <div><label class="l" for="${p}agent">Agente</label><select id="${p}agent" name="agent_id">${opts(agentsOn().map(x => [x.id, x.name + (x.status === 'sin_cuota' ? ' (sin cuota)' : '')]), a?.id, blank ? '— por defecto del área —' : null)}</select></div>
-    <div><label class="l" for="${p}model">Modelo</label><input id="${p}model" name="model" list="${p}models" value="${h(sel.model || a?.default_model || '')}"><datalist id="${p}models">${(a?.models || []).map(m => `<option value="${h(m)}">`).join('')}</datalist></div>
+    <div><label class="l" for="${p}model">Modelo</label><select id="${p}model" name="model">${modelOpts(a, sel.model)}</select></div>
     <div><label class="l" for="${p}effort">Esfuerzo</label><select id="${p}effort" name="effort">${opts((a?.efforts || []).map(e => [e, e]), sel.effort || a?.default_effort, '—')}</select></div>
     ${modes ? `<div><label class="l" for="${p}mode">Modo</label><select id="${p}mode" name="mode">${opts([['editar', 'Editar (auto-acepta cambios)'], ['plan', 'Plan / solo lectura'], ['supervisado', 'Supervisado (aprobar permisos, Claude)']], sel.mode || 'editar')}</select></div>` : ''}
   </div>`;
@@ -24,8 +26,7 @@ function bindPicker(root, p) {
   const s = $(`#${p}agent`, root); if (!s) return;
   s.addEventListener('change', () => {
     const a = agent(s.value);
-    $(`#${p}models`, root).innerHTML = (a?.models || []).map(m => `<option value="${h(m)}">`).join('');
-    $(`#${p}model`, root).value = a?.default_model || '';
+    $(`#${p}model`, root).innerHTML = modelOpts(a);
     $(`#${p}effort`, root).innerHTML = opts((a?.efforts || []).map(e => [e, e]), a?.default_effort, '—');
   });
 }
@@ -666,7 +667,7 @@ async function conveneDialog(pid) {
     <label class="l">Pedido libre (lente «Libre»)</label><input name="custom" placeholder="p. ej. ¿cómo reducimos los tiempos de respuesta?">
     <h3>3 · ¿Quién opina?</h3>
     ${agentsOn().map((a, i) => `<div class="row" style="margin:4px 0"><label class="row" style="min-width:170px"><input type="checkbox" name="ag" value="${a.id}" ${i === 0 ? 'checked' : ''}>${sprite('droid', a.color, 2)} ${h(a.name)}</label>
-      <input style="max-width:220px" data-m="${a.id}" list="cvm${a.id}" value="${h(a.default_model)}"><datalist id="cvm${a.id}">${a.models.map(m => `<option value="${h(m)}">`).join('')}</datalist>
+      <select style="max-width:220px" data-m="${a.id}">${modelOpts(a)}</select>
       <select style="max-width:120px" data-e="${a.id}">${opts(a.efforts.map(e => [e, e]), a.default_effort)}</select></div>`).join('')}
     <label class="l">Moderador (consolida si opinan varios)</label><select name="moderator">${opts(agentsOn().map(a => [a.id, a.name]), '', 'Sin moderador (consolidación automática)')}</select>
     <div class="row" style="margin-top:12px"><button class="btn y" id="cvOk">Convocar</button><button class="btn ghost" value="c">Cancelar</button></div>`);
