@@ -23,7 +23,7 @@ Requisitos: Node 22+, git, y los CLIs de los agentes instalados y con sesión in
 | **Consejo Jedi** | Informe de lo hecho → uno o varios agentes proponen mejoras por "lentes" → tablero de propuestas → tareas. |
 | **Archivos Jedi** | Historial de chats, tareas, ejecuciones, relevos, notificaciones, bitácora, consejos, papelera. Búsqueda global y CSV. |
 | **Puente de Mando** | Estado de todo: versión y salud de cada agente, límites (los que informa el CLI + medidos + manuales), procesos, carpetas git, sistema. Orden 66. |
-| **Configuración** | Agentes (comando, modelos, esfuerzos, concurrencia, patrones de cuota), áreas y cadena de relevo, usuarios/roles, límites, automatización, plantillas, perfil. |
+| **Configuración** | Máquinas (agentes de campo), agentes (comando, modelos, esfuerzos, concurrencia, patrones de cuota), áreas y cadena de relevo, usuarios/roles, límites, automatización, plantillas, perfil. |
 
 ## Cómo trabaja un agente
 
@@ -35,9 +35,59 @@ Requisitos: Node 22+, git, y los CLIs de los agentes instalados y con sesión in
 
 ⚠ En modo *Editar* los agentes auto-aceptan cambios dentro de su carpeta de trabajo.
 
+## En el VPS con la PC como ejecutora (acceso desde cualquier lado)
+
+```
+Celular / laptop ──HTTPS──► VPS ua.csjla.pe (web, BD, login Google, cola)
+                                  ▲
+                    conexión SALIENTE HTTPS (sin abrir puertos)
+                                  │
+                     PC ── worker.js (agente de campo): Claude/Codex/agy/CommandCode, git, archivos
+```
+- Si la PC está apagada, las tareas quedan **en cola** y arrancan solas cuando el agente se reconecta.
+- El agente de campo solo lanza `claude`, `codex`, `agy` y CommandCode, y solo trabaja en carpetas dentro de `roots` (worker.json).
+- Adjuntos: se suben al VPS y el agente los baja a `.oficina/adjuntos/` de la carpeta de trabajo antes del turno.
+
+### 1. Google SSO (una vez)
+1. https://console.cloud.google.com → crea un proyecto (ej. "Oficina Virtual").
+2. **Google Auth Platform → Branding / Audiencia**: tipo **Externo**, estado **Prueba**; en *Usuarios de prueba* agrega los correos permitidos.
+3. **Clientes → Crear cliente → Aplicación web**
+   - Orígenes autorizados: `https://ua.csjla.pe`
+   - URI de redirección: `https://ua.csjla.pe/api/auth/google/callback`
+4. Copia el ID y el secreto **directamente** en el VPS: `ssh vps` → `nano ~/oficina/.env` → `GOOGLE_CLIENT_ID=…` y `GOOGLE_CLIENT_SECRET=…`.
+
+`~/oficina/.env` (permisos 600):
+```
+OFICINA_AUTH=google
+OFICINA_PUBLIC_URL=https://ua.csjla.pe
+OFICINA_ALLOWED_EMAILS=correo1@…,correo2@…
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+```
+Solo los correos de `OFICINA_ALLOWED_EMAILS` entran (verificados por Google); no existe login por contraseña en este modo.
+
+### 2. Apache (requiere sudo, una vez)
+```
+sudo cp /etc/apache2/sites-available/ua.csjla.pe-le-ssl.conf /etc/apache2/sites-available/ua.csjla.pe-le-ssl.conf.bak-proyecto_sea
+sudo cp ~/oficina/app/deploy/ua.csjla.pe-le-ssl.conf /etc/apache2/sites-available/ua.csjla.pe-le-ssl.conf
+sudo apache2ctl configtest && sudo systemctl reload apache2
+```
+
+### 3. Desplegar / actualizar
+Desde la PC (sube el último commit, reconstruye y reinicia el contenedor `oficina-virtual` en 127.0.0.1:4242):
+```
+bash deploy/deploy-vps.sh
+```
+
+### 4. Agente de campo en la PC
+- Token: Configuración → Máquinas → *Generar token*, o en el VPS `docker run --rm -v ~/oficina/data:/data oficina-virtual node server.js crear-maquina "PC"`.
+- `worker.json` junto a `worker.js`: `{"url": "https://ua.csjla.pe", "token": "…", "roots": ["C:\\Users\\TU_USUARIO"]}` (no se sube a git).
+- Probar: `node worker.js` · Dejarlo siempre activo: `powershell -ExecutionPolicy Bypass -File instalar-agente.ps1` (tarea al iniciar sesión, log en `worker.log`).
+- La PC no debe suspenderse si quieres trabajar desde fuera.
+
 ## Datos
 
-Todo vive en `data/` (SQLite `oficina.db`, logs de ejecución, sandbox, respaldos diarios). Variables: `OFICINA_PORT` (4242), `OFICINA_DATA`, `OFICINA_NO_TOAST`.
+Todo vive en `data/` (SQLite `oficina.db`, logs de ejecución, sandbox, respaldos diarios). Variables: `OFICINA_PORT` (4242), `OFICINA_DATA`, `OFICINA_BIND`, `OFICINA_LOCAL_EXEC` (0 = no ejecutar agentes en el servidor), `OFICINA_AUTH` (password|google), `OFICINA_PUBLIC_URL`, `OFICINA_ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OFICINA_NO_TOAST`.
 
 ## Pruebas
 
