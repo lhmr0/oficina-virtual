@@ -20,6 +20,7 @@ const C = require('./council');
 const FAKE = `let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const fs=require('fs');
 if(s.includes('Consejo Jedi')||s.includes('moderador'))return console.log('Aquí va:\\n\`\`\`json\\n'+JSON.stringify({propuestas:[{title:'Agregar pruebas',description:'Cubrir salida.txt',impact:'alto',effort:'bajo',area:'Desarrollo',agent:'fake'},{title:'Documentar API',description:'README',impact:'medio',effort:'bajo',area:'Documentación'}]})+'\\n\`\`\`');
 if(s.includes('JSONMALO'))return console.log('no hay json aquí');
+if(s.includes('ADJUNTO')&&!s.includes('# RELEVO')){const t=fs.readFileSync('.oficina/adjuntos/nota.txt','utf8');fs.writeFileSync('salida.txt',t);return console.log('Leí: '+t+'\\n[[LISTO]] Leí: '+t);}
 if(s.includes('Descompón'))return console.log(JSON.stringify({subtareas:[{title:'Sub A',prompt:'a',area:'Análisis'},{title:'Sub B',prompt:'b',area:'Desarrollo',depends_on:[0]}]}));
 if(s.includes('# RELEVO')){fs.writeFileSync('relevo-prompt.txt',s);return console.log('Continué.\\n[[LISTO]] Relevo completado');}
 if(s.includes('PREGUNTA'))return console.log('Necesito saber algo.\\n[[CONSULTA]] ¿Cómo se llama el archivo?');
@@ -328,8 +329,76 @@ function gitRepo(name) {
     assert.equal(one('select end_reason from runs where conversation_id=?', c2).end_reason, 'interrumpido');
   });
 
+  // ---------- agente de campo remoto (worker.js en otro proceso) ----------
+  const { spawn } = require('node:child_process');
+  let worker;
+  const spawnWorker = token => spawn(process.execPath, ['--no-warnings', 'worker.js'], { cwd: __dirname, stdio: 'ignore',
+    env: { ...process.env, OFICINA_URL: `http://127.0.0.1:${PORT}`, OFICINA_TOKEN: token, OFICINA_WORKER_DATA: path.join(TMP, 'wdata'), OFICINA_WORKER_ROOTS: TMP,
+      OFICINA_WORKER_ALLOW_ANY: '1', OFICINA_WORKER_CONFIG: path.join(TMP, 'no-existe.json') } });
+  const machineOnline = async id => (await api('GET', '/api/machines')).find(x => x.id === id)?.online;
+
+  await t('agente de campo: token, raíces, adjuntos, worktree remoto, fusión, cola sin conexión y reconexión', async () => {
+    const m = await api('POST', '/api/machines', { name: 'PC remota' });
+    assert.match(m.token, /^\d+\.[\w-]+$/);
+    const bad = await fetch(`http://127.0.0.1:${PORT}/api/worker/hello`, { method: 'POST', headers: { Authorization: `Bearer ${m.id}.falso` }, body: '{}' });
+    assert.equal(bad.status, 401);
+    worker = spawnWorker(m.token);
+    await until(() => machineOnline(m.id), 15000, 'worker conectado');
+    await rejects(api('POST', '/api/projects', { name: 'Fuera', folders: [{ path: os.homedir(), machine_id: m.id }] }), /raíces/);
+    const repo3 = gitRepo('repo3');
+    const pid3 = (await api('POST', '/api/projects', { name: 'Remoto', folders: [{ label: 'r', path: repo3, machine_id: m.id }] })).id;
+    const f3 = (await api('GET', '/api/projects')).find(p => p.id === pid3).folders[0];
+    assert.equal(f3.machine_id, m.id);
+    assert.ok((await api('GET', `/api/machines/${m.id}/ls?path=${encodeURIComponent(TMP)}`)).dirs.some(d => d.name === 'repo3'), 'selector de carpetas remoto');
+    const id = (await api('POST', '/api/tasks', { project_id: pid3, folder_id: f3.id, title: 'Remota', prompt: 'lee el ADJUNTO', agent_id: fake2 })).id;
+    const up = await fetch(`http://127.0.0.1:${PORT}/api/attachments?task_id=${id}&name=nota.txt`, { method: 'POST', headers: { cookie, 'Content-Type': 'text/plain' }, body: 'secreto del sable' });
+    assert.equal(up.status, 200);
+    const dl = await fetch(`http://127.0.0.1:${PORT}/api/attachments/${(await up.json()).id}`, { headers: { cookie } });
+    assert.equal(await dl.text(), 'secreto del sable'); assert.equal(dl.headers.get('content-security-policy'), 'sandbox');
+    await api('POST', `/api/tasks/${id}/run`, {});
+    await until(() => task(id).status === 'revision', 20000, 'tarea remota en revisión');
+    assert.match(task(id).summary, /secreto del sable/, 'el agente leyó el adjunto en la PC');
+    assert.ok(task(id).worktree_path.includes('repo3'));
+    const diff = await api('GET', `/api/tasks/${id}/diff`);
+    assert.match(diff.diff, /salida\.txt/); assert.ok(!/adjuntos|progreso/.test(diff.diff), '.oficina fuera de git');
+    await api('POST', `/api/tasks/${id}/approve`, { merge: true });
+    assert.ok(fs.existsSync(path.join(repo3, 'salida.txt')), 'fusionado en la PC');
+    worker.kill();
+    await until(async () => !(await machineOnline(m.id)), 15000, 'worker desconectado');
+    const id2 = (await api('POST', '/api/tasks', { project_id: pid3, folder_id: f3.id, title: 'Espera la PC', prompt: 'x', agent_id: fake2, run: true })).id;
+    await new Promise(r => setTimeout(r, 800));
+    assert.equal(task(id2).status, 'en_cola', 'queda en cola con la PC apagada');
+    worker = spawnWorker(m.token);
+    await until(() => task(id2).status === 'revision', 25000, 'arranca al reconectar');
+  });
+  worker?.kill();
+
+  await t('modo Google (VPS): sin contraseñas, redirección PKCE, estado inválido y cabeceras de seguridad', async () => {
+    const GP = PORT + 1;
+    const g = spawn(process.execPath, ['--no-warnings', 'server.js'], { cwd: __dirname, stdio: 'ignore', env: { ...process.env, OFICINA_AUTH: 'google', GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'sec',
+      OFICINA_ALLOWED_EMAILS: 'a@pj.gob.pe', OFICINA_DATA: path.join(TMP, 'gdata'), OFICINA_PORT: String(GP), OFICINA_LOCAL_EXEC: '0', OFICINA_PUBLIC_URL: 'https://ua.csjla.pe' } });
+    try {
+      const u = p => `http://127.0.0.1:${GP}${p}`;
+      await until(() => fetch(u('/api/setup')).then(r => r.ok).catch(() => false), 10000, 'servidor google');
+      const st = await (await fetch(u('/api/setup'))).json();
+      assert.deepEqual(st, { needed: false, mode: 'google' });
+      assert.equal((await fetch(u('/api/login'), { method: 'POST', body: '{"username":"x","password":"y"}' })).status, 403);
+      assert.equal((await fetch(u('/api/bootstrap'))).status, 401);
+      const r = await fetch(u('/api/auth/google'), { redirect: 'manual' });
+      const loc = new URL(r.headers.get('location'));
+      assert.equal(loc.host, 'accounts.google.com');
+      assert.equal(loc.searchParams.get('redirect_uri'), 'https://ua.csjla.pe/api/auth/google/callback');
+      assert.equal(loc.searchParams.get('code_challenge_method'), 'S256');
+      const cb = await fetch(u('/api/auth/google/callback?state=falso&code=x'), { redirect: 'manual' });
+      assert.match(cb.headers.get('location'), /#\/login\?error=/);
+      assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+      assert.match(r.headers.get('strict-transport-security'), /max-age/);
+      assert.equal((await fetch(u('/api/worker/hello'), { method: 'POST', body: '{}' })).status, 401);
+    } finally { g.kill(); }
+  });
+
   server.close();
-  for (const a of R.active.values()) try { process.kill(a.proc.pid); } catch {}
+  for (const a of R.active.values()) if (a.runId) require('./host').runOp(a.runId, 'killRun');
   console.log(failed ? `\n${failed} FALLARON` : '\nTODO OK');
   process.exit(failed ? 1 : 0);
 })();
