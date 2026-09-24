@@ -16,7 +16,14 @@ const CRAWL = `<div class="crawl"><div class="crawl-text"><h2>OFICINA VIRTUAL</h
 <p>Cada tarea queda registrada en los Archivos Jedi. Si un droide se queda sin combustible, otro toma el relevo y nada se pierde.</p>
 <p>Que la Fuerza acompañe a tu backlog...</p></div></div>`;
 async function loginView() {
-  const { needed } = await get('/api/setup');
+  const { needed, mode } = await get('/api/setup');
+  const err = new URLSearchParams(location.hash.split('?')[1] || '').get('error');
+  if (mode === 'google') {
+    app.innerHTML = `<div class="login">${CRAWL}<div class="login-box panel y"><h1>IDENTIFÍCATE,<br>PILOTO</h1>
+      <a class="btn y" href="/api/auth/google" style="display:block;text-align:center">Entrar con Google</a>
+      <p class="muted" style="text-align:center">Solo cuentas autorizadas.</p><div class="err" role="alert">${h(err || '')}</div></div></div>`;
+    return;
+  }
   app.innerHTML = `<div class="login">${CRAWL}<div class="login-box panel y">
     <h1>${needed ? 'CREAR COMANDANTE' : 'IDENTIFÍCATE,<br>PILOTO'}</h1>
     <form id="lf" class="col-flex">
@@ -117,6 +124,7 @@ function connectSSE() {
   on('run.log', d => pass('run.log', d));
   on('agent.status', d => { reboot(); pass('agent.status', d); });
   on('project.updated', () => reboot());
+  on('machine.status', d => { reboot(); pass('machine.status', d); });
   on('queue', d => { S.boot.queue_paused = d.paused; $('#qpaused').hidden = !d.paused; });
   on('notify', n => { notifyUI(n); inboxCount(); });
   on('permiso', p => {

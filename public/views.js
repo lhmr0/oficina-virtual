@@ -1,6 +1,7 @@
 // Vistas de la oficina
 import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS, PSTATUS, chip, agent, area, user, project, isAdmin, canEdit,
-  agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep } from './core.js';
+  agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
+  machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML } from './core.js';
 import { sprite, icon, ICON_NAMES } from './sprites.js';
 import { route, refreshSoon, loadBoot } from './app.js';
 
@@ -28,10 +29,20 @@ function bindPicker(root, p) {
     $(`#${p}effort`, root).innerHTML = opts((a?.efforts || []).map(e => [e, e]), a?.default_effort, '—');
   });
 }
-async function browseInto(input) {
-  const b = input.nextElementSibling; if (b) b.disabled = true;
-  try { const r = await post('/api/browse'); if (r.path) input.value = r.path; } catch (e) { fail(e); } finally { if (b) b.disabled = false; }
+async function browseInto(input, machineId) {
+  const r = await folderPicker(machineId || defaultMachine(), input.value || null);
+  if (r) input.value = r;
 }
+// selector de máquina (solo se muestra si hay más de una)
+const machineSel = (attrs, sel) => machines().length > 1
+  ? `<div><label class="l">Máquina</label><select ${attrs}>${opts(machines().map(m => [m.id, `${m.name}${m.online ? '' : ' (desconectada)'}`]), sel || defaultMachine())}</select></div>`
+  : `<input type="hidden" ${attrs} value="${defaultMachine() || ''}">`;
+async function uploadAll(files, target) {
+  const ids = [];
+  for (const f of files) { holo('Subiendo…', f.name, { ms: 2000 }); ids.push((await upload(f, target)).id); }
+  return ids;
+}
+const offlineWarn = (name, online) => online === false ? `<div class="panel r" style="margin:10px 0">⚠ La máquina <b>${h(name || '')}</b> no está conectada: lo que ejecutes queda en cola hasta que el agente de campo se conecte.</div>` : '';
 
 // ---------- formulario de tarea ----------
 export async function taskForm(t = {}, preset = {}) {
@@ -58,6 +69,7 @@ export async function taskForm(t = {}, preset = {}) {
     <div id="tfHumanBox"><label class="l">Responsable</label><select name="assignee_user_id">${opts(S.boot.users.map(u => [u.id, u.name]), t.assignee_user_id || S.boot.me.id, '—')}</select></div>
     <label class="l">Depende de (se ejecuta al completarse éstas)</label>
     <select name="depends_on" id="tfDeps" multiple size="4">${projTasks.filter(x => x.id !== t.id).map(x => `<option value="${x.id}" ${deps.includes(x.id) ? 'selected' : ''}>#${x.id} ${h(x.title)} (${STATUS[x.status]})</option>`).join('')}</select>
+    <label class="l">Adjuntos (imágenes, PDF, documentos: el agente los recibe en .oficina/adjuntos)</label><input type="file" id="tfFiles" multiple>
     ${t.id ? '' : '<label class="row" style="margin-top:10px"><input type="checkbox" name="run" id="tfRun"> Ejecutar al crear</label>'}
     <div class="row" style="margin-top:12px"><button class="btn y" value="ok" id="tfSave">${t.id ? 'Guardar' : 'Crear tarea'}</button><button class="btn ghost" value="cancel" formnovalidate>Cancelar</button></div>`);
   bindPicker(d, 'tf');
@@ -74,8 +86,16 @@ export async function taskForm(t = {}, preset = {}) {
     for (const k of ['area_id', 'folder_id', 'agent_id', 'assignee_user_id']) f[k] = f[k] ? +f[k] : null;
     if (f.executor === 'humano') { f.agent_id = null; }
     try {
-      if (t.id) { delete f.project_id; delete f.run; await put('/api/tasks/' + t.id, f); closeModal(); refreshSoon(0); }
-      else { f.project_id = +$('#tfProj', d).value; const r = await post('/api/tasks', f); closeModal(); holo('Tarea creada', `#${r.id} ${f.title}`, { link: `#/tarea/${r.id}` }); refreshSoon(0); }
+      const files = [...$('#tfFiles', d).files];
+      if (t.id) { delete f.project_id; delete f.run; await put('/api/tasks/' + t.id, f); await uploadAll(files, { task_id: t.id }); closeModal(); refreshSoon(0); }
+      else {
+        const run = f.run; delete f.run;
+        f.project_id = +$('#tfProj', d).value;
+        const r = await post('/api/tasks', f);
+        await uploadAll(files, { task_id: r.id });
+        if (run && f.executor !== 'humano') await post(`/api/tasks/${r.id}/run`, {});
+        closeModal(); holo('Tarea creada', `#${r.id} ${f.title}`, { link: `#/tarea/${r.id}` }); refreshSoon(0);
+      }
     } catch (err) { fail(err); }
   };
 }
@@ -197,6 +217,7 @@ const proyectos = {
 function folderRow(f, i) {
   return `<div class="panel" style="padding:8px;margin:6px 0" data-fi="${i}"><div class="field-row">
     <div><label class="l">Etiqueta</label><input data-k="label" value="${h(f.label || '')}" placeholder="backend"></div>
+    ${f.id ? `<div><label class="l">Máquina</label><span class="chip">${h(machineName(f.machine_id || defaultMachine()))}</span></div>` : machineSel('data-k="machine_id"', f.machine_id)}
     <div style="grid-column:span 2"><label class="l">Ruta</label><div class="row" style="flex-wrap:nowrap"><input data-k="path" value="${h(f.path || '')}" placeholder="C:\\proyectos\\mi-app" ${f.id ? 'disabled' : ''}>${f.id ? '' : '<button class="btn sm" data-browse>Examinar</button>'}</div></div></div>
     <div class="row"><label class="row" style="font-size:17px"><input type="checkbox" data-k="use_worktrees" ${f.use_worktrees !== 0 ? 'checked' : ''}> worktree por tarea (git)</label>
     <label class="row" style="font-size:17px"><input type="radio" name="isdef" data-k="is_default" ${f.is_default ? 'checked' : ''}> por defecto</label>
@@ -217,7 +238,7 @@ function projectForm(p = null) {
   const read = () => $$('[data-fi]', d).forEach(r => { const f = folders[+r.dataset.fi]; for (const i of $$('[data-k]', r)) f[i.dataset.k] = i.type === 'checkbox' || i.type === 'radio' ? i.checked : i.value; });
   $('#addF', d).onclick = e => { e.preventDefault(); read(); folders.push({ use_worktrees: 1, is_default: !folders.length }); draw(); };
   d.onclick = async e => {
-    const b = e.target.closest('[data-browse]'); if (b) { e.preventDefault(); return browseInto(b.previousElementSibling); }
+    const b = e.target.closest('[data-browse]'); if (b) { e.preventDefault(); const row = b.closest('[data-fi]'); return browseInto($('[data-k=path]', row), $('[data-k=machine_id]', row)?.value); }
     const rm = e.target.closest('[data-rmf]'); if (rm) {
       e.preventDefault(); read(); const f = folders[+rm.dataset.rmf];
       if (f.id) { if (!await confirmBox(`¿Quitar la carpeta ${f.label}?`, 'Quitar', true)) return projectForm(p); await del('/api/folders/' + f.id).catch(fail); await loadBoot(); return projectForm(project(p.id)); }
@@ -256,7 +277,7 @@ async function projectCard(pid) {
     <h3>Métricas por agente (últimas ${runs.total} ejecuciones)</h3><table class="grid"><tr><th>Agente</th><th>Runs</th><th>Éxito</th><th>Duración media</th><th>Tokens</th><th>Costo</th></tr>
     ${Object.entries(byAgent).map(([id, x]) => `<tr><td>${agentChip(id)}</td><td>${x.n}</td><td>${Math.round(x.ok / x.n * 100)}%</td><td>${dur(x.t / x.n)}</td><td>${num(x.tk)}</td><td>$${x.usd.toFixed(2)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Sin ejecuciones</td></tr>'}</table>
     <h3>Bitácora reciente</h3>${acts.rows.filter(a => (a.entity === 'proyecto' && a.entity_id === pid) || (a.entity === 'tarea' && tasks.some(t => t.id === a.entity_id))).slice(0, 15).map(a => `<div><small>${fmtDate(a.at)}</small> ${h(a.user || 'sistema')} · ${h(a.entity)} #${a.entity_id} ${h(a.action)}</div>`).join('') || '<small class="muted">—</small>'}
-    <div class="row" style="margin-top:12px"><a class="btn y" href="#/kanban/${pid}" onclick="document.getElementById('modal').close()">Abrir kanban</a><a class="btn" href="#/consejo?project=${pid}" onclick="document.getElementById('modal').close()">Convocar consejo</a><button class="btn ghost" value="c">Cerrar</button></div>`);
+    <div class="row" style="margin-top:12px"><a class="btn y" href="#/kanban/${pid}" data-close>Abrir kanban</a><a class="btn" href="#/consejo?project=${pid}" data-close>Convocar consejo</a><button class="btn ghost" value="c">Cerrar</button></div>`);
 }
 
 // ===================== KANBAN =====================
@@ -362,6 +383,7 @@ const tarea = {
       <div class="row" style="margin:10px 0">${ar ? `<span class="chip" style="border-color:${ar.color}">${h(ar.alias)} · ${h(ar.name)}</span>` : ''}
         ${t.executor === 'humano' ? `<span class="chip">Persona: ${h(user(t.assignee_user_id)?.name || 'sin asignar')}</span>` : `${agentChip(t.agent_id)}<span class="chip">${h(t.model || '-')} · ${h(t.effort || '-')} · ${h(t.mode)}</span>`}
         <span class="chip pri-${t.priority}">${PRI[t.priority]}</span>${x.folder ? `<span class="chip" title="${h(x.folder.path)}">📁 ${h(x.folder.label)}</span>` : '<span class="chip">sandbox</span>'}
+        ${t.executor === 'agente' && machines().length ? `<span class="chip">🖥 ${h(x.machine || '')}${x.machine_online ? '' : ' (desconectada)'}</span>` : ''}
         ${t.branch ? `<span class="chip">rama ${h(t.branch)}</span>` : ''}${t.due_date ? `<span class="chip">📅 ${h(t.due_date)}</span>` : ''}<small class="muted">creada por ${h(user(t.created_by)?.name || '-')} ${ago(t.created_at)}</small></div>
       <div class="row">
         ${btn(t.executor === 'agente' && !running && t.status !== 'completada', 'bRun', 'y', t.conversation_id && ['esperando', 'fallida', 'pausada_cuota'].includes(t.status) ? '▶ Ejecutar de nuevo' : '▶ Ejecutar')}
@@ -376,10 +398,13 @@ const tarea = {
         ${btn(true, 'bDel', 'r right', 'Eliminar')}
       </div>
       ${permsHTML(x.permissions)}
+      ${t.executor === 'agente' && t.status !== 'completada' ? offlineWarn(x.machine, x.machine_online) : ''}
       ${t.status === 'esperando' ? `<div class="panel y" style="margin:10px 0"><b class="pixel" style="font-size:9px;color:var(--yellow)">? EL AGENTE ESPERA TU RESPUESTA</b><div>${md((([a, b = '']) => b.trim() || a)((x.messages.filter(m => m.role === 'agente').at(-1)?.text || '').split('[[CONSULTA]]')))}</div></div>` : ''}
       ${t.status === 'pausada_cuota' ? `<div class="panel r" style="margin:10px 0"><b class="pixel" style="font-size:9px">⛽ ${h(a?.name)} SE QUEDÓ SIN CUOTA</b><p>El avance quedó guardado (checkpoint + snapshot). Elige quién continúa.</p>${can ? '<button class="btn y" id="bHand2">Elegir relevo</button>' : ''} ${a?.quota_reset_at ? `<small>o espera a ${h(a.name)}: vuelve ${ago(a.quota_reset_at)}</small>` : ''}</div>` : ''}
       ${t.summary ? `<div class="panel h" style="margin:10px 0"><b class="pixel" style="font-size:9px;color:var(--holo)">RESUMEN DEL AGENTE</b>${md(t.summary)}</div>` : ''}
       ${t.review_comment ? `<div class="panel" style="margin:10px 0"><b class="pixel" style="font-size:9px">COMENTARIO DE REVISIÓN</b>${md(t.review_comment)}</div>` : ''}
+      <div class="panel" style="margin:10px 0"><div class="row"><b class="pixel" style="font-size:9px">ADJUNTOS (${x.attachments.length})</b>
+        ${can ? '<label class="btn sm right">+ Adjuntar<input type="file" id="attIn" multiple hidden></label>' : ''}</div>${attachmentsHTML(x.attachments, can)}</div>
       <div class="tabs" style="margin-top:14px">${[['consola', 'Consola'], ['chat', `Chat (${x.messages.length})`], ['cambios', 'Cambios'], ['runs', `Ejecuciones (${x.runs.length})`], ['relevos', `Relevos (${x.handoffs.length})`], ['historial', 'Historial'], ['detalles', 'Detalles']].map(([k, l]) => `<button data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="tabBody"></div>`;
     const body = $('#tabBody', el);
@@ -423,6 +448,7 @@ const tarea = {
         ${t.worktree_path ? `<h3>Worktree</h3><code>${h(t.worktree_path)}</code>` : ''}`;
     }
     $$('.tabs [data-tab]', el).forEach(b => b.onclick = () => { S.taskTab = b.dataset.tab; route(true); });
+    $('#attIn', el)?.addEventListener('change', async e => { try { await uploadAll([...e.target.files], { task_id: id }); holo('Adjuntado', 'Lo recibirá el agente en su próximo turno'); } catch (err) { fail(err); } });
     $('#replyF', el)?.addEventListener('submit', async e => {
       e.preventDefault(); const text = $('#replyT').value.trim(); if (!text) return;
       try { await post(`/api/tasks/${id}/reply`, { text }); $('#replyT').value = ''; beep('ok'); refreshSoon(0); } catch (err) { fail(err); }
@@ -444,7 +470,7 @@ const tarea = {
 function runDialog(t) {
   const d = modal(`<h2>Ejecutar #${t.id}</h2>${agentPicker('rd', t)}
     <label class="row" style="margin-top:10px"><input type="checkbox" name="fresh"> Empezar sesión nueva (no reanudar la anterior)</label>
-    <p class="muted">Carpeta: ${t.folder_id ? h(project(t.project_id)?.folders.find(f => f.id === t.folder_id)?.path || '') : 'sandbox de la oficina'}${t.mode === 'editar' ? ' · el agente podrá modificar archivos.' : ''}</p>
+    <p class="muted">Carpeta: ${t.folder_id ? h(project(t.project_id)?.folders.find(f => f.id === t.folder_id)?.path || '') : 'sandbox de la oficina'} · máquina ${h(machineName(project(t.project_id)?.folders.find(f => f.id === t.folder_id)?.machine_id || defaultMachine()))}${t.mode === 'editar' ? ' · el agente podrá modificar archivos.' : ''}</p>
     <div class="row"><button class="btn y" id="rdOk">▶ Ejecutar</button><button class="btn ghost" value="c">Cancelar</button></div>`);
   bindPicker(d, 'rd');
   $('#rdOk', d).onclick = async e => {
@@ -503,21 +529,25 @@ const cantina = {
         <form id="ncF">${agentPicker('nc', {}, { modes: false })}
         <div class="field-row"><div><label class="l">Modo</label><select name="mode">${opts([['plan', 'Solo lectura'], ['editar', 'Puede editar archivos']], 'plan')}</select></div>
         <div><label class="l">Proyecto (contexto, opcional)</label><select name="project_id" id="ncProj">${opts(S.boot.projects.map(p => [p.id, p.name]), '', '—')}</select></div></div>
+        <div class="field-row">${machineSel('name="machine_id" id="ncMachine"')}</div>
         <label class="l">Carpeta (opcional)</label><div class="row" style="flex-wrap:nowrap"><input name="folder_path" id="ncFolder" placeholder="C:\\ruta\\al\\código"><button class="btn sm" type="button" id="ncBrowse">Examinar</button></div>
         <label class="l">Mensaje</label><textarea name="text" id="ncText" rows="5" required></textarea>
+        <label class="l">Adjuntos (opcional)</label><input type="file" id="ncFiles" multiple>
         <button class="btn y" style="margin-top:10px">Enviar a la cantina</button></form></div>`;
     } else {
       const x = await get('/api/conversations/' + cid);
       const c = x.conversation;
       right = `<div class="panel"><div class="row"><h2 style="margin:0" class="grow ellipsis">${c.pinned ? '📌 ' : ''}${h(c.title)}</h2>${chip(c.status === 'inactiva' ? 'completada' : c.status === 'error' ? 'fallida' : c.status === 'sin_cuota' ? 'pausada_cuota' : c.status, c.status)}</div>
-        <div class="row" style="margin:8px 0">${agentChip(c.agent_id)}<span class="chip">${h(c.model || '-')} · ${h(c.effort || '-')} · ${c.mode === 'plan' ? 'lectura' : 'edición'}</span>${c.folder_path ? `<span class="chip" title="${h(c.folder_path)}">📁 ${h(c.folder_path.split(/[\\/]/).pop())}</span>` : ''}${c.project_id ? `<span class="chip">${h(project(c.project_id)?.name || '')}</span>` : ''}${c.task_id ? `<a class="chip" href="#/tarea/${c.task_id}">→ tarea #${c.task_id}</a>` : ''}</div>
+        ${offlineWarn(x.machine, x.machine_online)}
+        <div class="row" style="margin:8px 0">${agentChip(c.agent_id)}${machines().length > 1 ? `<span class="chip">🖥 ${h(x.machine || '')}</span>` : ''}<span class="chip">${h(c.model || '-')} · ${h(c.effort || '-')} · ${c.mode === 'plan' ? 'lectura' : 'edición'}</span>${c.folder_path ? `<span class="chip" title="${h(c.folder_path)}">📁 ${h(c.folder_path.split(/[\\/]/).pop())}</span>` : ''}${c.project_id ? `<span class="chip">${h(project(c.project_id)?.name || '')}</span>` : ''}${c.task_id ? `<a class="chip" href="#/tarea/${c.task_id}">→ tarea #${c.task_id}</a>` : ''}</div>
         ${canEdit() ? `<div class="row">${x.running ? '<button class="btn sm r" id="cAbort">■ Abortar</button>' : ''}<button class="btn sm" id="cSwitch">⇄ Cambiar agente</button><button class="btn sm g" id="cTask">→ Tarea</button><button class="btn sm" id="cProj">→ Proyecto</button>
           <button class="btn sm ghost" id="cRename">Renombrar</button><button class="btn sm ghost" id="cPin">${c.pinned ? 'Desfijar' : 'Fijar'}</button><button class="btn sm ghost" id="cArch">${c.archived ? 'Desarchivar' : 'Archivar'}</button>
           <a class="btn sm ghost" href="/api/conversations/${cid}/md">Exportar .md</a><button class="btn sm r" id="cDel">Eliminar</button></div>` : ''}
         ${permsHTML(x.permissions)}
+        ${x.attachments.length ? `<div style="margin-top:8px">${attachmentsHTML(x.attachments, canEdit())}</div>` : ''}
         <div class="chat" data-scroll="chat" style="margin-top:10px">${messagesHTML(x.messages)}</div>
         <div class="console" id="chatLive" style="height:160px" ${x.running ? '' : 'hidden'}></div>
-        ${canEdit() ? `<form id="crF" class="col-flex" style="margin-top:10px"><textarea id="crT" rows="3" placeholder="${c.status === 'esperando' ? 'Responde la consulta…' : 'Sigue la conversación…'}"></textarea><button class="btn y" ${x.running ? 'disabled' : ''}>Enviar</button></form>` : ''}</div>`;
+        ${canEdit() ? `<form id="crF" class="col-flex" style="margin-top:10px"><textarea id="crT" rows="3" placeholder="${c.status === 'esperando' ? 'Responde la consulta…' : 'Sigue la conversación…'}"></textarea><div class="row"><button class="btn y" ${x.running ? 'disabled' : ''}>Enviar</button><label class="btn ghost">📎 Adjuntar<input type="file" id="crFiles" multiple hidden></label><small id="crFilesN" class="muted"></small></div></form>` : ''}</div>`;
       setTimeout(() => { const ch = $('.chat', el); if (ch) ch.scrollTop = ch.scrollHeight; });
       if (x.running && x.runs[0]) get(`/api/runs/${x.runs[0].id}/log`).then(lg => { const lv = $('#chatLive', el); if (lv) { lv.innerHTML = logHTML(lg.log); lv.scrollTop = lv.scrollHeight; } });
     }
@@ -528,16 +558,24 @@ const cantina = {
     $$('[data-c]', el).forEach(i => i.onclick = () => go('#/cantina/' + i.dataset.c));
     if (!cid) {
       bindPicker(el, 'nc');
-      $('#ncBrowse', el).onclick = () => browseInto($('#ncFolder', el));
+      $('#ncBrowse', el).onclick = () => browseInto($('#ncFolder', el), $('#ncMachine', el)?.value);
       $('#ncProj', el).onchange = e => { const p = project(e.target.value); const f = p?.folders.find(x => x.is_default); if (f && !$('#ncFolder', el).value) $('#ncFolder', el).value = f.path; };
       $('#ncF', el).onsubmit = async e => {
         e.preventDefault(); const f = formData(e.target);
-        try { const r2 = await post('/api/conversations', { ...f, agent_id: +f.agent_id, project_id: +f.project_id || null }); beep('ok'); go('#/cantina/' + r2.id); } catch (err) { fail(err); }
+        try {
+          const attachment_ids = await uploadAll([...$('#ncFiles', el).files], {});
+          const r2 = await post('/api/conversations', { ...f, agent_id: +f.agent_id, project_id: +f.project_id || null, machine_id: +f.machine_id || null, attachment_ids });
+          beep('ok'); go('#/cantina/' + r2.id);
+        } catch (err) { fail(err); }
       };
       return;
     }
     const on = (sel, fn) => $(sel, el)?.addEventListener('click', fn);
-    $('#crF', el)?.addEventListener('submit', async e => { e.preventDefault(); const text = $('#crT').value.trim(); if (!text) return; try { await post(`/api/conversations/${cid}/reply`, { text }); $('#crT').value = ''; refreshSoon(0); } catch (err) { fail(err); } });
+    $('#crFiles', el)?.addEventListener('change', e => { $('#crFilesN', el).textContent = [...e.target.files].map(f => f.name).join(', '); });
+    $('#crF', el)?.addEventListener('submit', async e => {
+      e.preventDefault(); const text = $('#crT').value.trim(); if (!text) return;
+      try { await uploadAll([...$('#crFiles', el).files], { conversation_id: cid }); await post(`/api/conversations/${cid}/reply`, { text }); $('#crT').value = ''; refreshSoon(0); } catch (err) { fail(err); }
+    });
     on('#cAbort', () => act(() => post(`/api/conversations/${cid}/abort`)));
     on('#cRename', async () => { const v = await promptBox('Renombrar', 'Título', $('h2', el).textContent.replace('📌 ', '')); if (v) await act(() => put('/api/conversations/' + cid, { title: v })); });
     on('#cPin', () => act(() => put('/api/conversations/' + cid, { pinned: !$('#cPin').textContent.includes('Desfijar') ? 1 : 0 })));
@@ -710,7 +748,7 @@ const archivos = {
       const tr = e.target.closest('tr[data-i]'); if (!tr || e.target.closest('a,button')) return;
       const row = S.arows[+tr.dataset.i];
       if (tab === 'ejecuciones') { const lg = await get(`/api/runs/${row.id}/log`); return modal(`<h2>Ejecución #${row.id}</h2><small>${h(lg.run.command || '')}</small><div class="console">${logHTML(lg.log)}</div><button class="btn ghost" value="c">Cerrar</button>`); }
-      if (tab === 'relevos') { const hd = await get('/api/handoffs/' + row.id); return modal(`<h2>Relevo #${row.id}</h2><div class="chat">${md(hd.snapshot_md)}</div><div class="row"><a class="btn y" href="#/tarea/${row.task_id}" onclick="document.getElementById('modal').close()">Ir a la tarea</a><button class="btn ghost" value="c">Cerrar</button></div>`); }
+      if (tab === 'relevos') { const hd = await get('/api/handoffs/' + row.id); return modal(`<h2>Relevo #${row.id}</h2><div class="chat">${md(hd.snapshot_md)}</div><div class="row"><a class="btn y" href="#/tarea/${row.task_id}" data-close>Ir a la tarea</a><button class="btn ghost" value="c">Cerrar</button></div>`); }
       const l = LINK[tab]?.(row); if (l) go(l);
     };
   },
@@ -721,7 +759,7 @@ const lvl = p => p >= 90 ? 'var(--red)' : p >= 75 ? 'var(--yellow)' : 'var(--gre
 const STATE = { disponible: ['ok', 'Disponible'], ocupado: ['warn', 'Ocupado'], sin_cuota: ['bad', 'Sin cuota'], error: ['bad', 'Error'], no_encontrado: ['bad', 'No encontrado'], deshabilitado: ['off', 'Deshabilitado'] };
 const WINL = { five_hour: '5 horas', seven_day: '7 días', primary: 'primaria', secondary: 'secundaria', seven_day_opus: '7 días Opus', seven_day_sonnet: '7 días Sonnet' };
 const puente = {
-  refreshOn: ['status.scan', 'agent.status', 'run.started', 'task.updated'],
+  refreshOn: ['status.scan', 'agent.status', 'run.started', 'task.updated', 'machine.status'],
   event(type) { if (type === 'run.log') return 'handled'; },
   async render(el) {
     const [s, hist] = await Promise.all([get('/api/status'), get('/api/status/history?hours=24')]);
@@ -746,6 +784,9 @@ const puente = {
       <span class="right">${canEdit() ? '<button class="btn y" id="scan">Escanear ahora</button><button class="btn" id="ntest">Notificación de prueba</button><button class="btn ghost" id="ttest">Toast Windows</button>' : ''}
       ${isAdmin() ? (s.queue_paused ? '<button class="btn g" id="resume">Reanudar cola</button>' : '<button class="btn r" id="o66">ORDEN 66</button>') : ''}</span></div>
       ${s.queue_paused ? '<div class="panel r" style="margin:10px 0">La cola está en pausa: nada nuevo se ejecuta.</div>' : ''}
+      <h2>Máquinas</h2><div class="grid3">${s.machines.map(m => `<div class="panel ${m.online ? 'h' : 'r'}"><div class="row">${sprite('desk', m.online ? '#3ddc84' : '#ff3b3b', 3)}<div class="grow"><b class="pixel" style="font-size:9px">${h(m.name)}</b>${m.is_default ? ' ★' : ''}<br>
+        <span class="dot ${m.online ? 'ok' : 'bad'}"></span> ${m.online ? 'conectada' : 'desconectada'} · ${m.is_local ? 'este servidor' : 'agente de campo'}</div></div>
+        <div class="kv" style="margin-top:6px"><b>Visto</b><span>${ago(m.last_seen)}</span><b>Equipo</b><span>${h(m.info?.hostname || '-')} ${h(m.info?.platform || '')}</span><b>Ejecutando</b><span>${m.running}</span>${m.info?.roots ? `<b>Raíces</b><span class="ellipsis">${h(m.info.roots.join(', '))}</span>` : ''}</div></div>`).join('') || `<div class="panel r">No hay máquinas. ${isAdmin() ? '<a href="#/config/maquinas">Conecta esta PC</a>' : ''}</div>`}</div>
       <h2>Agentes</h2><div class="grid2">${s.agents.filter(a => a.enabled || a.found !== false).map(card).join('')}</div>
       <h2>Trabajo en curso</h2><div class="panel table-wrap"><table class="grid"><tr><th>Run</th><th>Tarea / chat</th><th>Agente</th><th>Modelo</th><th>PID</th><th>Memoria</th><th>CPU</th><th>Desde</th><th></th></tr>
         ${s.work.active.map(w => `<tr><td>${w.run_id}</td><td><a href="${w.task_id ? '#/tarea/' + w.task_id : '#/cantina/' + w.conv_id}">${h(w.title || '')}</a></td><td>${agentChip(w.agent_id)}</td><td>${h(w.model || '')} ${h(w.effort || '')}</td><td>${w.pid}</td><td>${h(w.mem || '-')}</td><td>${h(w.cpu_time || '-')}</td><td>${ago(w.started_at)}</td>
@@ -778,10 +819,18 @@ const NOTIF_KINDS = [['consulta', 'Consultas de agentes'], ['permiso', 'Permisos
 const config = {
   async render(el, r) {
     const admin = isAdmin();
-    const tabs = [...(admin ? [['agentes', 'Agentes'], ['areas', 'Áreas'], ['usuarios', 'Usuarios'], ['limites', 'Límites'], ['auto', 'Automatización']] : []), ['plantillas', 'Plantillas'], ['perfil', 'Mi perfil']];
+    const tabs = [...(admin ? [['maquinas', 'Máquinas'], ['agentes', 'Agentes'], ['areas', 'Áreas'], ['usuarios', 'Usuarios'], ['limites', 'Límites'], ['auto', 'Automatización']] : []), ['plantillas', 'Plantillas'], ['perfil', 'Mi perfil']];
     const tab = tabs.find(t => t[0] === r.args[0]) ? r.args[0] : tabs[0][0];
     let body = '';
-    if (tab === 'agentes') {
+    if (tab === 'maquinas') {
+      const ms = await get('/api/machines');
+      body = `<p class="muted">Una máquina es donde se ejecutan los agentes y viven los archivos. Si la oficina corre en el VPS, conecta tu PC con el <b>agente de campo</b>: sale hacia el VPS por HTTPS (no abre puertos) y ejecuta aquí Claude, Codex, git y archivos.</p>
+        <div class="panel table-wrap"><table class="grid"><tr><th>Máquina</th><th>Tipo</th><th>Estado</th><th>Equipo</th><th>Visto</th><th></th></tr>
+        ${ms.map(m => `<tr><td><b>${h(m.name)}</b>${m.is_default ? ' ★ por defecto' : ''}</td><td>${m.is_local ? 'este servidor' : 'agente de campo'}</td><td><span class="dot ${m.online ? 'ok' : 'bad'}"></span> ${m.online ? 'conectada' : 'desconectada'}</td>
+          <td>${h(m.info?.hostname || '-')}<br><small>${h((m.info?.roots || []).join(', '))}</small></td><td>${ago(m.last_seen)}</td>
+          <td>${m.is_default ? '' : `<button class="btn sm y" data-mdef="${m.id}">Por defecto</button>`}<button class="btn sm ghost" data-mren="${m.id}">Renombrar</button>${m.is_local ? '' : `<button class="btn sm r" data-mdel="${m.id}">Eliminar</button>`}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Sin máquinas</td></tr>'}</table></div>
+        <form class="panel" id="newMachine" style="margin-top:12px"><h3>Conectar una PC (agente de campo)</h3><label class="l">Nombre</label><input name="name" required placeholder="PC de la oficina"><button class="btn y" style="margin-top:10px">Generar token</button></form>`;
+    } else if (tab === 'agentes') {
       const list = await get('/api/agents');
       body = list.map(a => `<form class="panel agent-card" data-agent="${a.id}" style="--c:${a.color};margin-bottom:14px">
         <div class="row">${sprite('droid', a.color, 4)}<h2 style="margin:0;color:${a.color}">${h(a.name)}</h2><span class="chip">${h(a.key)} · adaptador ${h(a.adapter)}</span><label class="row right"><input type="checkbox" name="enabled" ${a.enabled ? 'checked' : ''}> habilitado</label></div>
@@ -851,6 +900,14 @@ const config = {
           let pre, extra; try { pre = JSON.parse(f.pre_args || '[]'); extra = JSON.parse(f.extra_args || '[]'); } catch { return fail('Args deben ser JSON, p. ej. ["--flag"]'); }
           await put('/api/agents/' + fm.dataset.agent, { ...f, pre_args: pre, extra_args: extra, models: list(f.models), efforts: list(f.efforts), quota_patterns: list(f.quota_patterns.replace(/,/g, '\u0000')).map(x => x.replace(/\u0000/g, ',')), max_concurrent: +f.max_concurrent, timeout_min: +f.timeout_min });
           holo('Agente guardado'); await loadBoot();
+        } else if (fm.id === 'newMachine') {
+          const m = await post('/api/machines', f);
+          const cfg = JSON.stringify({ url: location.origin, token: m.token, roots: ['C:\\Users\\TU_USUARIO'] }, null, 2);
+          modal(`<h2>Token de la máquina "${h(f.name)}"</h2><p class="panel r">Cópialo ahora: <b>no se vuelve a mostrar</b>. Quien lo tenga puede ejecutar agentes en esa PC.</p>
+            <label class="l">worker.json (junto a worker.js en la PC)</label><textarea rows="7" readonly>${h(cfg)}</textarea>
+            <p class="muted">En "roots" pon las carpetas donde el agente puede trabajar. Luego en la PC: <code>node worker.js</code> (o instalar-agente.ps1 para que arranque solo).</p>
+            <button class="btn ghost" value="c">Listo</button>`);
+          return loadBoot();
         } else if (fm.id === 'newAg') { await post('/api/agents', f); await loadBoot(); route(true); }
         else if (fm.dataset.area) { await put('/api/areas/' + fm.dataset.area, { name: f.name, alias: f.alias, icon: f.icon, color: f.color, default_agent_id: +f.default_agent_id || null, auto_fallback: f.auto_fallback, fallback_chain: list(f.chain).map(k => S.boot.agents.find(a => a.key === k)?.id).filter(Boolean) }); holo('Área guardada'); await loadBoot(); }
         else if (fm.id === 'newArea') { await post('/api/areas', f); await loadBoot(); route(true); }
@@ -879,6 +936,9 @@ const config = {
       if (b.dataset.deluser && await confirmBox('¿Eliminar usuario?', 'Eliminar', true)) { await act(() => del('/api/users/' + b.dataset.deluser)); route(true); }
       if (b.dataset.undel) { await act(() => put('/api/users/' + b.dataset.undel, { deleted: false })); route(true); }
       if (b.dataset.dellim) { await act(() => del('/api/limits/' + b.dataset.dellim)); route(true); }
+      if (b.dataset.mdef) { await act(() => put('/api/machines/' + b.dataset.mdef, { default: true }), 'Máquina por defecto'); await loadBoot(); route(true); }
+      if (b.dataset.mren) { const n = await promptBox('Renombrar máquina', 'Nombre'); if (n) { await act(() => put('/api/machines/' + b.dataset.mren, { name: n })); await loadBoot(); route(true); } }
+      if (b.dataset.mdel && await confirmBox('¿Eliminar la máquina? Su token deja de funcionar.', 'Eliminar', true)) { await act(() => del('/api/machines/' + b.dataset.mdel)); await loadBoot(); route(true); }
       if (b.id === 'bk') { const r2 = await act(() => post('/api/backup')); holo('Respaldo creado', r2.file); }
       if (b.id === 'askN') { await Notification.requestPermission(); route(true); }
     };

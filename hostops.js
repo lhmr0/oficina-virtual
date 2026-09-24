@@ -70,8 +70,11 @@ function create(cfg) {
       if (g) exclude(base, ['.oficina/', '.oficina-worktrees/', ...ex]);
       if (g && folder.use_worktrees && task && tryGit(base, 'rev-parse', 'HEAD')) {
         if (task.worktree_path && fs.existsSync(task.worktree_path)) return { cwd: task.worktree_path, git: true, wt: true };
-        const branch = task.branch || `oficina/task-${task.id}-${slug(task.title)}`;
-        const wt = path.join(base, '.oficina-worktrees', 'task-' + task.id);
+        // carpeta y rama únicas: puede haber restos de otra base de datos u otra oficina en el mismo repo
+        let wt = path.join(base, '.oficina-worktrees', 'task-' + task.id), n = 1;
+        while (fs.existsSync(wt)) wt = path.join(base, '.oficina-worktrees', `task-${task.id}-${++n}`);
+        let branch = task.branch;
+        if (!branch) { branch = `oficina/task-${task.id}-${slug(task.title)}`; for (let k = 2; tryGit(base, 'rev-parse', '--verify', branch); k++) branch = `oficina/task-${task.id}-${slug(task.title)}-${k}`; }
         const base_branch = task.base_branch || git(base, 'rev-parse', '--abbrev-ref', 'HEAD');
         if (tryGit(base, 'rev-parse', '--verify', branch)) git(base, 'worktree', 'add', wt, branch);
         else git(base, 'worktree', 'add', '-b', branch, wt);

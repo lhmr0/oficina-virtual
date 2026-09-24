@@ -90,6 +90,59 @@ export function linkLabels(root) {
   }
 }
 export const closeModal = () => dlg().close();
+// botones/enlaces con data-close cierran el modal (sin JS en línea: la CSP lo bloquea)
+document.addEventListener('click', e => { const c = e.target.closest('[data-close]'); if (c) c.closest('dialog')?.close(); });
+
+// ---------- máquinas y carpetas ----------
+export const machines = () => S.boot?.machines || [];
+export const machineName = id => machines().find(m => m.id === +id)?.name || '—';
+export const defaultMachine = () => machines().find(m => m.is_default)?.id || machines()[0]?.id;
+// Selector de carpetas en la máquina (funciona desde el celular: navega el disco de la PC vía el agente de campo)
+export function folderPicker(machineId, start) {
+  const d = document.getElementById('picker');
+  return new Promise(resolve => {
+    let cur = null;
+    const load = async p => {
+      d.innerHTML = '<div class="empty">Leyendo carpetas…</div>';
+      try {
+        const x = await get(`/api/machines/${machineId || 0}/ls${p ? '?path=' + encodeURIComponent(p) : ''}`);
+        cur = x.path;
+        d.innerHTML = `<h2>Elegir carpeta · ${h(machineName(machineId || defaultMachine()))}</h2>
+          <div class="row"><code class="grow ellipsis">${h(x.path || 'Raíces permitidas')}</code>${x.is_git ? '<span class="chip st-completada">git</span>' : ''}</div>
+          <div class="chat-list" style="max-height:50vh;margin:10px 0">
+            ${x.parent ? `<div class="chat-item" data-p="${h(x.parent)}">⬆ ..</div>` : x.path ? '<div class="chat-item" data-p="">⬆ raíces</div>' : ''}
+            ${x.dirs.map(f => `<div class="chat-item" data-p="${h(f.path)}">📁 ${h(f.name)}</div>`).join('') || '<div class="empty">Sin subcarpetas</div>'}
+          </div>
+          <div class="row"><button class="btn y" id="pkOk" ${x.path ? '' : 'disabled'}>Elegir esta carpeta</button><button class="btn ghost" id="pkNo">Cancelar</button></div>`;
+        d.querySelectorAll('[data-p]').forEach(i => i.onclick = () => load(i.dataset.p));
+        d.querySelector('#pkOk').onclick = () => { d.close(); resolve(cur); };
+        d.querySelector('#pkNo').onclick = () => { d.close(); resolve(null); };
+      } catch (e) { d.innerHTML = `<div class="panel r">${h(e.message)}</div><button class="btn ghost" id="pkNo">Cerrar</button>`; d.querySelector('#pkNo').onclick = () => { d.close(); resolve(null); }; }
+    };
+    d.showModal();
+    load(start || null);
+  });
+}
+
+// ---------- adjuntos ----------
+export async function upload(file, { task_id, conversation_id } = {}) {
+  const q = new URLSearchParams({ name: file.name, ...(task_id ? { task_id } : {}), ...(conversation_id ? { conversation_id } : {}) });
+  const r = await fetch('/api/attachments?' + q, { method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(j?.error || `Error ${r.status}`);
+  return j;
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-delatt]'); if (!b) return;
+  e.preventDefault();
+  if (await confirmBox('¿Quitar el adjunto?', 'Quitar', true)) del('/api/attachments/' + b.dataset.delatt).catch(fail);
+});
+export const bytesTxt = n => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.ceil(n / 1e3) + ' KB';
+export function attachmentsHTML(list, canDelete) {
+  if (!list?.length) return '<small class="muted">Sin adjuntos</small>';
+  return `<div class="row">${list.map(a => `<div class="chip" style="font-size:9px">${/^image\//.test(a.mime) ? `<img src="/api/attachments/${a.id}" alt="" style="width:40px;height:40px;object-fit:cover;image-rendering:auto">` : '📎'}
+    <a href="/api/attachments/${a.id}" target="_blank" rel="noopener">${h(a.name)}</a> <small>${bytesTxt(a.size)}</small>${canDelete ? `<button class="btn sm r" data-delatt="${a.id}" title="Quitar">×</button>` : ''}</div>`).join('')}</div>`;
+}
 export function confirmBox(text, okLabel = 'Confirmar', danger) {
   return new Promise(res => {
     const d = modal(`<h2>${h(text)}</h2><div class="row"><button class="btn ${danger ? 'r' : 'y'}" value="ok">${h(okLabel)}</button><button class="btn ghost" value="no">Cancelar</button></div>`);
