@@ -111,8 +111,12 @@ const ADAPTERS = {
     },
   },
   agy: {
-    args(c, { first, prompt }) {
-      const a = ['-p', cap(prompt), '--output-format', 'stream-json', '--mode', c.mode === 'plan' ? 'plan' : 'accept-edits'];
+    args(c, { first, prompt, cwd }) {
+      // sin terminal agy no puede pedir permisos y los niega todos → auto-aprobar (como el skill antigravity-agents);
+      // en plan se suma --sandbox (restringe la terminal). Editar corre en el worktree de la tarea.
+      const a = ['-p', cap(prompt), '--output-format', 'stream-json', '--mode', c.mode === 'plan' ? 'plan' : 'accept-edits', '--dangerously-skip-permissions'];
+      if (c.mode === 'plan') a.push('--sandbox');
+      if (cwd) a.push('--add-dir', cwd); // sin esto agy ejecuta los comandos en su propia carpeta scratch
       if (c.model) a.push('--model', c.model);
       if (c.effort && !/-(low|medium|high)$/.test(c.model || '')) a.push('--effort', c.effort); // agy rechaza --effort si el modelo ya lo trae
       if (!first) a.push('--conversation', c.session_id);
@@ -239,7 +243,7 @@ async function start(item, mid) {
     } catch (e) { prompt += `\n\n(No se pudieron entregar los adjuntos: ${e.message})`; }
   }
   const supervised = item.supervised && ag.adapter === 'claude';
-  const b = ad.args(cc, { first, prompt, supervised, convId: c.id });
+  const b = ad.args(cc, { first, prompt, supervised, convId: c.id, cwd });
   const args = [...J(ag.pre_args, []), ...b.args, ...J(ag.extra_args, [])];
   const turn = (one('select count(*) n from runs where conversation_id=?', c.id).n || 0) + 1;
   const runId = insert('runs', { conversation_id: c.id, task_id: task?.id ?? null, agent_id: ag.id, model: cc.model, effort: cc.effort, turn,
