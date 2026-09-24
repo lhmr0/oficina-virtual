@@ -2,9 +2,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 const crypto = require('node:crypto');
-const { execFile } = require('node:child_process');
 const { db, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting } = require('./db');
 const host = require('./host');
 const R = require('./runner');
