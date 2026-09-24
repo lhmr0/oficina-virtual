@@ -15,9 +15,9 @@ Requisitos: Node 22+, git, y los CLIs de los agentes instalados y con sesión in
 
 | Sección | Para qué |
 |---|---|
-| **Estación** | Mapa de la oficina: cada área es una sala; los droides trabajan en escritorios, piden ayuda con "?" y duermen (Zz) sin cuota. |
+| **Estación** | Mapa de la oficina (estilo Gather): cada área es una sala con escritorios; los droides trabajan, piden ayuda con "?", esperan revisión con "!" y duermen (Zz) sin cuota. Cantina, Consejo, Puente y Archivos también son salas. Todo lo demás se abre en un panel lateral sobre el mapa; dock inferior y buscador **Ctrl+K**. |
 | **Proyectos** | Con carpetas locales (una o varias, git opcional) o solo de registro. Estado, avance, métricas. |
-| **Kanban** | Por proyecto. Arrastra a "En curso" para ejecutar. |
+| **Kanban** | Por proyecto o de todos los proyectos. Arrastra a "En curso" para ejecutar. |
 | **Tarea** | Agente + modelo + esfuerzo + modo, consola en vivo, chat con el agente, diff, ejecuciones, relevos, historial de cambios. |
 | **Cantina** | Consultas rápidas sin proyecto; multi-turno, cambio de agente a mitad, convertir en tarea/proyecto. |
 | **Consejo Jedi** | Informe de lo hecho → uno o varios agentes proponen mejoras por "lentes" → tablero de propuestas → tareas. |

@@ -1,13 +1,9 @@
 // Arranque, login, shell, router, tiempo real (SSE) y bandeja de pendientes
-import { S, get, post, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, project, opts, linkLabels } from './core.js';
+import { S, get, post, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels } from './core.js';
 import { sprite } from './sprites.js';
-import { VIEWS } from './views.js';
+import { VIEWS, taskForm, missionForm } from './views.js';
 
 const app = document.getElementById('app');
-const NAV = [
-  ['estacion', 'Estación', 'droid'], ['proyectos', 'Proyectos', 'rebel'], ['kanban', 'Kanban', 'desk'], ['cantina', 'Cantina', 'rebel'],
-  ['consejo', 'Consejo Jedi', 'imperial'], ['archivos', 'Archivos Jedi', 'droid'], ['puente', 'Puente de Mando', 'imperial'], ['config', 'Configuración', 'droid'],
-];
 let current = null;
 
 // ---------- login / setup ----------
@@ -41,41 +37,113 @@ async function loginView() {
   });
 }
 
-// ---------- shell ----------
+// ---------- shell: mapa de fondo + panel lateral + dock inferior (estilo Gather) ----------
 export async function loadBoot() {
   S.boot = await get('/api/bootstrap');
   if (S.project && !project(S.project)) S.project = null;
-  if (!S.project && S.boot.projects[0]) S.project = S.boot.projects[0].id;
 }
+// proyecto actual (null = todos): filtra el mapa y es el predeterminado del kanban y los formularios
+export function setProject(id) {
+  S.project = id || null;
+  localStorage.setItem('ov_project', S.project || '');
+  const s = $('#projSel'); if (s) s.value = S.project || '';
+}
+const MENU = [['proyectos', 'Proyectos'], ['kanban', 'Kanban'], ['cantina', 'Cantina'], ['consejo', 'Consejo Jedi'], ['archivos', 'Archivos Jedi'], ['puente', 'Puente de Mando'], ['config', 'Configuración']];
+const WIDE = ['proyectos', 'kanban', 'consejo', 'archivos', 'puente', 'config'];
 function shell() {
   const me = S.boot.me;
   app.innerHTML = `
-  <header class="top">
-    <a class="logo" href="#/estacion">★ OFICINA VIRTUAL</a>
-    <select id="projSel" aria-label="Proyecto actual">${opts(S.boot.projects.map(p => [p.id, p.name]), S.project, '— Sin proyecto —')}</select>
-    <input class="search" id="gsearch" placeholder="Buscar en todo…" aria-label="Buscar">
-    <div class="right row">
-      <button class="btn ghost sm" id="soundBtn" title="Sonido">${S.sound ? '♪ ON' : '♪ OFF'}</button>
-      <button class="btn ghost sm bell" id="bellBtn" aria-label="Bandeja">BANDEJA<span class="n" id="bellN" hidden></span></button>
-      <span class="me">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3)}<span>${h(me.name)}<br><small>${h(S.boot.users.find(u => u.id === me.id)?.rank || '')} · ${h(me.role)}</small></span></span>
-      <button class="btn ghost sm" id="logoutBtn">Salir</button>
-    </div>
-  </header>
-  <div id="qpaused" class="queue-paused" ${S.boot.queue_paused ? '' : 'hidden'}>⚠ COLA EN PAUSA (Orden 66) ${isAdmin() ? '<button class="btn sm y" id="resumeQ">Reanudar cola</button>' : ''}</div>
-  <div class="layout">
-    <nav class="nav" aria-label="Secciones">${NAV.map(([k, l, s]) => (k === 'archivos' ? '<div class="sep"></div>' : '') + `<a href="#/${k}" data-k="${k}">${sprite(s, '#4fc3f7', 2)}${l}</a>`).join('')}</nav>
-    <main id="view" tabindex="-1"></main>
+  <div class="hud-tl">
+    <a class="logo" href="#/estacion" title="Volver al mapa">★ OFICINA</a>
+    <select id="projSel" aria-label="Proyecto que se muestra en el mapa">${opts(S.boot.projects.map(p => [p.id, p.name]), S.project || '', 'Todos los proyectos')}</select>
   </div>
+  <div id="qpaused" class="queue-paused" ${S.boot.queue_paused ? '' : 'hidden'}>⚠ Cola en pausa (Orden 66) ${isAdmin() ? '<button class="btn sm y" id="resumeQ">Reanudar cola</button>' : ''}</div>
+  <div id="map" class="map"></div>
+  <aside class="drawer" id="drawer" hidden aria-label="Panel">
+    <button class="drawer-x" id="drawerX" title="Cerrar (Esc)" aria-label="Cerrar panel">✕</button>
+    <main id="view" tabindex="-1"></main>
+  </aside>
+  <nav class="dock" aria-label="Acciones">
+    <button class="dock-me" id="meBtn" aria-haspopup="menu" aria-expanded="false">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 2)}<span>${h(me.name.split(' ')[0])}</span></button>
+    ${canEdit() ? '<button id="dNew" class="dock-y">+ Tarea</button>' : ''}
+    <a href="#/kanban">Kanban</a>
+    <a href="#/cantina">Cantina</a>
+    <button id="dFind" title="Buscar y navegar (Ctrl+K)">Buscar <kbd>Ctrl K</kbd></button>
+    <button class="bell" id="bellBtn" aria-label="Bandeja">Bandeja<span class="n" id="bellN" hidden></span></button>
+  </nav>
+  <div class="menu" id="meMenu" role="menu" hidden>
+    <div class="menu-head">${h(me.name)}<br><small>${h(S.boot.users.find(u => u.id === me.id)?.rank || '')} · ${h(me.role)}</small></div>
+    ${MENU.filter(([k]) => k !== 'config' || isAdmin()).map(([k, l]) => `<a role="menuitem" href="#/${k}">${l}</a>`).join('')}
+    ${canEdit() ? '<button role="menuitem" id="mMission">Nueva misión</button>' : ''}
+    <button role="menuitem" id="soundBtn">Sonido: ${S.sound ? 'sí' : 'no'}</button>
+    <button role="menuitem" id="logoutBtn">Salir</button>
+  </div>
+  <dialog id="palette" class="palette" aria-label="Buscar"><input id="palQ" placeholder="Busca una tarea, proyecto o sección…" autocomplete="off"><div id="palList" role="listbox"></div></dialog>
   <aside class="inbox" id="inbox" hidden></aside>`;
-  $('#projSel').onchange = e => { S.project = +e.target.value || null; localStorage.setItem('ov_project', S.project || ''); if (['kanban', 'estacion'].includes(current?.name)) route(); };
+  $('#projSel').onchange = e => { setProject(+e.target.value); mapSoon(0); if (current?.name === 'kanban') go('#/kanban/' + (S.project || 'todos')); };
+  $('#drawerX').onclick = closeDrawer;
+  const menu = $('#meMenu');
+  const toggleMenu = show => { menu.hidden = !show; $('#meBtn').setAttribute('aria-expanded', show); };
+  $('#meBtn').onclick = e => { e.stopPropagation(); toggleMenu(menu.hidden); };
+  document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('#meMenu')) toggleMenu(false); });
+  menu.addEventListener('click', e => { if (e.target.closest('a')) toggleMenu(false); });
   $('#logoutBtn').onclick = async () => { await post('/api/logout'); location.hash = '#/login'; location.reload(); };
-  $('#soundBtn').onclick = e => { S.sound = !S.sound; localStorage.setItem('ov_sound', S.sound ? '1' : '0'); e.target.textContent = S.sound ? '♪ ON' : '♪ OFF'; if (S.sound) beep('ok'); };
+  $('#soundBtn').onclick = e => { S.sound = !S.sound; localStorage.setItem('ov_sound', S.sound ? '1' : '0'); e.target.textContent = 'Sonido: ' + (S.sound ? 'sí' : 'no'); if (S.sound) beep('ok'); };
+  $('#mMission')?.addEventListener('click', () => { toggleMenu(false); missionForm(); });
+  $('#dNew')?.addEventListener('click', () => taskForm());
+  $('#dFind').onclick = openPalette;
   $('#bellBtn').onclick = toggleInbox;
   $('#resumeQ')?.addEventListener('click', () => post('/api/queue/resume').catch(fail));
-  $('#gsearch').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.value.trim()) location.hash = '#/archivos/buscar?q=' + encodeURIComponent(e.target.value.trim()); });
+}
+const go = hash => { location.hash = hash; };
+const closeDrawer = () => go('#/estacion');
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (S.boot) openPalette(); return; }
+  if (e.key === 'Escape' && !document.querySelector('dialog[open]') && S.boot) {
+    if (!$('#inbox')?.hidden) $('#inbox').hidden = true;
+    else if (!$('#drawer')?.hidden) closeDrawer();
+  }
+});
+
+// ---------- paleta de comandos (Ctrl+K) ----------
+const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const STATUS_TXT = { pendiente: 'pendiente', bloqueada: 'bloqueada', en_cola: 'en cola', en_curso: 'en curso', esperando: 'espera respuesta', revision: 'revisión', completada: 'completada', pausada_cuota: 'sin cuota', fallida: 'fallida' };
+async function openPalette() {
+  const d = $('#palette'), q = $('#palQ'), list = $('#palList');
+  if (d.open) return;
+  q.value = ''; d.showModal();
+  let tasks = [];
+  const base = [
+    ...(canEdit() ? [['Nueva tarea', 'acción', () => taskForm()], ['Nueva misión', 'acción', () => missionForm()], ['Nueva consulta rápida', 'acción', () => go('#/cantina')]] : []),
+    ['Estación', 'ir a', () => go('#/estacion')],
+    ...MENU.filter(([k]) => k !== 'config' || isAdmin()).map(([k, l]) => [l, 'ir a', () => go('#/' + k)]),
+    ['Kanban de todos los proyectos', 'ir a', () => go('#/kanban/todos')],
+    ...S.boot.projects.map(p => [p.name, 'proyecto', () => go('#/kanban/' + p.id)]),
+  ];
+  let items = [], sel = 0;
+  const draw = () => {
+    const t = norm(q.value.trim());
+    const found = t ? tasks.filter(x => norm(`#${x.id} ${x.title}`).includes(t)).slice(0, 8).map(x => [`#${x.id} ${x.title}`, STATUS_TXT[x.status] || x.status, () => go('#/tarea/' + x.id)]) : [];
+    items = [...base.filter(([l]) => !t || norm(l).includes(t)), ...found];
+    if (t) items.push([`Buscar «${q.value.trim()}» en el historial`, 'archivos', () => go('#/archivos/buscar?q=' + encodeURIComponent(q.value.trim()))]);
+    sel = Math.min(sel, Math.max(0, items.length - 1));
+    list.innerHTML = items.map(([l, k], i) => `<div class="pal-item ${i === sel ? 'on' : ''}" role="option" aria-selected="${i === sel}" data-i="${i}"><span>${h(l)}</span><small>${h(k)}</small></div>`).join('') || '<div class="empty">Sin resultados</div>';
+    list.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+  };
+  const pick = i => { const it = items[i]; if (!it) return; d.close(); it[2](); };
+  q.oninput = () => { sel = 0; draw(); };
+  q.onkeydown = e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(sel + 1, items.length - 1); draw(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(sel - 1, 0); draw(); }
+    else if (e.key === 'Enter') { e.preventDefault(); pick(sel); }
+  };
+  list.onclick = e => { const it = e.target.closest('[data-i]'); if (it) pick(+it.dataset.i); };
+  d.onclick = e => { if (e.target === d) d.close(); }; // clic fuera de la caja
+  draw(); q.focus();
+  get('/api/tasks').then(t => { tasks = t; if (d.open) draw(); }).catch(() => {}); // las tareas llegan después: la paleta ya responde
 }
 
-// ---------- router ----------
+// ---------- router: la estación es el mapa; todo lo demás abre el panel lateral ----------
 function parseHash() {
   const [p, qs] = (location.hash.slice(2) || 'estacion').split('?');
   const [name, ...rest] = p.split('/');
@@ -85,32 +153,49 @@ export async function route(soft = false) {
   const r = parseHash();
   if (r.name === 'login') return loginView();
   if (!S.boot) return start();
-  const v = VIEWS[r.name] || VIEWS.estacion;
-  $$('.nav a').forEach(a => a.classList.toggle('on', a.dataset.k === r.name));
+  const name = VIEWS[r.name] ? r.name : 'estacion';
+  const drawer = $('#drawer');
+  if (name === 'estacion') {
+    current = { ...r, name, view: VIEWS.estacion };
+    drawer.hidden = true; document.body.classList.remove('drawer-open');
+    return renderMap();
+  }
+  const v = VIEWS[name];
+  drawer.hidden = false; document.body.classList.add('drawer-open');
+  drawer.classList.toggle('wide', WIDE.includes(name));
   const old = $('#view');
   const keep = soft ? snapshot(old) : null;
   const el = old.cloneNode(false); // elemento nuevo: sin listeners de la vista anterior
-  const token = current = { ...r, view: v };
+  const token = current = { ...r, name, view: v };
   try { await v.render(el, r); } catch (e) { el.innerHTML = `<div class="panel r">${h(e.message)}</div>`; }
   if (current !== token) return; // otra navegación empezó mientras cargaba
   linkLabels(el);
   $('#view').replaceWith(el);
-  if (keep) restore(el, keep); else { window.scrollTo(0, 0); }
+  if (keep) restore(el, keep, drawer); else { drawer.scrollTop = 0; el.focus({ preventScroll: true }); }
 }
+// el mapa se dibuja aparte y se refresca con sus propios eventos, esté o no abierto el panel
+let mapBusy = false, mapT;
+async function renderMap() {
+  if (mapBusy) return mapSoon();
+  mapBusy = true;
+  try { await VIEWS.estacion.render($('#map')); } catch (e) { $('#map').innerHTML = `<div class="panel r" style="margin:80px 16px">${h(e.message)}</div>`; }
+  mapBusy = false;
+}
+function mapSoon(ms = 400) { clearTimeout(mapT); mapT = setTimeout(renderMap, ms); }
 // conserva lo que el usuario está escribiendo durante refrescos en vivo
 function snapshot(el) {
   const vals = {}; $$('[id]', el).forEach(i => { if ('value' in i && i.type !== 'button') vals[i.id] = i.type === 'checkbox' ? i.checked : i.value; });
   const scroll = {}; $$('[data-scroll]', el).forEach(s => scroll[s.dataset.scroll] = [s.scrollTop, s.scrollHeight - s.scrollTop - s.clientHeight < 40]);
-  return { vals, focus: document.activeElement?.id, scroll, y: window.scrollY };
+  return { vals, focus: document.activeElement?.id, scroll, y: $('#drawer').scrollTop };
 }
-function restore(el, k) {
+function restore(el, k, drawer) {
   for (const [id, v] of Object.entries(k.vals)) { const i = document.getElementById(id); if (i && el.contains(i)) { if (i.type === 'checkbox') i.checked = v; else if (i.tagName !== 'SELECT' || [...i.options].some(o => o.value === v)) i.value = v; } }
   $$('[data-scroll]', el).forEach(s => { const x = k.scroll[s.dataset.scroll]; if (x) s.scrollTop = x[1] ? s.scrollHeight : x[0]; });
-  if (k.focus) document.getElementById(k.focus)?.focus();
-  window.scrollTo(0, k.y);
+  if (k.focus) document.getElementById(k.focus)?.focus({ preventScroll: true });
+  drawer.scrollTop = k.y;
 }
 let refreshT;
-export function refreshSoon(ms = 350) { clearTimeout(refreshT); refreshT = setTimeout(() => route(true), ms); }
+export function refreshSoon(ms = 350) { clearTimeout(refreshT); refreshT = setTimeout(() => { if (current?.name !== 'estacion') route(true); mapSoon(0); }, ms); }
 let bootT;
 const reboot = () => { clearTimeout(bootT); bootT = setTimeout(async () => { await loadBoot(); refreshSoon(0); }, 400); };
 
@@ -119,7 +204,7 @@ function connectSSE() {
   const es = new EventSource('/api/events');
   const on = (t, fn) => es.addEventListener(t, e => fn(JSON.parse(e.data)));
   let inboxT;
-  const pass = (t, d) => { if (['task.updated', 'conv.updated'].includes(t)) { clearTimeout(inboxT); inboxT = setTimeout(inboxCount, 800); } const r = current?.view.event?.(t, d, current); if (r === 'handled') return; if (r === 'refresh' || (current?.view.refreshOn || []).includes(t)) refreshSoon(); };
+  const pass = (t, d) => { if (['task.updated', 'conv.updated'].includes(t)) { clearTimeout(inboxT); inboxT = setTimeout(inboxCount, 800); } if (VIEWS.estacion.refreshOn.includes(t)) mapSoon(); if (current?.name === 'estacion') return; const r = current?.view.event?.(t, d, current); if (r === 'handled') return; if (r === 'refresh' || (current?.view.refreshOn || []).includes(t)) refreshSoon(); };
   for (const t of ['task.updated', 'task.created', 'conv.updated', 'run.started', 'handoff', 'activity', 'status.scan', 'council.updated']) on(t, d => pass(t, d));
   on('run.log', d => pass('run.log', d));
   on('agent.status', d => { reboot(); pass('agent.status', d); });
@@ -192,7 +277,7 @@ function renderInbox(x) {
 // ---------- arranque ----------
 async function start() {
   try { await loadBoot(); } catch { return loginView(); }
-  shell(); connectSSE(); inboxCount(); setInterval(inboxCount, 60000);
+  shell(); connectSSE(); inboxCount(); setInterval(inboxCount, 60000); renderMap();
   if (!location.hash || location.hash === '#/login') location.hash = '#/estacion';
   route();
 }

@@ -3,7 +3,7 @@ import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS
   agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
   machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML } from './core.js';
 import { sprite, icon, ICON_NAMES } from './sprites.js';
-import { route, refreshSoon, loadBoot } from './app.js';
+import { route, refreshSoon, loadBoot, setProject } from './app.js';
 
 const go = hash => { location.hash = hash; };
 const ACTIVE = ['en_curso', 'en_cola', 'esperando'];
@@ -102,7 +102,7 @@ export async function taskForm(t = {}, preset = {}) {
   };
 }
 
-async function missionForm() {
+export async function missionForm() {
   const p = project(S.project) || S.boot.projects[0];
   if (!p) return go('#/proyectos');
   const stages = ['Análisis', 'Desarrollo', 'Documentación'].map(n => S.boot.areas.find(a => a.name === n)).filter(Boolean);
@@ -124,57 +124,61 @@ async function missionForm() {
   };
 }
 
-// ===================== ESTACIÓN =====================
+// ===================== ESTACIÓN (mapa) =====================
+// Se dibuja en la capa #map, siempre visible detrás del panel lateral.
+const AT_DESK = ['en_curso', 'en_cola', 'esperando', 'revision'];
+const LIVE = ['en_curso', 'en_cola', 'esperando'];
+const MON = { en_curso: '#3ddc84', en_cola: '#b98cff', esperando: '#ffe81f', revision: '#ff8c42' };
+const BUB = { esperando: '<span class="bubble">?</span>', en_cola: '<span class="bubble z">…</span>', revision: '<span class="bubble o">!</span>' };
 const estacion = {
   refreshOn: ['task.updated', 'task.created', 'conv.updated', 'run.started', 'agent.status'],
   async render(el) {
     const [tasks, chats] = await Promise.all([get('/api/tasks'), get('/api/conversations')]);
-    const onlyProj = localStorage.getItem('ov_only_proj') === '1' && S.project;
-    const vis = tasks.filter(t => !onlyProj || t.project_id === S.project);
-    const busy = new Set([...vis.filter(t => ACTIVE.includes(t.status)).map(t => t.agent_id), ...chats.filter(c => ['en_curso', 'en_cola', 'esperando'].includes(c.status)).map(c => c.agent_id)]);
+    const vis = tasks.filter(t => !S.project || t.project_id === S.project);
+    const busy = new Set([...tasks.filter(t => ACTIVE.includes(t.status)).map(t => t.agent_id), ...chats.filter(c => LIVE.includes(c.status)).map(c => c.agent_id)]);
     const desk = t => {
       const a = agent(t.agent_id);
-      const who = t.executor === 'humano' ? sprite('rebel', '#ff8c42', 4) : sprite('droid', a?.color, 4);
-      const bub = t.status === 'esperando' ? '<span class="bubble">?</span>' : t.status === 'en_cola' ? '<span class="bubble z">…</span>' : '';
-      return `<div class="station-desk ${t.status === 'en_curso' ? 'busy' : ''}" data-task="${t.id}" title="#${t.id} ${h(t.title)} · ${STATUS[t.status]}" tabindex="0" role="button">
-        <div class="who" style="position:relative">${who}${bub}</div><span class="screen">${sprite('desk', t.status === 'esperando' ? '#ffe81f' : t.status === 'en_curso' ? '#3ddc84' : '#4fc3f7', 4)}</span>
-        <div class="lbl">#${t.id} ${h(t.title.slice(0, 22))}</div></div>`;
+      const who = t.executor === 'humano' ? sprite('rebel', '#ff8c42', 3) : sprite('droid', a?.color, 3);
+      return `<button class="desk ${t.status}" data-task="${t.id}" title="#${t.id} ${h(t.title)} · ${STATUS[t.status]}${a ? ' · ' + h(a.name) : ''}">
+        <span class="who">${who}${BUB[t.status] || ''}</span>${sprite('desk', MON[t.status], 3)}<span class="lbl">${h(t.title)}</span></button>`;
     };
-    const empty = `<div class="station-desk"><div class="who"></div>${sprite('desk', '#1d2447', 4)}<div class="lbl">libre</div></div>`;
-    const rooms = S.boot.areas.map(a => {
-      const at = vis.filter(t => t.area_id === a.id);
-      const act = at.filter(t => ACTIVE.includes(t.status));
-      const c = s => at.filter(t => t.status === s).length;
-      return `<div class="room" data-area="${a.id}" style="--c:${a.color}"><div class="room-head">${icon(a.icon)}<b>${h(a.alias)}</b><small>${h(a.name)}</small>
-        <span class="right row" style="gap:4px">${chip('pendiente', c('pendiente'))}${chip('en_curso', c('en_curso') + c('en_cola'))}${chip('esperando', c('esperando'))}${chip('revision', c('revision'))}</span></div>
-        <div class="desks">${act.map(desk).join('')}${Array(Math.max(0, 3 - act.length)).fill(empty).join('')}</div></div>`;
-    }).join('');
-    const live = chats.filter(c => ['en_curso', 'en_cola', 'esperando'].includes(c.status));
-    const cantina = `<div class="room" data-cantina="1" style="--c:#ffe81f"><div class="room-head">${icon('cantina')}<b>Cantina de Mos Eisley</b><small>Consultas rápidas</small><span class="right">${chip('en_curso', live.length + ' activas')}</span></div>
-      <div class="desks">${live.map(c => `<div class="station-desk ${c.status === 'en_curso' ? 'busy' : ''}" data-chat="${c.id}" title="${h(c.title)}" tabindex="0" role="button"><div class="who" style="position:relative">${sprite('droid', agent(c.agent_id)?.color, 4)}${c.status === 'esperando' ? '<span class="bubble">?</span>' : ''}</div><span class="screen">${sprite('desk', '#ffe81f', 4)}</span><div class="lbl">${h(c.title.slice(0, 22))}</div></div>`).join('') || '<p class="muted" style="padding:8px">La cantina está tranquila. Pide una consulta rápida.</p>'}</div></div>`;
+    const free = `<span class="desk free" aria-hidden="true"><span class="who"></span>${sprite('desk', '#1d2447', 3)}<span class="lbl"></span></span>`;
+    const room = a => {
+      const at = vis.filter(t => t.area_id === a.id && AT_DESK.includes(t.status));
+      const shown = at.slice(0, 6), pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
+      return `<section class="room2" data-area="${a.id}" style="--c:${a.color}" tabindex="0" role="button" aria-label="${h(a.alias)}: ${at.length} en actividad, ${pend} pendientes">
+        <div class="plaque">${icon(a.icon, 2)}<b>${h(a.alias)}</b><small>${h(a.name)}</small>${pend ? `<small class="right" title="Tareas pendientes">${pend} pendiente${pend > 1 ? 's' : ''}</small>` : ''}</div>
+        <div class="desks2">${shown.map(desk).join('')}${Array(Math.max(0, 3 - shown.length)).fill(free).join('')}${at.length > 6 ? `<span class="more">+${at.length - 6}</span>` : ''}</div>
+        ${sprite('plant', '', 3, 'deco')}</section>`;
+    };
+    const live = chats.filter(c => LIVE.includes(c.status));
+    const cantina = `<section class="room2 cantina2" data-go="#/cantina" style="--c:#ffe81f" tabindex="0" role="button" aria-label="Cantina: ${live.length} consultas activas">
+      <div class="plaque">${icon('cantina', 2)}<b>Cantina</b><small>Consultas rápidas</small></div>
+      <div class="stools">${live.map(c => `<button class="desk ${c.status}" data-chat="${c.id}" title="${h(c.title)}"><span class="who">${sprite('droid', agent(c.agent_id)?.color, 3)}${c.status === 'esperando' ? BUB.esperando : ''}</span><span class="lbl">${h(c.title)}</span></button>`).join('') || '<span class="hint">Nadie en la barra</span>'}</div>
+      <div class="bar"></div></section>`;
+    const consejo = `<section class="room2" data-go="#/consejo" style="--c:#b98cff" tabindex="0" role="button" aria-label="Sala del Consejo">
+      <div class="plaque">${icon('holocron', 2)}<b>Consejo Jedi</b><small>Propuestas de mejora</small></div><div class="round-table"></div></section>`;
+    const lamp = a => a.status === 'sin_cuota' ? '#ff3b3b' : !a.enabled ? '#444a6e' : busy.has(a.id) ? '#3ddc84' : '#4fc3f7';
+    const puente = `<section class="room2" data-go="#/puente" style="--c:#4fc3f7" tabindex="0" role="button" aria-label="Puente de Mando">
+      <div class="plaque">${icon('radar', 2)}<b>Puente de Mando</b><small>Estado y límites</small></div>
+      <div class="consoles">${S.boot.agents.map(a => `<span title="${h(a.name)}: ${busy.has(a.id) ? 'trabajando' : a.status === 'sin_cuota' ? 'sin cuota' : a.enabled ? 'disponible' : 'apagado'}">${sprite('console', lamp(a), 3)}</span>`).join('')}</div></section>`;
+    const archivo = `<section class="room2" data-go="#/archivos" style="--c:#8c97c9" tabindex="0" role="button" aria-label="Archivos Jedi">
+      <div class="plaque">${icon('holocron', 2)}<b>Archivos Jedi</b><small>Historial</small></div><div class="shelves"></div></section>`;
+    const me = S.boot.me;
     const idle = S.boot.agents.filter(a => !busy.has(a.id));
-    const corridor = `<div class="corridor"><span class="label">PASILLO · droides en espera</span>${idle.map((a, i) => {
-      if (a.status === 'sin_cuota') return `<div class="walker sleeping" style="left:${8 + i * 22}%;animation:none" title="${h(a.name)} sin cuota hasta ${fmtDate(a.quota_reset_at)}">${sprite('droid', a.color, 4)}<span class="bubble z">Zz ${a.quota_reset_at ? new Date(a.quota_reset_at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>`;
-      if (!a.enabled) return `<div class="walker sleeping" style="left:${8 + i * 22}%;animation:none" title="${h(a.name)} deshabilitado">${sprite('droid', a.color, 4)}</div>`;
-      return `<div class="walker" style="--d:${10 + i * 3}s;animation-delay:-${i * 2}s" title="${h(a.name)} disponible">${sprite('droid', a.color, 4)}</div>`;
-    }).join('')}</div>`;
-    el.innerHTML = `<div class="row"><h1 style="margin:0">Estación</h1>
-      <label class="row" style="font-size:17px"><input type="checkbox" id="onlyProj" ${onlyProj ? 'checked' : ''}> solo proyecto actual</label>
-      <span class="right">${canEdit() ? `<button class="btn y" id="nt">+ Tarea</button><button class="btn" id="nm">+ Misión</button><button class="btn o" id="nc">+ Consulta</button>` : ''}</span></div>
-      <div class="agent-strip" style="margin:12px 0">${S.boot.agents.map(a => `<div class="agent-pill" style="--c:${a.color}">${sprite('droid', a.color, 3)}<div><b class="pixel" style="font-size:9px">${h(a.name)}</b><br><small>${h(a.rank)} · ${busy.has(a.id) ? 'trabajando' : a.status === 'sin_cuota' ? 'sin cuota' : a.enabled ? 'disponible' : 'apagado'}</small></div></div>`).join('')}</div>
-      <div class="station">${rooms}${cantina}${corridor}</div>
-      <div class="legend"><span>${sprite('desk', '#3ddc84', 2)} trabajando</span><span><span class="chip st-esperando">?</span> espera tu respuesta</span><span><span class="chip">…</span> en cola</span><span>Zz sin cuota</span></div>`;
-    $('#onlyProj', el).onchange = e => { localStorage.setItem('ov_only_proj', e.target.checked ? '1' : '0'); refreshSoon(0); };
-    $('#nt', el)?.addEventListener('click', () => taskForm());
-    $('#nm', el)?.addEventListener('click', missionForm);
-    $('#nc', el)?.addEventListener('click', () => go('#/cantina'));
+    const hall = `<div class="hall" aria-label="Pasillo">
+      <span class="avatar" style="left:4%" title="Tú">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3)}<span class="tag">${h(me.name.split(' ')[0])}</span></span>
+      ${idle.map((a, i) => a.status === 'sin_cuota' || !a.enabled
+        ? `<span class="avatar sleeping" style="left:${22 + i * 16}%" title="${h(a.name)} ${a.enabled ? 'sin cuota hasta ' + fmtDate(a.quota_reset_at) : 'apagado'}">${sprite('droid', a.color, 3)}${a.enabled ? '<span class="bubble z">Zz</span>' : ''}<span class="tag">${h(a.name)}</span></span>`
+        : `<span class="avatar walker" style="--d:${12 + i * 3}s;animation-delay:-${i * 2}s" title="${h(a.name)} disponible">${sprite('droid', a.color, 3)}<span class="tag">${h(a.name)}</span></span>`).join('')}</div>`;
+    el.innerHTML = `<div class="floor"><div class="wing">${S.boot.areas.map(room).join('')}</div>${hall}<div class="wing">${cantina}${consejo}${puente}${archivo}</div></div>`;
     el.onclick = e => {
       const d = e.target.closest('[data-task]'); if (d) return go('#/tarea/' + d.dataset.task);
       const c = e.target.closest('[data-chat]'); if (c) return go('#/cantina/' + c.dataset.chat);
-      if (e.target.closest('[data-cantina]')) return go('#/cantina');
+      const g = e.target.closest('[data-go]'); if (g) return go(g.dataset.go);
       const r = e.target.closest('[data-area]'); if (r) roomModal(+r.dataset.area, vis);
     };
-    el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('[data-task],[data-chat]')) e.target.click(); };
+    el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('[data-area],[data-go]')) e.target.click(); };
   },
 };
 function roomModal(areaId, tasks) {
@@ -212,7 +216,7 @@ const proyectos = {
     el.onclick = e => {
       const ed = e.target.closest('[data-edit]'); if (ed) return projectForm(project(ed.dataset.edit));
       const fi = e.target.closest('[data-ficha]'); if (fi) return projectCard(+fi.dataset.ficha);
-      const r = e.target.closest('[data-p]'); if (r) { S.project = +r.dataset.p; localStorage.setItem('ov_project', S.project); $('#projSel').value = S.project; go('#/kanban/' + r.dataset.p); }
+      const r = e.target.closest('[data-p]'); if (r) { setProject(+r.dataset.p); go('#/kanban/' + r.dataset.p); }
     };
   },
 };
@@ -221,8 +225,8 @@ function folderRow(f, i) {
     <div><label class="l">Etiqueta</label><input data-k="label" value="${h(f.label || '')}" placeholder="backend"></div>
     ${f.id ? `<div><label class="l">Máquina</label><span class="chip">${h(machineName(f.machine_id || defaultMachine()))}</span></div>` : machineSel('data-k="machine_id"', f.machine_id)}
     <div style="grid-column:span 2"><label class="l">Ruta</label><div class="row" style="flex-wrap:nowrap"><input data-k="path" value="${h(f.path || '')}" placeholder="C:\\proyectos\\mi-app" ${f.id ? 'disabled' : ''}>${f.id ? '' : '<button class="btn sm" data-browse>Examinar</button>'}</div></div></div>
-    <div class="row"><label class="row" style="font-size:17px"><input type="checkbox" data-k="use_worktrees" ${f.use_worktrees !== 0 ? 'checked' : ''}> worktree por tarea (git)</label>
-    <label class="row" style="font-size:17px"><input type="radio" name="isdef" data-k="is_default" ${f.is_default ? 'checked' : ''}> por defecto</label>
+    <div class="row"><label class="row" style="font-size:13px"><input type="checkbox" data-k="use_worktrees" ${f.use_worktrees !== 0 ? 'checked' : ''}> worktree por tarea (git)</label>
+    <label class="row" style="font-size:13px"><input type="radio" name="isdef" data-k="is_default" ${f.is_default ? 'checked' : ''}> por defecto</label>
     ${f.id ? `<span class="chip">${f.is_git ? 'git' : 'sin git'}</span>` : ''}<button class="btn sm r right" data-rmf="${i}">Quitar</button></div></div>`;
 }
 function projectForm(p = null) {
@@ -288,24 +292,27 @@ const STUCK = ['bloqueada', 'pausada_cuota', 'fallida'];
 const kanban = {
   refreshOn: ['task.updated', 'task.created', 'agent.status'],
   async render(el, r) {
-    const pid = +r.args[0] || S.project;
-    if (!pid || !project(pid)) { el.innerHTML = `<h1>Kanban</h1><div class="panel empty">Elige un proyecto arriba o <a href="#/proyectos">crea uno</a>.</div>`; return; }
-    if (pid !== S.project) { S.project = pid; localStorage.setItem('ov_project', pid); const s = $('#projSel'); if (s) s.value = pid; }
+    // #/kanban/todos = todos los proyectos; sin argumento usa el proyecto actual (vacío = todos)
+    let pid = r.args[0] === 'todos' ? null : +r.args[0] || S.project;
+    if (pid && !project(pid)) pid = null;
+    setProject(pid);
     const p = project(pid);
     const f = S.kf ||= { area: '', agent: '', pri: '', who: '' };
-    const all = await get('/api/tasks?project_id=' + pid);
+    const all = await get('/api/tasks' + (pid ? '?project_id=' + pid : ''));
     const tasks = all.filter(t => (!f.area || t.area_id === +f.area) && (!f.agent || t.agent_id === +f.agent) && (!f.pri || t.priority === f.pri) && (!f.who || t.assignee_user_id === +f.who));
     const card = t => {
       const a = agent(t.agent_id), ar = area(t.area_id);
+      const tp = pid ? null : project(t.project_id);
       return `<div class="kcard" draggable="${canEdit()}" data-id="${t.id}" style="--c:${ar?.color || '#46529a'}" tabindex="0">
-        <div class="row" style="gap:6px"><small>#${t.id}</small>${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
+        <div class="row" style="gap:6px"><small>#${t.id}</small>${tp ? `<span class="chip" style="border-color:${h(tp.color)}">${h(tp.name)}</span>` : ''}${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
         <div class="t">${h(t.title)}</div>
         <div class="meta">${t.executor === 'humano' ? `${sprite('rebel', '#ff8c42', 2)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${sprite('droid', a?.color, 2)}${h(a?.name || '—')} <span>${h(t.model || '')}${t.effort ? '·' + h(t.effort) : ''}</span>`}
         ${t.status === 'en_curso' ? `<span class="chip st-en_curso">⏱ ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}${t.status === 'esperando' ? '<span class="chip st-esperando">? responde</span>' : ''}
         ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div></div>`;
     };
-    el.innerHTML = `<div class="row"><h1 style="margin:0"><span style="color:${h(p.color)}">■</span> ${h(p.name)}</h1>${chip('pendiente', PSTATUS[p.status])}
-      <span class="right">${canEdit() ? '<button class="btn y" id="kt">+ Tarea</button><button class="btn" id="km">+ Misión</button>' : ''}<a class="btn o" href="#/consejo?project=${pid}">Consejo</a><button class="btn ghost" id="kf">Ficha</button></span></div>
+    el.innerHTML = `<div class="row"><h1 style="margin:0">Kanban</h1>
+      <select id="kfProj" style="width:auto;max-width:260px" aria-label="Proyecto">${opts(S.boot.projects.map(x => [x.id, x.name]), pid || '', 'Todos los proyectos')}</select>${p ? chip('pendiente', PSTATUS[p.status]) : ''}
+      <span class="right">${canEdit() ? '<button class="btn y" id="kt">+ Tarea</button><button class="btn" id="km">+ Misión</button>' : ''}<a class="btn o" href="#/consejo${pid ? '?project=' + pid : ''}">Consejo</a>${p ? '<button class="btn ghost" id="kf">Ficha</button>' : ''}</span></div>
       <div class="row" style="margin:12px 0">
         <select id="kfA" style="width:auto">${opts(S.boot.areas.map(a => [a.id, a.name]), f.area, 'Todas las áreas')}</select>
         <select id="kfG" style="width:auto">${opts(S.boot.agents.map(a => [a.id, a.name]), f.agent, 'Todos los agentes')}</select>
@@ -318,7 +325,8 @@ const kanban = {
       }).join('')}</div>`;
     $('#kt', el)?.addEventListener('click', () => taskForm({}, { project_id: pid }));
     $('#km', el)?.addEventListener('click', missionForm);
-    $('#kf', el).onclick = () => projectCard(pid);
+    $('#kf', el)?.addEventListener('click', () => projectCard(pid));
+    $('#kfProj', el).onchange = e => go('#/kanban/' + (e.target.value || 'todos'));
     for (const [id, k] of [['#kfA', 'area'], ['#kfG', 'agent'], ['#kfP', 'pri'], ['#kfW', 'who']]) $(id, el).onchange = e => { f[k] = e.target.value; route(true); };
     el.onclick = e => { const c = e.target.closest('.kcard'); if (c) go('#/tarea/' + c.dataset.id); };
     el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('.kcard')) go('#/tarea/' + e.target.dataset.id); };
@@ -523,7 +531,7 @@ const cantina = {
     const q = S.chatQ ||= { q: '', archived: false };
     const list = await get(`/api/conversations?q=${encodeURIComponent(q.q)}${q.archived ? '&archived=1' : ''}`);
     const left = `<div class="col-flex"><button class="btn y" id="newChat">+ Nueva consulta</button><input id="chatQ" placeholder="Buscar chats" value="${h(q.q)}">
-      <label class="row" style="font-size:17px"><input type="checkbox" id="chatArch" ${q.archived ? 'checked' : ''}> ver archivados</label>
+      <label class="row" style="font-size:13px"><input type="checkbox" id="chatArch" ${q.archived ? 'checked' : ''}> ver archivados</label>
       <div class="chat-list" data-scroll="clist">${list.map(c => `<div class="chat-item ${c.id === cid ? 'on' : ''}" data-c="${c.id}"><div class="row" style="gap:6px">${sprite('droid', agent(c.agent_id)?.color, 2)}<b class="ellipsis grow">${c.pinned ? '📌 ' : ''}${h(c.title)}</b>${c.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : c.status === 'en_curso' ? '<span class="chip st-en_curso">…</span>' : ''}</div><small>${h(agent(c.agent_id)?.name)} · ${c.n_runs} turnos · ${ago(c.updated_at)}</small></div>`).join('') || '<div class="empty">Sin consultas todavía</div>'}</div></div>`;
     let right;
     if (!cid) {
@@ -664,7 +672,7 @@ async function conveneDialog(pid) {
     <button class="btn sm" id="cvDig">Generar informe</button>
     <label class="l">Informe (editable antes de enviar)</label><textarea name="digest_md" id="cvMd" rows="8" placeholder="Pulsa «Generar informe»"></textarea>
     <h3>2 · Lentes: ¿qué tipo de mejora buscas?</h3>
-    <div class="grid3">${Object.entries(L).map(([k, [n, desc]]) => `<label class="row" style="font-size:17px;align-items:flex-start" title="${h(desc)}"><input type="checkbox" name="lens" value="${k}" ${['siguiente'].includes(k) ? 'checked' : ''}><span><b>${h(n)}</b><br><small>${h(desc).slice(0, 70)}</small></span></label>`).join('')}</div>
+    <div class="grid3">${Object.entries(L).map(([k, [n, desc]]) => `<label class="row" style="font-size:13px;align-items:flex-start" title="${h(desc)}"><input type="checkbox" name="lens" value="${k}" ${['siguiente'].includes(k) ? 'checked' : ''}><span><b>${h(n)}</b><br><small>${h(desc).slice(0, 70)}</small></span></label>`).join('')}</div>
     <label class="l">Pedido libre (lente «Libre»)</label><input name="custom" placeholder="p. ej. ¿cómo reducimos los tiempos de respuesta?">
     <h3>3 · ¿Quién opina?</h3>
     ${agentsOn().map((a, i) => `<div class="row" style="margin:4px 0"><label class="row" style="min-width:170px"><input type="checkbox" name="ag" value="${a.id}" ${i === 0 ? 'checked' : ''}>${sprite('droid', a.color, 2)} ${h(a.name)}</label>

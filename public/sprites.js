@@ -1,5 +1,5 @@
 // Sprites pixel-art generados como SVG desde matrices de caracteres
-const PAL = { K: '#0b0d1a', W: '#e8ecff', G: '#8b93b8', R: '#ff3b3b', Y: '#ffe81f', S: '#f2c29b', O: '#ff8c42', D: '#3a4270', H: '#4fc3f7', N: '#5a3a1a' };
+const PAL = { K: '#0b0d1a', W: '#e8ecff', G: '#8b93b8', R: '#ff3b3b', Y: '#ffe81f', S: '#f2c29b', O: '#ff8c42', D: '#3a4270', H: '#4fc3f7', N: '#5a3a1a', L: '#3ddc84' };
 
 const SHAPES = {
   // astromech (agentes). B = color del agente
@@ -59,6 +59,27 @@ const SHAPES = {
     'KKKKKKKKKKKKKKKK',
     '.KN..........NK.',
     '.KK..........KK.',
+  ],
+  // decoración del mapa
+  plant: [
+    '...LL.L.',
+    '.L.LLLL.',
+    'LLLLL.LL',
+    '.LLLLLL.',
+    '..LLLL..',
+    '..KNNK..',
+    '..KNNK..',
+    '...KK...',
+  ],
+  // consola del puente (B = luz de estado)
+  console: [
+    'KKKKKKKKKK',
+    'KDDDDDDDDK',
+    'KDBBDDBBDK',
+    'KDDDDDDDDK',
+    'KKKKKKKKKK',
+    '.KGGGGGGK.',
+    '.KKKKKKKK.',
   ],
 };
 

@@ -140,7 +140,7 @@ document.addEventListener('click', async e => {
 export const bytesTxt = n => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.ceil(n / 1e3) + ' KB';
 export function attachmentsHTML(list, canDelete) {
   if (!list?.length) return '<small class="muted">Sin adjuntos</small>';
-  return `<div class="row">${list.map(a => `<div class="chip" style="font-size:9px">${/^image\//.test(a.mime) ? `<img src="/api/attachments/${a.id}" alt="" style="width:40px;height:40px;object-fit:cover;image-rendering:auto">` : '📎'}
+  return `<div class="row">${list.map(a => `<div class="chip">${/^image\//.test(a.mime) ? `<img src="/api/attachments/${a.id}" alt="" style="width:40px;height:40px;object-fit:cover;image-rendering:auto">` : '📎'}
     <a href="/api/attachments/${a.id}" target="_blank" rel="noopener">${h(a.name)}</a> <small>${bytesTxt(a.size)}</small>${canDelete ? `<button class="btn sm r" data-delatt="${a.id}" title="Quitar">×</button>` : ''}</div>`).join('')}</div>`;
 }
 export function confirmBox(text, okLabel = 'Confirmar', danger) {
