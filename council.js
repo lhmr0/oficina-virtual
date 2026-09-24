@@ -99,7 +99,8 @@ async function convene({ scope = {}, digest_md, lenses: ls = ['siguiente'], cust
     agents: JSON.stringify(agents), moderator_id: moderator?.agent_id || null, digest_md: md, status: 'en_curso', created_by: userId, at: now() });
   log(userId, 'consejo', rid, 'convocar', { lentes: ls, agentes: agents.map(a => a.agent_id) });
   emit('council.updated', { id: rid });
-  const folder = project_id ? one('select path from project_folders where project_id=? order by is_default desc, id limit 1', project_id)?.path : null;
+  const frow = project_id ? one('select path, machine_id from project_folders where project_id=? order by is_default desc, id limit 1', project_id) : null;
+  const folder = frow?.path || null;
   const prompt = `Eres miembro del Consejo Jedi de una oficina de desarrollo. Analiza el informe de trabajo realizado y propone mejoras concretas.
 ${folder ? 'Puedes leer el código real en tu carpeta de trabajo (solo lectura).' : ''}
 ## Lentes pedidos
@@ -113,7 +114,7 @@ ${FORMAT}`;
       const results = await Promise.all(agents.map(async a => {
         const ag = one('select * from agents where id=?', a.agent_id);
         const cid = insert('conversations', { kind: 'consejo', project_id, title: `Consejo #${rid} · ${ag.name}`, agent_id: ag.id, model: a.model || ag.default_model,
-          effort: a.effort || ag.default_effort, mode: 'plan', folder_path: folder, created_by: userId, created_at: now(), updated_at: now() });
+          effort: a.effort || ag.default_effort, mode: 'plan', folder_path: folder, machine_id: frow?.machine_id ?? null, created_by: userId, created_at: now(), updated_at: now() });
         const res = await R.runTurn(cid, null, { userId, prompt });
         try { return validProposals(extractJSON(res.final)).map(p => ({ ...p, conv: cid, agentKey: ag.key })); }
         catch (e) { insert('messages', { conversation_id: cid, role: 'sistema', text: 'JSON inválido: ' + e.message, kind: 'nota', at: now() }); return []; }
@@ -185,9 +186,10 @@ async function decompose(taskId, userId) {
   const t = one('select * from tasks where id=?', taskId);
   const ag = one('select * from agents where id=?', t.agent_id || one('select default_agent_id from areas where id=?', t.area_id)?.default_agent_id);
   if (!ag) throw new Error('La tarea no tiene agente para descomponer');
-  const folder = t.folder_id ? one('select path from project_folders where id=?', t.folder_id)?.path : null;
+  const frow = t.folder_id ? one('select path, machine_id from project_folders where id=?', t.folder_id) : null;
+  const folder = frow?.path || null;
   const cid = insert('conversations', { kind: 'consejo', project_id: t.project_id, title: `Descomponer #${t.id}`, agent_id: ag.id, model: ag.default_model, effort: ag.default_effort,
-    mode: 'plan', folder_path: folder, created_by: userId, created_at: now(), updated_at: now() });
+    mode: 'plan', folder_path: folder, machine_id: frow?.machine_id ?? null, created_by: userId, created_at: now(), updated_at: now() });
   const areas = all('select name from areas where deleted_at is null').map(a => a.name).join(', ');
   const res = await R.runTurn(cid, null, { userId, prompt: `Descompón esta tarea en subtareas ejecutables por agentes de IA, en orden.\n# ${t.title}\n${t.prompt}\n\nÁreas disponibles: ${areas}.\nResponde SOLO JSON: {"subtareas":[{"title":"...","prompt":"instrucciones completas","area":"...","depends_on":[índices 0-based de subtareas previas]}]} (máximo 8).` });
   const obj = extractJSON(res.final);

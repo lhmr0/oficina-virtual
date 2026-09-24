@@ -1,23 +1,21 @@
 // Puente de Mando: estado de agentes, límites, trabajo, carpetas y sistema
-const { execFile } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { db, DATA, now, all, one, run, J, insert, update, bus, emit, notify, setting, setSetting } = require('./db');
 const R = require('./runner');
+const host = require('./host');
 
 const started = Date.now();
 const errors = [];            // errores recientes del servidor
 const pushError = e => { errors.unshift({ at: now(), msg: String(e?.stack || e).slice(0, 600) }); errors.length = Math.min(errors.length, 30); };
-const versions = {};          // agentId → {found, version, at}
+const versions = {};          // agentId → {found, version, at} (en la máquina por defecto)
 let lastScan = null;
 
-const sh = (exe, args, timeout = 20000) => new Promise(res => execFile(exe, args, { timeout, windowsHide: true, encoding: 'utf8' },
-  (err, out, errOut) => res({ err, out: (out || '').trim(), errOut: (errOut || '').trim() })));
-
 async function probe(ag) {
-  const r = await sh(ag.exe, [...J(ag.pre_args, []), '--version']);
-  const found = !(r.err && (r.err.code === 'ENOENT' || /not found|no se encuentra|Cannot find module/i.test(r.errOut)));
-  versions[ag.id] = { found, version: found ? (r.out || r.errOut).split(/\r?\n/)[0].slice(0, 80) : null, at: now() };
+  const mid = host.defaultMachine();
+  if (!host.online(mid)) return versions[ag.id] || { found: null, version: null };
+  try { versions[ag.id] = { ...(await host.call(mid, 'probe', { exe: ag.exe, pre_args: J(ag.pre_args, []) })), at: now() }; }
+  catch (e) { versions[ag.id] = { found: null, version: null, error: e.message, at: now() }; }
   return versions[ag.id];
 }
 
@@ -57,27 +55,25 @@ function agentCard(ag) {
 }
 
 async function processes() {
-  const pids = [...R.active.values()].map(a => a.proc.pid).filter(Boolean);
-  if (!pids.length || process.platform !== 'win32') return {};
-  const r = await sh('tasklist', ['/V', '/FO', 'CSV', '/NH']);
+  const byM = {};
+  for (const a of R.active.values()) if (a.runId) (byM[a.mid] ||= []).push(one('select pid from runs where id=?', a.runId)?.pid);
   const m = {};
-  for (const l of r.out.split(/\r?\n/)) {
-    const c = l.match(/"([^"]*)"/g)?.map(x => x.slice(1, -1)); if (!c) continue;
-    if (pids.includes(+c[1])) m[c[1]] = { mem: c[4], cpu_time: c[7] };
-  }
+  for (const [mid, pids] of Object.entries(byM)) try { Object.assign(m, await host.call(+mid, 'processes', { pids: pids.filter(Boolean) })); } catch {}
   return m;
 }
 
-function folders() {
-  return all(`select f.*, p.name project from project_folders f join projects p on p.id=f.project_id where p.deleted_at is null`).map(f => {
-    const exists = fs.existsSync(f.path);
-    const g = exists && R.isGit(f.path);
-    let free = null; try { const s = fs.statfsSync(f.path); free = s.bavail * s.bsize; } catch {}
-    const wts = g ? (R.tryGit(f.path, 'worktree', 'list', '--porcelain') || '').split(/\r?\n/).filter(l => l.startsWith('worktree ') && l.includes('.oficina-worktrees'))
-      .map(l => { const p = path.normalize(l.slice(9)); const t = one('select id, status from tasks where worktree_path=? and deleted_at is null', p); return { path: p, task_id: t?.id ?? null, orphan: !t || t.status === 'completada' }; }) : [];
-    return { id: f.id, project: f.project, label: f.label, path: f.path, exists, is_git: g, branch: g ? R.tryGit(f.path, 'rev-parse', '--abbrev-ref', 'HEAD') : null,
-      dirty: g ? (R.tryGit(f.path, 'status', '--porcelain') || '').split(/\r?\n/).filter(Boolean).length : null, worktrees: wts, free_bytes: free };
-  });
+async function folders() {
+  const rows = all(`select f.*, p.name project from project_folders f join projects p on p.id=f.project_id where p.deleted_at is null`);
+  return Promise.all(rows.map(async f => {
+    const mid = f.machine_id || host.defaultMachine();
+    const base = { id: f.id, project: f.project, label: f.label, path: f.path, machine_id: mid, machine: host.machine(mid)?.name, online: host.online(mid) };
+    if (!base.online) return { ...base, exists: null, worktrees: [] };
+    try {
+      const i = await host.call(mid, 'folderInfo', { path: f.path });
+      const worktrees = i.worktrees.map(p => { const t = one('select id, status from tasks where worktree_path=? and deleted_at is null', p); return { path: p, task_id: t?.id ?? null, orphan: !t || t.status === 'completada' }; });
+      return { ...base, ...i, worktrees };
+    } catch (e) { return { ...base, exists: null, error: e.message, worktrees: [] }; }
+  }));
 }
 
 const dirSize = d => { let n = 0; try { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); n += e.isDirectory() ? dirSize(p) : fs.statSync(p).size; } } catch {} return n; };
@@ -85,11 +81,11 @@ const dirSize = d => { let n = 0; try { for (const e of fs.readdirSync(d, { with
 async function status() {
   const agents = all('select * from agents order by id').map(agentCard);
   const procs = await processes();
-  const act = [...R.active.values()].map(a => {
+  const act = [...R.active.values()].filter(a => a.runId).map(a => {
     const r = one('select * from runs where id=?', a.runId);
     const c = one('select * from conversations where id=?', a.convId);
-    return { run_id: a.runId, conv_id: a.convId, task_id: r.task_id, title: c.title, agent_id: a.agentId, model: r.model, effort: r.effort, pid: a.proc.pid,
-      started_at: r.started_at, ...(procs[a.proc.pid] || {}) };
+    return { run_id: a.runId, conv_id: a.convId, task_id: r.task_id, title: c.title, agent_id: a.agentId, model: r.model, effort: r.effort, pid: r.pid,
+      machine: host.machine(a.mid)?.name, started_at: r.started_at, ...(procs[r.pid] || {}) };
   });
   const cnt = s => one(`select count(*) n from tasks where status=? and deleted_at is null`, s).n;
   const backups = fs.readdirSync(path.join(DATA, 'backups')).sort();
@@ -101,7 +97,8 @@ async function status() {
       waiting_chats: all(`select id, title from conversations where status='esperando' and kind='consulta_rapida' and deleted_at is null`),
       permissions: [...R.pendingPerms.entries()].map(([id, p]) => ({ request_id: id, conv_id: p.convId, task_id: p.taskId })),
       blocked: cnt('bloqueada'), failed_24h: one(`select count(*) n from tasks where status='fallida' and updated_at>=? and deleted_at is null`, new Date(Date.now() - 86400e3).toISOString()).n },
-    folders: folders(),
+    folders: await folders(),
+    machines: host.machineList(),
     system: { uptime_s: Math.round((Date.now() - started) / 1000), node: process.version, pid: process.pid,
       db_bytes: fs.statSync(path.join(DATA, 'oficina.db')).size, runs_bytes: dirSize(path.join(DATA, 'runs')), sandbox_bytes: dirSize(path.join(DATA, 'sandbox')),
       last_backup: backups.at(-1) || null, backups: backups.length, sse_clients: bus.listenerCount('ev'), errors: errors.slice(0, 10) },

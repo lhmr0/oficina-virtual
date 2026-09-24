@@ -5,7 +5,8 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
-const { db, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, toast, setting, setSetting } = require('./db');
+const { db, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting } = require('./db');
+const host = require('./host');
 const R = require('./runner');
 const S = require('./status');
 const C = require('./council');
@@ -26,18 +27,57 @@ const publicUser = u => u && { ...u, notif_prefs: J(u.notif_prefs, {}) };
 class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
 const need = (cond, msg, code = 400) => { if (!cond) throw new HttpError(code, msg); };
 
+// modo de login: 'password' (local) o 'google' (VPS: solo correos permitidos vía Google SSO)
+const AUTH = process.env.OFICINA_AUTH || 'password';
+const SECURE = host.PUBLIC_URL.startsWith('https://');
+const ALLOWED = (process.env.OFICINA_ALLOWED_EMAILS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const oauthStates = new Map(); // state → {verifier, exp}
+const b64u = b => b.toString('base64url');
+
 // ---------- router ----------
 const routes = [];
-const r = (method, pattern, role, fn) => routes.push({ method, role, fn, re: new RegExp('^' + pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$') });
+const r = (method, pattern, role, fn, opt = {}) => routes.push({ method, role, fn, ...opt, re: new RegExp('^' + pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$') });
 
 function newSession(res, userId) {
   const token = crypto.randomBytes(32).toString('hex');
   run('delete from sessions where expires_at<?', Date.now());
   insert('sessions', { token, user_id: userId, expires_at: Date.now() + 12 * 3600e3 });
-  res.setHeader('Set-Cookie', `ov_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${12 * 3600}`);
+  res.setHeader('Set-Cookie', `ov_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${12 * 3600}${SECURE ? '; Secure' : ''}`);
 }
-r('GET', '/api/setup', null, () => ({ needed: !one('select 1 from users where deleted_at is null limit 1') }));
+r('GET', '/api/setup', null, () => ({ needed: AUTH === 'password' && !one('select 1 from users where deleted_at is null limit 1'), mode: AUTH }));
+r('GET', '/api/auth/google', null, ({ res }) => {
+  need(AUTH === 'google', 'Login con Google deshabilitado', 404);
+  const state = b64u(crypto.randomBytes(24)), verifier = b64u(crypto.randomBytes(32));
+  for (const [k, v] of oauthStates) if (v.exp < Date.now()) oauthStates.delete(k);
+  oauthStates.set(state, { verifier, exp: Date.now() + 10 * 60000 });
+  const q = new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID, redirect_uri: host.PUBLIC_URL + '/api/auth/google/callback', response_type: 'code',
+    scope: 'openid email profile', state, code_challenge: b64u(crypto.createHash('sha256').update(verifier).digest()), code_challenge_method: 'S256', prompt: 'select_account' });
+  res.writeHead(302, { Location: 'https://accounts.google.com/o/oauth2/v2/auth?' + q });
+  res.end();
+  return RAW;
+});
+r('GET', '/api/auth/google/callback', null, async ({ query, res }) => {
+  const back = msg => { res.writeHead(302, { Location: '/#/login?error=' + encodeURIComponent(msg) }); res.end(); return RAW; };
+  const st = oauthStates.get(query.state);
+  oauthStates.delete(query.state);
+  if (AUTH !== 'google' || !st || st.exp < Date.now() || !query.code) return back('Inicio de sesión inválido o expirado');
+  const tok = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ code: query.code, client_id: process.env.GOOGLE_CLIENT_ID, client_secret: process.env.GOOGLE_CLIENT_SECRET, redirect_uri: host.PUBLIC_URL + '/api/auth/google/callback', grant_type: 'authorization_code', code_verifier: st.verifier }) }).then(r => r.json());
+  if (!tok.access_token) return back('Google rechazó el inicio de sesión');
+  const info = await fetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { Authorization: 'Bearer ' + tok.access_token } }).then(r => r.json());
+  const email = String(info.email || '').toLowerCase();
+  if (!info.email_verified || !ALLOWED.includes(email)) { log(null, 'usuario', null, 'login_rechazado', { email }); return back(`La cuenta ${email || '?'} no tiene acceso a esta oficina`); }
+  let u = one('select * from users where lower(email)=? or lower(username)=?', email, email);
+  if (!u) { const id = insert('users', { username: email, email, name: info.name || email, pass_hash: '-', role: 'admin', created_at: now() }); u = one('select * from users where id=?', id); }
+  else if (u.deleted_at) return back('Usuario desactivado');
+  else if (!u.email) update('users', u.id, { email });
+  newSession(res, u.id);
+  log(u.id, 'usuario', u.id, 'login', { via: 'google' });
+  res.writeHead(302, { Location: '/#/estacion' }); res.end();
+  return RAW;
+});
 r('POST', '/api/setup', null, ({ body, res }) => {
+  need(AUTH === 'password', 'Esta oficina usa inicio de sesión con Google', 403);
   need(!one('select 1 from users limit 1'), 'Ya existe un comandante', 403);
   need(body.username && body.password?.length >= 6, 'Usuario y contraseña (mín. 6) requeridos');
   const id = insert('users', { username: body.username.trim(), name: body.name || body.username, pass_hash: hashPw(body.password), role: 'admin', created_at: now() });
@@ -46,6 +86,7 @@ r('POST', '/api/setup', null, ({ body, res }) => {
   return { ok: true };
 });
 r('POST', '/api/login', null, ({ body, res }) => {
+  need(AUTH === 'password', 'Esta oficina usa inicio de sesión con Google', 403);
   const u = String(body.username || '').trim();
   const f = fails.get(u);
   need(!(f && f.until > Date.now()), `Demasiados intentos. Espera ${Math.ceil(((f?.until || 0) - Date.now()) / 60000)} min`, 429);
@@ -105,16 +146,22 @@ r('GET', '/api/bootstrap', 'observador', ({ user }) => ({
   templates: all('select * from templates order by area_id, id'),
   lenses: C.lenses(),
   queue_paused: R.isPaused(),
+  machines: host.machineList(),
+  auth_mode: AUTH,
   settings: { council_auto_n: setting('council_auto_n', 0), council_auto_agents: setting('council_auto_agents', []), divert_at_80: setting('divert_at_80', false), scan_min: setting('scan_min', 5), checkpoint_exclude: setting('checkpoint_exclude', R.DEFAULT_EXCLUDE) },
 }));
 
 // ---------- proyectos ----------
-function addFolder(projectId, f, userId) {
-  const err = R.validFolder(f.path); need(!err, `${f.path}: ${err}`);
-  const p = R.canon(f.path);
+async function checkFolder(f) {
+  const mid = +f.machine_id || host.defaultMachine();
+  try { return { mid, ...(await host.call(mid, 'checkFolder', { path: f.path })) }; } catch (e) { throw new HttpError(400, `${f.path}: ${e.message}`); }
+}
+async function addFolder(projectId, f, userId, chk) {
+  chk ||= await checkFolder(f);
+  const p = chk.path;
   const first = !one('select 1 from project_folders where project_id=?', projectId);
   if (f.is_default) run('update project_folders set is_default=0 where project_id=?', projectId);
-  const id = insert('project_folders', { project_id: projectId, label: f.label || path.basename(p), path: p, is_git: R.isGit(p) ? 1 : 0,
+  const id = insert('project_folders', { project_id: projectId, label: f.label || p.split(/[\\/]/).pop(), path: p, is_git: chk.is_git ? 1 : 0, machine_id: chk.mid,
     use_worktrees: f.use_worktrees === false || f.use_worktrees === 0 ? 0 : 1, is_default: f.is_default || first ? 1 : 0 });
   update('projects', projectId, { kind: 'con_carpetas', updated_at: now() });
   log(userId, 'proyecto', projectId, 'agregar_carpeta', { path: p });
@@ -122,12 +169,13 @@ function addFolder(projectId, f, userId) {
 }
 const PSTATUS = ['planificacion', 'activo', 'pausado', 'completado', 'archivado'];
 r('GET', '/api/projects', 'observador', () => projectsList());
-r('POST', '/api/projects', 'operador', ({ body, user }) => {
+r('POST', '/api/projects', 'operador', async ({ body, user }) => {
   need(body.name?.trim(), 'Nombre requerido');
-  for (const f of body.folders || []) { const e = R.validFolder(f.path); need(!e, `${f.path}: ${e}`); }
+  const checked = [];
+  for (const f of body.folders || []) checked.push(await checkFolder(f));
   const id = insert('projects', { name: body.name.trim(), code: body.code || null, kind: 'solo_registro', status: PSTATUS.includes(body.status) ? body.status : 'planificacion',
     description: body.description || '', briefing: body.briefing || '', color: body.color || '#ffe81f', created_by: user.id, created_at: now(), updated_at: now() });
-  for (const f of body.folders || []) addFolder(id, f, user.id);
+  for (const [i, f] of (body.folders || []).entries()) await addFolder(id, f, user.id, checked[i]);
   log(user.id, 'proyecto', id, 'crear', { nombre: body.name });
   emit('project.updated', { id });
   return { id };
@@ -146,7 +194,7 @@ r('PUT', '/api/projects/:id', 'operador', ({ params, body, user }) => {
 r('DELETE', '/api/projects/:id', 'operador', ({ params, user }) => {
   update('projects', +params.id, { deleted_at: now() }); log(user.id, 'proyecto', +params.id, 'eliminar'); emit('project.updated', { id: +params.id }); return { ok: true };
 });
-r('POST', '/api/projects/:id/folders', 'operador', ({ params, body, user }) => { const id = addFolder(+params.id, body, user.id); emit('project.updated', { id: +params.id }); return { id }; });
+r('POST', '/api/projects/:id/folders', 'operador', async ({ params, body, user }) => { const id = await addFolder(+params.id, body, user.id); emit('project.updated', { id: +params.id }); return { id }; });
 r('PUT', '/api/folders/:id', 'operador', ({ params, body, user }) => {
   const f = one('select * from project_folders where id=?', +params.id); need(f, 'No existe', 404);
   if (body.is_default) run('update project_folders set is_default=0 where project_id=?', f.project_id);
@@ -162,10 +210,18 @@ r('DELETE', '/api/folders/:id', 'operador', ({ params, user }) => {
   log(user.id, 'proyecto', f.project_id, 'quitar_carpeta', { path: f.path }); emit('project.updated', { id: f.project_id });
   return { ok: true };
 });
-r('POST', '/api/browse', 'operador', () => new Promise(res => {
-  const ps = `Add-Type -AssemblyName System.Windows.Forms; $o = New-Object System.Windows.Forms.Form -Property @{TopMost=$true}; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Carpeta del proyecto'; if ($f.ShowDialog($o) -eq 'OK') { [Console]::Out.Write($f.SelectedPath) }`;
-  execFile('powershell', ['-STA', '-NoProfile', '-Command', ps], { windowsHide: false, encoding: 'utf8', timeout: 300000 }, (e, out) => res({ path: (out || '').trim() || null }));
-}));
+// ---------- máquinas (agentes de campo) ----------
+r('GET', '/api/machines', 'observador', () => host.machineList());
+r('POST', '/api/machines', 'admin', ({ body, user }) => { need(body.name?.trim(), 'Nombre requerido'); return host.createMachine(body.name.trim(), user.id); });
+r('PUT', '/api/machines/:id', 'admin', ({ params, body, user }) => {
+  const m = host.machine(+params.id); need(m, 'No existe', 404);
+  if (body.name) update('machines', m.id, { name: body.name });
+  if (body.default) setSetting('default_machine', m.id);
+  log(user.id, 'maquina', m.id, 'editar', body); emit('machine.status', { id: m.id });
+  return { ok: true };
+});
+r('DELETE', '/api/machines/:id', 'admin', ({ params, user }) => { update('machines', +params.id, { deleted_at: now(), token_hash: null }); log(user.id, 'maquina', +params.id, 'eliminar'); emit('machine.status', { id: +params.id }); return { ok: true }; });
+r('GET', '/api/machines/:id/ls', 'operador', ({ params, query }) => host.call(+params.id || host.defaultMachine(), 'listDir', { path: query.path || null }));
 
 // ---------- tareas ----------
 const taskRow = t => t && { ...t, depends_on: J(t.depends_on, []) };
@@ -177,7 +233,8 @@ r('GET', '/api/tasks', 'observador', ({ query }) => {
   return all(`select t.*, (select count(*) from messages m join conversations c on c.id=m.conversation_id where c.task_id=t.id and m.kind='consulta') consultas
     from tasks t where ${w.join(' and ')} order by t.kanban_order`, ...p).map(taskRow);
 });
-r('GET', '/api/tasks/:id', 'observador', ({ params }) => {
+const attachmentsOf = (taskId, convIds) => all(`select id, task_id, conversation_id, name, mime, size, uploaded_by, at from attachments where ${taskId ? 'task_id=? or ' : ''}conversation_id in (${convIds.length ? convIds.join(',') : -1}) order by id`, ...(taskId ? [taskId] : []));
+r('GET', '/api/tasks/:id', 'observador', async ({ params }) => {
   const t = taskRow(one('select * from tasks where id=?', +params.id)); need(t, 'No existe', 404);
   const convs = all('select * from conversations where task_id=? order by id', t.id);
   const ids = convs.map(c => c.id).concat(t.conversation_id || []);
@@ -191,28 +248,26 @@ r('GET', '/api/tasks/:id', 'observador', ({ params }) => {
     dependents: all(`select id, title, status from tasks where depends_on like ? and deleted_at is null`, `%${t.id}%`).filter(x => J(one('select depends_on from tasks where id=?', x.id).depends_on, []).includes(t.id)),
     permissions: [...R.pendingPerms.entries()].filter(([, p]) => p.taskId === t.id).map(([id, p]) => ({ request_id: id, input: p.input })),
     running: [...R.active.values()].some(a => ids.includes(a.convId)), queued: R.queue.some(q => ids.includes(q.convId)),
-    files: t.folder_id ? [] : listFiles(path.join(DATA, 'sandbox', 'task-' + t.id)),
+    files: t.folder_id || !host.online(R.machineOfTask(t)) ? [] : await host.call(R.machineOfTask(t), 'listFiles', { sandbox: 'task-' + t.id }).catch(() => []),
+    attachments: attachmentsOf(t.id, [...new Set(ids)]),
+    machine: host.machine(R.machineOfTask(t))?.name || null, machine_online: host.online(R.machineOfTask(t)),
     proposal: t.proposal_id ? one('select * from proposals where id=?', t.proposal_id) : null,
   };
 });
-function listFiles(dir, base = dir) {
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? listFiles(path.join(dir, e.name), base) : [{ name: path.relative(base, path.join(dir, e.name)).replace(/\\/g, '/'), size: fs.statSync(path.join(dir, e.name)).size }]);
-}
-r('GET', '/api/tasks/:id/file', 'observador', ({ params, query, res }) => {
-  const base = path.join(DATA, 'sandbox', 'task-' + +params.id);
-  const f = path.resolve(base, String(query.name || ''));
-  need(f.startsWith(base + path.sep) && fs.existsSync(f), 'Archivo no encontrado', 404);
-  res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${path.basename(f).replace(/"/g, '')}"` });
-  fs.createReadStream(f).pipe(res);
+r('GET', '/api/tasks/:id/file', 'observador', async ({ params, query, res }) => {
+  const t = one('select * from tasks where id=?', +params.id); need(t, 'No existe', 404);
+  const b64 = await host.call(R.machineOfTask(t), 'readFileB64', { sandbox: 'task-' + t.id, name: String(query.name || '') });
+  res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${String(query.name).split('/').pop().replace(/"/g, '')}"` });
+  res.end(Buffer.from(b64, 'base64'));
   return RAW;
 });
-r('GET', '/api/tasks/:id/diff', 'observador', ({ params }) => {
+r('GET', '/api/tasks/:id/diff', 'observador', async ({ params }) => {
   const t = one('select * from tasks where id=?', +params.id); need(t, 'No existe', 404);
-  let cwd = null; try { cwd = t.folder_id ? R.workdir(t).cwd : null; } catch {}
-  if (!cwd || !R.isGit(cwd)) return { diff: '', log: '' };
-  const range = t.worktree_path ? `${t.base_branch}...HEAD` : null;
-  return { diff: (range ? R.tryGit(cwd, 'diff', range) : R.tryGit(cwd, 'diff')) || '', log: range ? R.tryGit(cwd, 'log', '--oneline', `${t.base_branch}..HEAD`) || '' : '', branch: t.branch };
+  const mid = R.machineOfTask(t);
+  const cwd = t.worktree_path || R.folderOf(t)?.path;
+  if (!cwd) return { diff: '', log: '' };
+  if (!host.online(mid)) return { diff: '', log: '', offline: true };
+  return { ...(await host.call(mid, 'diff', { cwd, base: t.worktree_path ? t.base_branch : null })), branch: t.branch };
 });
 r('POST', '/api/tasks', 'operador', ({ body, user }) => {
   need(body.title?.trim() && body.project_id, 'Título y proyecto requeridos');
@@ -273,8 +328,8 @@ r('POST', '/api/tasks/:id/abort', 'operador', ({ params, user }) => {
   log(user.id, 'tarea', t.id, 'abortar');
   return { ok: !!ok };
 });
-r('POST', '/api/tasks/:id/approve', 'operador', ({ params, body, user }) => {
-  const merge = R.approveTask(+params.id, user.id, { merge: !!body.merge });
+r('POST', '/api/tasks/:id/approve', 'operador', async ({ params, body, user }) => {
+  const merge = await R.approveTask(+params.id, user.id, { merge: !!body.merge });
   const second = body.second_opinion ? C.secondOpinion(+params.id, user.id) : null;
   if (second && body.run_second) bg(R.runTask(second, user.id), second);
   return { ok: true, merge, second };
@@ -326,13 +381,14 @@ r('GET', '/api/conversations', 'observador', ({ query }) => {
   return all(`select c.*, (select count(*) from messages where conversation_id=c.id) n_msgs, (select count(*) from runs where conversation_id=c.id) n_runs,
     (select coalesce(sum(tokens_in+tokens_out),0) from runs where conversation_id=c.id) tokens from conversations c where ${w.join(' and ')} order by c.pinned desc, c.updated_at desc limit 300`, ...p);
 });
-r('POST', '/api/conversations', 'operador', ({ body, user }) => {
+r('POST', '/api/conversations', 'operador', async ({ body, user }) => {
   need(body.agent_id && body.text?.trim(), 'Agente y mensaje requeridos');
-  if (body.folder_path) { const e = R.validFolder(body.folder_path); need(!e, e); }
+  const chk = body.folder_path ? await checkFolder({ path: body.folder_path, machine_id: body.machine_id }) : null;
   const ag = one('select * from agents where id=?', +body.agent_id);
   const id = insert('conversations', { kind: 'consulta_rapida', project_id: body.project_id || null, title: body.title || body.text.trim().slice(0, 60), agent_id: ag.id,
     model: body.model || ag.default_model, effort: body.effort || ag.default_effort, mode: body.mode === 'editar' ? 'editar' : 'plan',
-    folder_path: body.folder_path ? R.canon(body.folder_path) : null, created_by: user.id, created_at: now(), updated_at: now() });
+    folder_path: chk?.path || null, machine_id: chk?.mid || (+body.machine_id || null), created_by: user.id, created_at: now(), updated_at: now() });
+  for (const aid of body.attachment_ids || []) run('update attachments set conversation_id=? where id=? and conversation_id is null and task_id is null', id, +aid);
   log(user.id, 'chat', id, 'crear', { agente: ag.key });
   R.runTurn(id, body.text, { userId: user.id, prompt: chatPrompt(one('select * from conversations where id=?', id), body.text) }).catch(() => {});
   return { id };
@@ -341,7 +397,8 @@ r('GET', '/api/conversations/:id', 'observador', ({ params }) => {
   const c = one('select * from conversations where id=?', +params.id); need(c, 'No existe', 404);
   return { conversation: c, messages: all('select * from messages where conversation_id=? order by id', c.id), runs: all('select * from runs where conversation_id=? order by id desc', c.id),
     permissions: [...R.pendingPerms.entries()].filter(([, p]) => p.convId === c.id).map(([id, p]) => ({ request_id: id, input: p.input })),
-    running: [...R.active.values()].some(a => a.convId === c.id) || R.queue.some(q => q.convId === c.id) };
+    running: [...R.active.values()].some(a => a.convId === c.id) || R.queue.some(q => q.convId === c.id),
+    attachments: attachmentsOf(null, [c.id]), machine: host.machine(R.machineOfConv(c))?.name || null, machine_online: host.online(R.machineOfConv(c)) };
 });
 r('POST', '/api/conversations/:id/reply', 'operador', ({ params, body, user }) => {
   need(body.text?.trim(), 'Escribe un mensaje');
@@ -394,7 +451,39 @@ r('GET', '/api/conversations/:id/md', 'observador', ({ params, res }) => {
   res.end(`# ${c.title}\n\nAgente: ${ag} · ${c.model} · ${c.effort} · ${c.created_at}\n\n${transcript(c.id)}\n`);
   return RAW;
 });
-r('POST', '/api/permissions/:rid', 'operador', ({ params, body, user }) => { R.answerPermission(params.rid, !!body.allow, user.id); return { ok: true }; });
+r('POST', '/api/permissions/:rid', 'operador', async ({ params, body, user }) => { await R.answerPermission(params.rid, !!body.allow, user.id); return { ok: true }; });
+
+// ---------- adjuntos (se entregan en .oficina/adjuntos de la carpeta de trabajo antes del turno) ----------
+const INLINE = /^(image\/(png|jpeg|gif|webp)|application\/pdf)$/;
+r('POST', '/api/attachments', 'operador', ({ req, query, body, user }) => {
+  need(body.length, 'Archivo vacío');
+  const name = String(query.name || 'archivo').replace(/[\\/<>:"|?*\x00-\x1f]/g, '_').slice(0, 120);
+  const task_id = +query.task_id || null, conversation_id = +query.conversation_id || null;
+  if (task_id) need(one('select 1 from tasks where id=?', task_id), 'Tarea inexistente');
+  if (conversation_id) need(one('select 1 from conversations where id=?', conversation_id), 'Conversación inexistente');
+  const stored = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${name}`;
+  fs.writeFileSync(path.join(DATA, 'attachments', stored), body);
+  const id = insert('attachments', { task_id, conversation_id, name, mime: String(req.headers['content-type'] || 'application/octet-stream').slice(0, 100), size: body.length, stored, uploaded_by: user.id, at: now() });
+  log(user.id, task_id ? 'tarea' : 'chat', task_id || conversation_id, 'adjuntar', { name, size: body.length });
+  if (task_id) emit('task.updated', { id: task_id, project_id: one('select project_id from tasks where id=?', task_id).project_id });
+  if (conversation_id) emit('conv.updated', { id: conversation_id });
+  return { id, name, size: body.length };
+}, { raw: true });
+r('GET', '/api/attachments/:id', 'observador', ({ params, res }) => {
+  const a = one('select * from attachments where id=?', +params.id); need(a, 'No existe', 404);
+  const inline = INLINE.test(a.mime);
+  res.writeHead(200, { 'Content-Type': inline ? a.mime : 'application/octet-stream', 'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename="${a.name.replace(/"/g, '')}"`, 'Content-Security-Policy': 'sandbox', 'Cache-Control': 'private, max-age=3600' });
+  fs.createReadStream(path.join(DATA, 'attachments', a.stored)).pipe(res);
+  return RAW;
+});
+r('DELETE', '/api/attachments/:id', 'operador', ({ params, user }) => {
+  const a = one('select * from attachments where id=?', +params.id); need(a, 'No existe', 404);
+  run('delete from attachments where id=?', a.id);
+  fs.rmSync(path.join(DATA, 'attachments', a.stored), { force: true });
+  log(user.id, 'adjunto', a.id, 'eliminar', { name: a.name });
+  if (a.task_id) emit('task.updated', { id: a.task_id }); if (a.conversation_id) emit('conv.updated', { id: a.conversation_id });
+  return { ok: true };
+});
 r('GET', '/api/runs/:id/log', 'observador', ({ params, query }) => {
   const x = one('select * from runs where id=?', +params.id); need(x, 'No existe', 404);
   const txt = x.log_path && fs.existsSync(x.log_path) ? fs.readFileSync(x.log_path, 'utf8') : '';
@@ -472,11 +561,10 @@ r('GET', '/api/status', 'observador', () => S.status());
 r('POST', '/api/status/scan', 'operador', async () => { await S.scan(); return S.status(); });
 r('GET', '/api/status/history', 'observador', ({ query }) => S.history(+query.hours || 24));
 r('POST', '/api/agents/:id/test', 'operador', ({ params, user }) => S.testAgent(+params.id, user.id));
-r('POST', '/api/notify/test', 'operador', ({ query }) => { if (query.toast) toast('Prueba de notificación', 'La Fuerza está con la oficina.', '#/puente'); else notify('sistema', 'Prueba de notificación', 'La Fuerza está con la oficina.', '#/puente'); return { ok: true }; });
-r('POST', '/api/worktrees/clean', 'operador', ({ body, user }) => {
+r('POST', '/api/notify/test', 'operador', ({ query }) => { if (query.toast) bus.emit('toast', { title: 'Prueba de notificación', body: 'La Fuerza está con la oficina.', link: '#/puente' }); else notify('sistema', 'Prueba de notificación', 'La Fuerza está con la oficina.', '#/puente'); return { ok: true }; });
+r('POST', '/api/worktrees/clean', 'operador', async ({ body, user }) => {
   const f = one('select * from project_folders where id=?', +body.folder_id); need(f, 'Carpeta inválida');
-  need(path.resolve(body.path).startsWith(path.join(f.path, '.oficina-worktrees')), 'Ruta inválida');
-  R.tryGit(f.path, 'worktree', 'remove', '--force', body.path); R.tryGit(f.path, 'worktree', 'prune');
+  await host.call(f.machine_id || host.defaultMachine(), 'removeWorktree', { repo: f.path, path: body.path });
   log(user.id, 'git', f.id, 'limpiar_worktree', { path: body.path });
   return { ok: true };
 });
@@ -504,13 +592,7 @@ r('PUT', '/api/agents/:id', 'admin', ({ params, body, user }) => {
 r('POST', '/api/agents/:id/reactivate', 'operador', ({ params, user }) => { update('agents', +params.id, { status: 'disponible', quota_reset_at: null, last_error: null }); log(user.id, 'agente', +params.id, 'reactivar'); emit('agent.status', { id: +params.id }); R.pump(); return { ok: true }; });
 r('POST', '/api/agents/:id/detect-models', 'admin', async ({ params }) => {
   const a = one('select * from agents where id=?', +params.id);
-  const sh = args => new Promise(res => execFile(a.exe, [...J(a.pre_args, []), ...args], { timeout: 60000, windowsHide: true, encoding: 'utf8' }, (e, o) => res(o || '')));
-  let models = [];
-  if (a.adapter === 'codex') { try { const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.codex', 'models_cache.json'), 'utf8')); models = (j.models || j.data || []).filter(m => m.visibility !== 'hide').map(m => m.slug || m.id); } catch {} }
-  else if (a.adapter === 'agy') models = (await sh(['models'])).split(/\r?\n/).map(l => l.split('\t')[0].trim()).filter(l => /^[\w.-]+$/.test(l));
-  else if (a.adapter === 'commandcode') models = (await sh(['--list-models'])).split(/\r?\n/).map(l => l.trim().split(/\s+/)[0]).filter(x => /^[\w.-]+\/[\w.-]+$/.test(x));
-  else if (a.adapter === 'claude') models = ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'];
-  return { models };
+  return { models: await host.call(host.defaultMachine(), 'detectModels', { adapter: a.adapter, exe: a.exe, pre_args: J(a.pre_args, []) }) };
 });
 r('POST', '/api/areas', 'admin', ({ body, user }) => { need(body.name, 'Nombre requerido'); const id = insert('areas', { name: body.name, alias: body.alias || body.name, icon: body.icon || 'radar', color: body.color || '#ffe81f', default_agent_id: body.default_agent_id || null, fallback_chain: JSON.stringify(body.fallback_chain || []), auto_fallback: +!!body.auto_fallback }); log(user.id, 'config', id, 'crear_area'); return { id }; });
 r('PUT', '/api/areas/:id', 'admin', ({ params, body, user }) => {
@@ -522,7 +604,7 @@ r('DELETE', '/api/areas/:id', 'admin', ({ params, user }) => { update('areas', +
 r('POST', '/api/templates', 'operador', ({ body, user }) => { const id = insert('templates', { area_id: body.area_id || null, title: body.title, prompt: body.prompt }); log(user.id, 'config', id, 'crear_plantilla'); return { id }; });
 r('PUT', '/api/templates/:id', 'operador', ({ params, body }) => { update('templates', +params.id, { area_id: body.area_id || null, title: body.title, prompt: body.prompt }); return { ok: true }; });
 r('DELETE', '/api/templates/:id', 'operador', ({ params }) => { run('delete from templates where id=?', +params.id); return { ok: true }; });
-r('GET', '/api/users', 'admin', () => all('select id, username, name, role, avatar, created_at, deleted_at from users'));
+r('GET', '/api/users', 'admin', () => all('select id, username, email, name, role, avatar, created_at, deleted_at from users'));
 r('POST', '/api/users', 'admin', ({ body, user }) => {
   need(body.username && body.password?.length >= 6, 'Usuario y contraseña (mín. 6) requeridos'); need(LEVEL[body.role] != null, 'Rol inválido');
   need(!one('select 1 from users where username=?', body.username), 'El usuario ya existe');
@@ -544,7 +626,7 @@ r('POST', '/api/limits', 'admin', ({ body, user }) => {
 });
 r('DELETE', '/api/limits/:id', 'admin', ({ params }) => { run(`delete from agent_limits where id=? and source='manual'`, +params.id); return { ok: true }; });
 r('PUT', '/api/settings', 'admin', ({ body, user }) => {
-  for (const k of ['council_auto_n', 'council_auto_agents', 'divert_at_80', 'lenses', 'scan_min', 'checkpoint_exclude']) if (body[k] !== undefined) setSetting(k, body[k]);
+  for (const k of ['council_auto_n', 'council_auto_agents', 'divert_at_80', 'lenses', 'scan_min', 'checkpoint_exclude', 'default_machine']) if (body[k] !== undefined) setSetting(k, body[k]);
   log(user.id, 'config', null, 'ajustes', Object.keys(body)); return { ok: true };
 });
 
@@ -571,8 +653,32 @@ r('POST', '/api/proposals/:id/detail', 'operador', ({ params, user }) => {
 const RAW = Symbol('raw');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
 const PUB = path.join(__dirname, 'public');
-function readBody(req) {
-  return new Promise((res, rej) => { let s = ''; req.on('data', d => { s += d; if (s.length > 5e6) { rej(new HttpError(413, 'Cuerpo demasiado grande')); req.destroy(); } }); req.on('end', () => { try { res(s ? JSON.parse(s) : {}); } catch { rej(new HttpError(400, 'JSON inválido')); } }); });
+function readBody(req, raw) {
+  const max = raw ? 25e6 : 5e6;
+  return new Promise((res, rej) => {
+    const chunks = []; let n = 0;
+    req.on('data', d => { n += d.length; if (n > max) { rej(new HttpError(413, raw ? 'Archivo demasiado grande (máx. 25 MB)' : 'Cuerpo demasiado grande')); req.destroy(); } else chunks.push(d); });
+    req.on('end', () => { const b = Buffer.concat(chunks); if (raw) return res(b); try { res(b.length ? JSON.parse(b.toString('utf8')) : {}); } catch { rej(new HttpError(400, 'JSON inválido')); } });
+  });
+}
+const SEC_HEADERS = {
+  'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'same-origin',
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  ...(SECURE ? { 'Strict-Transport-Security': 'max-age=63072000; includeSubDomains' } : {}),
+};
+// rutas del agente de campo: autenticadas con su token, no con sesión de usuario
+async function handleWorker(req, res, url) {
+  const m = host.authWorker(req);
+  if (!m) { res.writeHead(401); return res.end('token inválido'); }
+  const json = x => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(x ?? null)); };
+  const p = url.pathname.slice('/api/worker/'.length);
+  if (req.method === 'GET' && p === 'stream') return host.attachStream(m, req, res);
+  if (req.method === 'POST' && p === 'hello') return json(host.hello(m, await readBody(req)));
+  if (req.method === 'POST' && p === 'reply') return json(host.reply(m, await readBody(req)));
+  if (req.method === 'POST' && p === 'events') return json(host.events(m, (await readBody(req)).events));
+  const at = /^attachments\/(\d+)$/.exec(p);
+  if (req.method === 'GET' && at) { const f = one('select * from attachments where id=?', +at[1]); if (!f) { res.writeHead(404); return res.end(); } res.writeHead(200, { 'Content-Type': 'application/octet-stream' }); return fs.createReadStream(path.join(DATA, 'attachments', f.stored)).pipe(res); }
+  res.writeHead(404); res.end();
 }
 function sse(req, res, user) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -584,6 +690,8 @@ function sse(req, res, user) {
 }
 async function handle(req, res) {
   const url = new URL(req.url, 'http://x');
+  for (const [k, v] of Object.entries(SEC_HEADERS)) res.setHeader(k, v);
+  if (url.pathname.startsWith('/api/worker/')) return handleWorker(req, res, url).catch(e => { if (!res.headersSent) res.writeHead(400); res.end(String(e.message)); });
   if (url.pathname.startsWith('/api/')) {
     const user = userOf(req);
     if (url.pathname === '/api/events') { if (!user) { res.writeHead(401); return res.end(); } return sse(req, res, user); }
@@ -592,7 +700,7 @@ async function handle(req, res) {
       need(route, 'Ruta no encontrada', 404);
       if (req.method !== 'GET') need(!req.headers.origin || new URL(req.headers.origin).host === req.headers.host, 'Origen no permitido', 403);
       if (route.role) { need(user, 'Inicia sesión', 401); need(LEVEL[user.role] >= LEVEL[route.role], 'No tienes permiso para esto', 403); }
-      const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req) : {};
+      const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req, route.raw) : {};
       const out = await route.fn({ req, res, user, body, params: route.re.exec(url.pathname).groups || {}, query: Object.fromEntries(url.searchParams) });
       if (out === RAW) return;
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -632,7 +740,9 @@ function startServer(port = PORT) {
   bus.on('project.completed', ({ id }) => { if (setting('council_auto_n', 0)) C.convene({ scope: { project_ids: [id], last_n: 30 }, lenses: ['retro', 'deuda', 'documentacion'], agents: setting('council_auto_agents', []).length ? setting('council_auto_agents', []) : [{ agent_id: one('select id from agents where enabled=1 order by id').id }] }, null).catch(() => {}); });
   process.on('uncaughtException', S.pushError);
   process.on('unhandledRejection', S.pushError);
-  return new Promise(res => server.listen(port, '127.0.0.1', () => { console.log(`★ Oficina Virtual en http://127.0.0.1:${port}`); res(server); }));
+  if (AUTH === 'google' && (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !ALLOWED.length)) throw new Error('OFICINA_AUTH=google requiere GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET y OFICINA_ALLOWED_EMAILS');
+  const bind = process.env.OFICINA_BIND || '127.0.0.1';
+  return new Promise(res => server.listen(port, bind, () => { console.log(`★ Oficina Virtual en http://${bind}:${port} (login: ${AUTH}, ejecución local: ${host.LOCAL_EXEC ? 'sí' : 'no'})`); res(server); }));
 }
 if (require.main === module) startServer();
 module.exports = { server, startServer, hashPw, checkPw };

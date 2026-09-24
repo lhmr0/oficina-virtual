@@ -1,9 +1,10 @@
-// Motor de ejecución: adaptadores de CLIs, cola, turnos, estados de tarea, cuota/relevo, git
-const { spawn, execFileSync } = require('node:child_process');
+// Motor de ejecución: adaptadores de CLIs, cola, turnos, estados de tarea, cuota/relevo, git.
+// Todo lo que toca archivos/procesos pasa por host (máquina local o agente de campo remoto).
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { DATA, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting } = require('./db');
+const host = require('./host');
 
 // ---------- estados ----------
 const STATUS = ['pendiente', 'bloqueada', 'en_cola', 'en_curso', 'esperando', 'revision', 'completada', 'pausada_cuota', 'fallida'];
@@ -13,64 +14,36 @@ const RULES = `## Reglas de la oficina (obligatorias)
 2. Si necesitas una decisión del usuario, termina tu respuesta con la línea [[CONSULTA]] seguida de la pregunta (y opciones si aplica). No inventes la decisión.
 3. Cuando termines, termina tu respuesta con la línea [[LISTO]] seguida de un resumen breve de lo hecho.`;
 const RULES_CHAT = 'Si necesitas que el usuario decida algo antes de seguir, termina con la línea [[CONSULTA]] y la pregunta.';
-
-// ---------- git ----------
-const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim();
-const tryGit = (cwd, ...a) => { try { return git(cwd, ...a); } catch { return null; } };
-const isGit = p => tryGit(p, 'rev-parse', '--is-inside-work-tree') === 'true';
-function exclude(repo, lines) {
-  const f = path.resolve(repo, tryGit(repo, 'rev-parse', '--git-common-dir') || '.git', 'info', 'exclude');
-  fs.mkdirSync(path.dirname(f), { recursive: true });
-  const cur = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
-  const add = lines.filter(l => !cur.split(/\r?\n/).includes(l));
-  if (add.length) fs.appendFileSync(f, (cur && !cur.endsWith('\n') ? '\n' : '') + add.join('\n') + '\n');
-}
-function commit(cwd, msg) {
-  if (!tryGit(cwd, 'status', '--porcelain')) return null;
-  git(cwd, 'add', '-A');
-  try { git(cwd, 'commit', '-q', '-m', msg); } catch { git(cwd, '-c', 'user.name=Oficina Virtual', '-c', 'user.email=oficina@localhost', 'commit', '-q', '-m', msg); }
-  return git(cwd, 'rev-parse', '--short', 'HEAD');
-}
+const REMINDER = '(Recuerda: termina con [[LISTO]] y un resumen si terminaste, o con [[CONSULTA]] y la pregunta si necesitas una decisión.)';
 // estado que hooks/herramientas del usuario dejan en cada carpeta (solo afecta archivos sin versionar)
 const DEFAULT_EXCLUDE = ['.ijfw/', '.serena/', '/AGENTS.md', '/CLAUDE.md'];
-const slug = s => String(s).toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
 
-// ---------- rutas seguras ----------
-// ruta canónica larga: los CLIs rechazan escribir si el cwd viene en formato 8.3 (LOCALA~1)
-const canon = p => { try { return fs.realpathSync.native(path.resolve(p)); } catch { return path.resolve(p); } };
-function validFolder(p) {
-  if (!p || !path.isAbsolute(p)) return 'La ruta debe ser absoluta';
-  if (!fs.existsSync(p) || !fs.statSync(p).isDirectory()) return 'La carpeta no existe';
-  const r = canon(p);
-  if (path.dirname(r) === r) return 'No se permite la raíz de un disco';
-  const bad = [process.env.SystemRoot, process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramData].filter(Boolean).map(x => path.resolve(x).toLowerCase());
-  if (bad.some(b => r.toLowerCase() === b || r.toLowerCase().startsWith(b + path.sep))) return 'No se permiten carpetas del sistema';
-  return null;
+// ---------- máquina y carpeta de cada tarea/conversación ----------
+const folderOf = t => t?.folder_id ? one('select * from project_folders where id=?', t.folder_id) : null;
+function machineOfTask(t) {
+  const f = folderOf(t);
+  if (f) return f.machine_id || host.defaultMachine();
+  const c = t.conversation_id ? one('select machine_id from conversations where id=?', t.conversation_id) : null;
+  return c?.machine_id || host.defaultMachine();
 }
-
-// ---------- directorio de trabajo de una tarea ----------
-function workdir(task) {
-  if (!task.folder_id) {
-    const d = path.join(DATA, 'sandbox', 'task-' + task.id);
-    fs.mkdirSync(d, { recursive: true });
-    return { cwd: d, lock: null, git: false };
-  }
-  const f0 = one('select * from project_folders where id=?', task.folder_id);
-  if (!f0) throw new Error('La carpeta de la tarea ya no existe en el proyecto');
-  const f = { ...f0, path: canon(f0.path) };
-  const g = isGit(f.path);
-  if (g) exclude(f.path, ['.oficina/', '.oficina-worktrees/', ...setting('checkpoint_exclude', DEFAULT_EXCLUDE)]);
-  if (g && f.use_worktrees && tryGit(f.path, 'rev-parse', 'HEAD')) {
-    if (task.worktree_path && fs.existsSync(task.worktree_path)) return { cwd: task.worktree_path, lock: null, git: true, wt: true };
-    const branch = task.branch || `oficina/task-${task.id}-${slug(task.title)}`;
-    const wt = path.join(f.path, '.oficina-worktrees', 'task-' + task.id);
-    const base = task.base_branch || git(f.path, 'rev-parse', '--abbrev-ref', 'HEAD');
-    if (tryGit(f.path, 'rev-parse', '--verify', branch)) git(f.path, 'worktree', 'add', wt, branch);
-    else git(f.path, 'worktree', 'add', '-b', branch, wt);
-    update('tasks', task.id, { branch, worktree_path: wt, base_branch: base });
-    return { cwd: wt, lock: null, git: true, wt: true };
-  }
-  return { cwd: f.path, lock: 'folder-' + f.id, git: g };
+function machineOfConv(c) {
+  if (c.task_id && c.kind === 'tarea') return machineOfTask(one('select * from tasks where id=?', c.task_id));
+  return c.machine_id || host.defaultMachine();
+}
+// bloqueo por carpeta cuando no hay worktree (git sin worktrees o carpeta sin git)
+function staticLock(t) {
+  const f = folderOf(t);
+  return f && !(f.is_git && f.use_worktrees) ? `folder-${f.id}` : null;
+}
+async function workdir(t) {
+  const mid = machineOfTask(t);
+  const f = folderOf(t);
+  if (t.folder_id && !f) throw new Error('La carpeta de la tarea ya no existe en el proyecto');
+  const r = f
+    ? await host.call(mid, 'workdir', { folder: { path: f.path, use_worktrees: !!f.use_worktrees }, task: { id: t.id, title: t.title, branch: t.branch, worktree_path: t.worktree_path, base_branch: t.base_branch }, exclude: setting('checkpoint_exclude', DEFAULT_EXCLUDE) })
+    : await host.call(mid, 'workdir', { sandbox: 'task-' + t.id });
+  if (r.worktree_path) update('tasks', t.id, { branch: r.branch, worktree_path: r.worktree_path, base_branch: r.base_branch });
+  return { ...r, mid };
 }
 
 // ---------- adaptadores ----------
@@ -190,14 +163,14 @@ const ADAPTERS = {
 
 // ---------- cola y procesos activos ----------
 const queue = [];              // {convId, prompt, userId, supervised, lock, resolve}
-const active = new Map();      // runId → {proc, convId, agentId, lock, st, aborted, timedOut}
-const pendingPerms = new Map();// requestId → {runId, input, convId}
+const active = new Map();      // runId → {convId, agentId, mid, lock, st, aborted, timedOut}
+const pendingPerms = new Map();// requestId → {runId, input, convId, taskId}
 const PRI = { alta: 0, media: 1, baja: 2 };
 const isPaused = () => setting('queue_paused', false);
 
 function agentOf(id) { return one('select * from agents where id=?', id); }
 function conv(id) { return one('select * from conversations where id=?', id); }
-function taskOfConv(c) { return c.task_id ? one('select * from tasks where id=?', c.task_id) : null; }
+function taskOfConv(c) { return c.task_id && c.kind === 'tarea' ? one('select * from tasks where id=?', c.task_id) : null; }
 const busyCount = agentId => [...active.values()].filter(a => a.agentId === agentId).length;
 
 function pump() {
@@ -207,19 +180,23 @@ function pump() {
     const ag = agentOf(c.agent_id);
     if (!ag?.enabled || ag.status === 'sin_cuota') continue;
     if (busyCount(ag.id) >= ag.max_concurrent) continue;
+    const mid = machineOfConv(c);
+    if (!host.online(mid)) continue; // la PC está apagada/desconectada: espera en cola
     if (item.lock && [...active.values()].some(a => a.lock === item.lock)) continue;
     queue.splice(queue.indexOf(item), 1);
-    start(item).catch(e => { finishConv(item, { end_reason: 'error', error: e.message, final: '' }); });
+    start(item, mid).catch(e => finishConv(item, { end_reason: 'error', error: e.message, final: '' }));
   }
 }
+bus.on('machine.online', () => setTimeout(pump, 200));
 
 // Encola un turno. Devuelve promesa con el resultado del turno.
-function runTurn(convId, userText, { userId = null, prompt = null, supervised = false, lock = null, priority = 'media', silentUserMsg = false } = {}) {
-  const c = conv(convId);
+function runTurn(convId, userText, { userId = null, prompt = null, supervised = false, lock = null, priority = 'media' } = {}) {
   if (queue.some(q => q.convId === convId) || [...active.values()].some(a => a.convId === convId)) throw new Error('Esta conversación ya está en ejecución');
-  if (userText && !silentUserMsg) insert('messages', { conversation_id: convId, role: 'usuario', user_id: userId, text: userText, kind: 'mensaje', at: now() });
+  if (userText) insert('messages', { conversation_id: convId, role: 'usuario', user_id: userId, text: userText, kind: 'mensaje', at: now() });
   update('conversations', convId, { status: 'en_cola', updated_at: now() });
   emit('conv.updated', { id: convId });
+  const c = conv(convId);
+  if (!host.online(machineOfConv(c))) insert('messages', { conversation_id: convId, role: 'sistema', text: `La máquina "${host.machine(machineOfConv(c))?.name || '?'}" no está conectada: el turno queda en cola y arrancará cuando se conecte.`, kind: 'nota', at: now() });
   return new Promise(resolve => {
     queue.push({ convId, prompt: prompt || userText, userId, supervised, lock, resolve, pri: PRI[priority] ?? 1, at: Date.now() });
     queue.sort((a, b) => a.pri - b.pri || a.at - b.at);
@@ -227,7 +204,14 @@ function runTurn(convId, userText, { userId = null, prompt = null, supervised = 
   });
 }
 
-async function start(item) {
+// adjuntos de la conversación (y de su tarea) aún no anunciados al agente
+function attachmentsFor(c, sinceRun) {
+  const since = sinceRun?.started_at || '';
+  const list = all(`select * from attachments where (conversation_id=? ${c.task_id ? 'or task_id=?' : ''}) order by id`, c.id, ...(c.task_id ? [c.task_id] : []));
+  return { all: list, fresh: list.filter(a => a.at > since) };
+}
+
+async function start(item, mid) {
   const c = conv(item.convId);
   const ag = agentOf(c.agent_id);
   const ad = ADAPTERS[ag.adapter];
@@ -235,26 +219,40 @@ async function start(item) {
   const first = !c.session_id;
   if (first && ad.newSession) update('conversations', c.id, { session_id: ad.newSession() });
   const cc = conv(c.id);
-  let cwd = cc.folder_path || path.join(DATA, 'sandbox', 'conv-' + c.id);
-  if (task) { cwd = workdir(one('select * from tasks where id=?', task.id)).cwd; }
-  fs.mkdirSync(cwd, { recursive: true });
+  // reservar el cupo antes de cualquier await para que pump() no lance dos veces
+  const act = { convId: c.id, agentId: ag.id, mid, lock: item.lock, st: null, runId: null };
+  const key = 'pre-' + c.id;
+  active.set(key, act);
+  let cwd;
+  try {
+    cwd = task ? (await workdir(one('select * from tasks where id=?', task.id))).cwd
+      : cc.folder_path || (await host.call(mid, 'workdir', { sandbox: 'conv-' + c.id })).cwd;
+  } catch (e) { active.delete(key); throw e; }
+  const lastRun = one('select * from runs where conversation_id=? order by id desc limit 1', c.id);
+  const att = attachmentsFor(cc, first ? null : lastRun);
+  let prompt = item.prompt;
+  if (att.all.length) {
+    try {
+      const rel = await host.call(mid, 'putFiles', { cwd, files: att.all.map(a => ({ id: a.id, name: a.name, size: a.size })) });
+      const fresh = att.fresh.map(a => rel[att.all.indexOf(a)]);
+      if (fresh.length) prompt += `\n\n# Archivos adjuntos (ya están en tu carpeta de trabajo)\n${att.fresh.map((a, i) => `- ${fresh[i]} (${a.mime || 'archivo'}, ${Math.ceil(a.size / 1024)} KB)`).join('\n')}\nLéelos con tus herramientas si los necesitas.`;
+    } catch (e) { prompt += `\n\n(No se pudieron entregar los adjuntos: ${e.message})`; }
+  }
   const supervised = item.supervised && ag.adapter === 'claude';
-  const b = ad.args(cc, { first, prompt: item.prompt, supervised, convId: c.id });
+  const b = ad.args(cc, { first, prompt, supervised, convId: c.id });
   const args = [...J(ag.pre_args, []), ...b.args, ...J(ag.extra_args, [])];
   const turn = (one('select count(*) n from runs where conversation_id=?', c.id).n || 0) + 1;
   const runId = insert('runs', { conversation_id: c.id, task_id: task?.id ?? null, agent_id: ag.id, model: cc.model, effort: cc.effort, turn,
     command: [ag.exe, ...args].map(x => (/\s/.test(x) ? JSON.stringify(x.length > 120 ? x.slice(0, 120) + '…' : x) : x)).join(' '),
     started_by: item.userId, started_at: now(), log_path: path.join(DATA, 'runs', 'run-' + Date.now() + '-' + c.id + '.log') });
-  const r = one('select * from runs where id=?', runId);
-  const logf = fs.openSync(r.log_path, 'a');
+  const logf = fs.openSync(one('select log_path from runs where id=?', runId).log_path, 'a');
   const out = line => { fs.writeSync(logf, line + '\n'); emit('run.log', { run_id: runId, conv_id: c.id, task_id: task?.id ?? null, line }); };
-  out(`▶ ${ag.name} · ${cc.model || 'modelo por defecto'} · ${cc.effort || '-'} · turno ${turn} · ${cwd}`);
+  const mname = host.machine(mid)?.name || '';
+  out(`▶ ${ag.name} · ${cc.model || 'modelo por defecto'} · ${cc.effort || '-'} · turno ${turn} · ${mname} · ${cwd}`);
 
   const st = { limits: [], final: '', error: null, tin: 0, tout: 0, cost: 0 };
-  const proc = spawn(ag.exe, args, { cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, OFICINA_TASK: String(task?.id ?? ''), OFICINA_CONV: String(c.id) } });
-  const act = { proc, convId: c.id, agentId: ag.id, lock: item.lock, st, runId };
-  active.set(runId, act);
-  update('runs', runId, { pid: proc.pid ?? null });
+  Object.assign(act, { st, runId });
+  active.delete(key); active.set(runId, act);
   update('conversations', c.id, { status: 'en_curso', updated_at: now() });
   if (task) setStatus(task.id, 'en_curso', item.userId, { run: runId }, true);
   refreshAgentStatus(ag.id);
@@ -268,27 +266,32 @@ async function start(item) {
     notify('permiso', `${ag.name} pide permiso`, desc, task ? `#/tarea/${task.id}` : `#/cantina/${c.id}`);
     out('🔐 esperando permiso: ' + desc);
   };
-  proc.on('error', e => { st.error = `No se pudo iniciar ${ag.exe}: ${e.message}`; });
-  if (b.stdin != null) { proc.stdin.write(b.stdin); if (!b.keepOpen) proc.stdin.end(); } else proc.stdin.end();
 
-  let buf = '', errTail = '';
-  proc.stdout.on('data', d => {
-    buf += d; let i;
-    while ((i = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, i).replace(/\r$/, ''); buf = buf.slice(i + 1);
-      if (!line.trim()) continue;
-      let o = null; try { o = JSON.parse(line); } catch {}
-      try { ad.parse(ag.adapter === 'fake' ? line : (o ?? null) || {}, st, out); } catch (e) { out('⚠ parser: ' + e.message); }
-      if (!o && ag.adapter !== 'fake') out(line);
-      if (st.done && b.keepOpen && !proc.stdin.destroyed) proc.stdin.end();
+  let errTail = '';
+  let exitRes;
+  const exited = new Promise(r => { exitRes = r; });
+  const onEvent = ev => {
+    if (ev.t === 'out') {
+      let o = null; try { o = JSON.parse(ev.line); } catch {}
+      try { ad.parse(ag.adapter === 'fake' ? ev.line : (o ?? null) || {}, st, out); } catch (e) { out('⚠ parser: ' + e.message); }
+      if (!o && ag.adapter !== 'fake') out(ev.line);
+      if (st.done && b.keepOpen && !st.ended) { st.ended = true; host.runOp(runId, 'endRun'); }
+    } else if (ev.t === 'err') {
+      errTail = (errTail + ev.text).slice(-3000);
+      for (const l of ev.text.split(/\r?\n/)) if (l.trim()) out('⚠ ' + l);
+    } else if (ev.t === 'exit') {
+      if (ev.error) st.error = ev.error;
+      exitRes(ev.code);
     }
-  });
-  proc.stderr.on('data', d => { const s = String(d); errTail = (errTail + s).slice(-3000); for (const l of s.split(/\r?\n/)) if (l.trim()) out('⚠ ' + l); });
-  const timer = setTimeout(() => { act.timedOut = true; kill(proc); }, (ag.timeout_min || 30) * 60000);
+  };
+  const timer = setTimeout(() => { act.timedOut = true; host.runOp(runId, 'killRun'); }, (ag.timeout_min || 30) * 60000);
+  try {
+    const { pid } = await host.spawnRun(mid, { runId, exe: ag.exe, args, cwd, env: { OFICINA_TASK: String(task?.id ?? ''), OFICINA_CONV: String(c.id) }, stdin: b.stdin, keepOpen: b.keepOpen }, onEvent);
+    update('runs', runId, { pid: pid ?? null });
+  } catch (e) { st.error = e.message; exitRes(-1); }
 
-  const code = await new Promise(res => proc.on('close', res));
+  const code = await exited;
   clearTimeout(timer);
-  if (buf.trim()) { try { ad.parse(ag.adapter === 'fake' ? buf.trim() : JSON.parse(buf), st, out); } catch { out(buf.trim()); } }
   active.delete(runId);
   for (const [k, v] of pendingPerms) if (v.runId === runId) pendingPerms.delete(k);
 
@@ -313,8 +316,7 @@ async function start(item) {
   else if (end_reason !== 'error') update('agents', ag.id, { last_error: null });
   if (end_reason === 'error') update('agents', ag.id, { last_error: errText.slice(0, 500) });
 
-  const res = { run_id: runId, end_reason, final: st.final, error: errText, code };
-  await finishConv(item, res);
+  await finishConv(item, { run_id: runId, end_reason, final: st.final, error: errText, code });
   refreshAgentStatus(ag.id);
   pump();
 }
@@ -327,36 +329,33 @@ async function finishConv(item, res) {
   if (res.end_reason === 'error' || res.end_reason === 'cuota' || res.end_reason === 'timeout')
     insert('messages', { conversation_id: c.id, role: 'sistema', text: `${res.end_reason.toUpperCase()}: ${(res.error || '').slice(0, 800)}`, kind: 'nota', at: now() });
   const task = taskOfConv(c);
-  if (task) await onTaskTurnEnd(task.id, res, item);
-  else {
-    const status = { consulta: 'esperando', cuota: 'sin_cuota', error: 'error', timeout: 'error' }[res.end_reason] || 'inactiva';
-    update('conversations', c.id, { status, updated_at: now() });
-    if (res.end_reason === 'consulta') notify('consulta', `${ag.name} te consulta`, question(text), `#/cantina/${c.id}`);
-    if (res.end_reason === 'cuota') notify('cuota', `${ag.name} sin cuota`, 'La consulta rápida se detuvo. Puedes continuarla con otro agente.', `#/cantina/${c.id}`);
+  try {
+    if (task) await onTaskTurnEnd(task.id, res, item);
+    else {
+      const status = { consulta: 'esperando', cuota: 'sin_cuota', error: 'error', timeout: 'error' }[res.end_reason] || 'inactiva';
+      update('conversations', c.id, { status, updated_at: now() });
+      if (res.end_reason === 'consulta') notify('consulta', `${ag.name} te consulta`, question(text), `#/cantina/${c.id}`);
+      if (res.end_reason === 'cuota') notify('cuota', `${ag.name} sin cuota`, 'La consulta rápida se detuvo. Puedes continuarla con otro agente.', `#/cantina/${c.id}`);
+    }
+  } finally {
+    emit('conv.updated', { id: c.id });
+    item.resolve?.(res);
   }
-  emit('conv.updated', { id: c.id });
-  item.resolve?.(res);
 }
 // texto de la pregunta: lo que va tras [[CONSULTA]] (o lo previo si el marcador va al final), sin markdown
 const question = t => { const [a, b = ''] = String(t).split('[[CONSULTA]]'); return (b.trim() || a).replace(/\*\*|`|\[\[\w+\]\]/g, '').trim().slice(-400); };
 
-function kill(proc) {
-  if (!proc?.pid) return;
-  if (process.platform === 'win32') spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true }).on('error', () => {});
-  else proc.kill('SIGKILL');
-}
 function abortConv(convId) {
   const qi = queue.findIndex(q => q.convId === convId);
   if (qi >= 0) { const [it] = queue.splice(qi, 1); finishConv(it, { end_reason: 'abortado', final: '' }); return true; }
-  for (const a of active.values()) if (a.convId === convId) { a.aborted = true; kill(a.proc); return true; }
+  for (const a of active.values()) if (a.convId === convId && a.runId) { a.aborted = true; host.runOp(a.runId, 'killRun'); return true; }
   return false;
 }
-function answerPermission(requestId, allow, userId) {
+async function answerPermission(requestId, allow, userId) {
   const p = pendingPerms.get(requestId);
   if (!p) throw new Error('El permiso ya no está pendiente');
-  const a = active.get(p.runId);
   const response = allow ? { behavior: 'allow', updatedInput: p.input } : { behavior: 'deny', message: 'Denegado por el usuario desde la oficina' };
-  a.proc.stdin.write(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response } }) + '\n');
+  await host.runOp(p.runId, 'writeRun', { data: JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response } }) + '\n' });
   pendingPerms.delete(requestId);
   insert('messages', { conversation_id: p.convId, role: 'usuario', user_id: userId, text: allow ? '✅ Permiso aprobado' : '⛔ Permiso denegado', kind: 'permiso', at: now() });
   log(userId, 'permiso', p.convId, allow ? 'aprobar' : 'denegar', { requestId });
@@ -464,7 +463,7 @@ function taskPrompt(t, extra = '') {
     extra].filter(Boolean).join('\n\n');
 }
 
-// Ejecuta (o reanuda) una tarea. opts: {agent_id, model, effort, mode, supervised, extra}
+// Ejecuta (o reanuda) una tarea. Lanza error sincrónico si no se puede encolar; devuelve la promesa del turno.
 function runTask(taskId, userId, opts = {}) {
   let t = one('select * from tasks where id=?', taskId);
   if (t.executor !== 'agente') throw new Error('Tarea humana: no se ejecuta con agente');
@@ -477,39 +476,40 @@ function runTask(taskId, userId, opts = {}) {
   t = one('select * from tasks where id=?', taskId);
   const ag = agentOf(t.agent_id);
   if (!ag.enabled) throw new Error(`${ag.name} está deshabilitado`);
-  const wd = workdir(t);
+  if (t.folder_id && !folderOf(t)) throw new Error('La carpeta de la tarea ya no existe en el proyecto');
   let c = t.conversation_id ? conv(t.conversation_id) : null;
   const newConv = !c || c.agent_id !== t.agent_id || opts.fresh;
   if (newConv) {
     const cid = insert('conversations', { kind: 'tarea', task_id: t.id, project_id: t.project_id, title: t.title, agent_id: t.agent_id, model: t.model || ag.default_model,
-      effort: t.effort || ag.default_effort, mode: t.mode === 'plan' ? 'plan' : 'editar', created_by: userId, created_at: now(), updated_at: now() });
+      effort: t.effort || ag.default_effort, mode: t.mode === 'plan' ? 'plan' : 'editar', machine_id: c?.machine_id ?? null, created_by: userId, created_at: now(), updated_at: now() });
     changeTask(t.id, { conversation_id: cid }, userId);
     c = conv(cid);
   } else update('conversations', c.id, { model: t.model || c.model, effort: t.effort || c.effort, mode: t.mode === 'plan' ? 'plan' : 'editar' });
-  const prompt = newConv ? taskPrompt(t, opts.extra) : `${opts.text || 'Continúa con la tarea.'}
-
-(Recuerda: termina con [[LISTO]] y un resumen si terminaste, o con [[CONSULTA]] y la pregunta si necesitas una decisión.)`;
+  const prompt = newConv ? taskPrompt(t, opts.extra) : `${opts.text || 'Continúa con la tarea.'}\n\n${REMINDER}`;
   setStatus(t.id, 'en_cola', userId, {}, true);
   log(userId, 'tarea', t.id, 'ejecutar', { agente: ag.key, modelo: t.model, esfuerzo: t.effort });
   if (newConv) insert('messages', { conversation_id: c.id, role: 'sistema', user_id: userId, text: `Tarea asignada a ${ag.name} (${t.model || ag.default_model} · ${t.effort || ag.default_effort})`, kind: 'nota', at: now() });
-  return runTurn(c.id, newConv ? null : opts.text, { userId, prompt, supervised: t.mode === 'supervisado', lock: wd.lock, priority: t.priority });
+  return runTurn(c.id, newConv ? null : opts.text, { userId, prompt, supervised: t.mode === 'supervisado', lock: staticLock(t), priority: t.priority });
 }
-
 const runTaskBg = (...a) => Promise.resolve().then(() => runTask(...a));
 
 async function onTaskTurnEnd(taskId, res, item) {
   const t = one('select * from tasks where id=?', taskId);
   const ag = agentOf(t.agent_id);
   const link = `#/tarea/${t.id}`;
-  const cwd = (() => { try { return workdir(t).cwd; } catch { return null; } })();
-  const wt = t.worktree_path && cwd === t.worktree_path;
-  let diff = null;
-  if (cwd && wt) {
-    const why = { listo: 'listo', consulta: 'consulta', cuota: 'cuota', error: 'error', timeout: 'timeout', abortado: 'abortado' }[res.end_reason] || 'turno';
-    try { commit(cwd, `oficina: checkpoint task-${t.id} (${ag.key}, ${why})`); } catch {}
-    diff = tryGit(cwd, 'diff', '--stat', `${t.base_branch}...HEAD`);
-  } else if (cwd && isGit(cwd)) diff = tryGit(cwd, 'diff', '--stat');
-  if (diff != null) update('runs', res.run_id, { diff_stat: diff });
+  const mid = machineOfTask(t);
+  if (host.online(mid)) {
+    try {
+      if (t.worktree_path) {
+        await host.call(mid, 'checkpoint', { cwd: t.worktree_path, message: `oficina: checkpoint task-${t.id} (${ag.key}, ${res.end_reason})` });
+        const g = await host.call(mid, 'gitInfo', { cwd: t.worktree_path, base: t.base_branch });
+        if (g.git) update('runs', res.run_id, { diff_stat: g.diffStat ?? '' });
+      } else if (folderOf(t)) {
+        const g = await host.call(mid, 'gitInfo', { cwd: folderOf(t).path });
+        if (g.git) update('runs', res.run_id, { diff_stat: g.diffStat ?? '' });
+      }
+    } catch {}
+  }
   const S = (s, d) => setStatus(t.id, s, null, d, true);
   switch (res.end_reason) {
     case 'listo':
@@ -518,7 +518,7 @@ async function onTaskTurnEnd(taskId, res, item) {
     case 'consulta': case 'sin_marcador':
       S('esperando'); notify('consulta', `${ag.name} consulta en tarea #${t.id}`, question(res.final) || 'Terminó el turno sin marcador; revisa y responde.', link); break;
     case 'cuota': {
-      const h = createHandoff(t.id, 'cuota', null);
+      const h = await createHandoff(t.id, 'cuota', null);
       S('pausada_cuota', { handoff: h });
       notify('cuota', `${ag.name} se quedó sin combustible`, `Tarea #${t.id} ${t.title}. Avance guardado; elige quién continúa.`, link);
       const area = one('select * from areas where id=?', t.area_id);
@@ -529,29 +529,33 @@ async function onTaskTurnEnd(taskId, res, item) {
       break;
     }
     case 'abortado': S('pendiente', { motivo: 'abortado' }); break;
-    case 'timeout': createHandoff(t.id, 'timeout', null); S('fallida', { motivo: 'timeout' }); notify('fallo', `Tarea #${t.id} excedió el tiempo`, t.title, link); break;
+    case 'timeout': await createHandoff(t.id, 'timeout', null); S('fallida', { motivo: 'timeout' }); notify('fallo', `Tarea #${t.id} excedió el tiempo`, t.title, link); break;
     default: {
-      const transient = /ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up|\b50[0-9]\b|overloaded|network/i.test(res.error || '');
+      const transient = /ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up|\b50[0-9]\b|overloaded|network|se desconectó|se reinició/i.test(res.error || '');
       if (transient && !item.retried) {
         S('pendiente');
-        setTimeout(() => runTaskBg(t.id, item.userId, { text: 'Hubo un error de red; continúa donde quedaste.' }).catch(() => {}), 5000);
+        setTimeout(() => runTaskBg(t.id, item.userId, { text: 'Hubo un error de red o de la máquina; continúa donde quedaste.' }).catch(() => {}), 5000);
         notify('fallo', `Tarea #${t.id}: error transitorio, reintentando`, (res.error || '').slice(0, 200), link);
         break;
       }
-      createHandoff(t.id, 'error', null);
+      await createHandoff(t.id, 'error', null);
       S('fallida', { error: (res.error || '').slice(0, 300) }); notify('fallo', `Tarea #${t.id} falló`, (res.error || '').slice(0, 300), link);
     }
   }
 }
 
 // ---------- relevo ----------
-function snapshot(t) {
-  let cwd = null; try { cwd = workdir(t).cwd; } catch {}
-  const prog = cwd && fs.existsSync(path.join(cwd, '.oficina', 'progreso.md')) ? fs.readFileSync(path.join(cwd, '.oficina', 'progreso.md'), 'utf8') : '(no existe .oficina/progreso.md)';
+async function snapshot(t) {
+  const mid = machineOfTask(t);
+  const cwd = t.worktree_path || folderOf(t)?.path || null;
+  let prog = '(no existe .oficina/progreso.md)', gitInfo = '';
+  if (cwd && host.online(mid)) {
+    try { prog = (await host.call(mid, 'readText', { cwd, rel: '.oficina/progreso.md' })) || prog; } catch {}
+    try { const g = await host.call(mid, 'gitInfo', { cwd, base: t.worktree_path ? t.base_branch : null }); gitInfo = [g.log, g.diffStat].filter(Boolean).join('\n\n'); } catch {}
+  }
   const msgs = t.conversation_id ? all('select role, text, kind from messages where conversation_id=? order by id desc limit 12', t.conversation_id).reverse() : [];
   const lastRun = t.conversation_id ? one('select * from runs where conversation_id=? order by id desc limit 1', t.conversation_id) : null;
   const tail = lastRun?.log_path && fs.existsSync(lastRun.log_path) ? fs.readFileSync(lastRun.log_path, 'utf8').split('\n').slice(-60).join('\n') : '';
-  const gitInfo = cwd && t.worktree_path ? [tryGit(cwd, 'log', '--oneline', `${t.base_branch}..HEAD`), tryGit(cwd, 'diff', '--stat', `${t.base_branch}...HEAD`)].filter(Boolean).join('\n\n') : (cwd && isGit(cwd) ? tryGit(cwd, 'diff', '--stat') : '');
   return `# Relevo de la tarea #${t.id}: ${t.title}
 ## Objetivo
 ${t.prompt || '(sin descripción)'}
@@ -566,12 +570,13 @@ ${gitInfo || '(sin cambios registrados)'}
 ${tail}
 \`\`\``;
 }
-function createHandoff(taskId, reason, userId, to = {}) {
+async function createHandoff(taskId, reason, userId, to = {}) {
   const t = one('select * from tasks where id=?', taskId);
   let sha = null;
-  try { const cwd = workdir(t).cwd; if (t.worktree_path) { commit(cwd, `oficina: checkpoint task-${t.id} (relevo: ${reason})`); sha = tryGit(cwd, 'rev-parse', '--short', 'HEAD'); } } catch {}
+  const mid = machineOfTask(t);
+  if (t.worktree_path && host.online(mid)) try { sha = await host.call(mid, 'checkpoint', { cwd: t.worktree_path, message: `oficina: checkpoint task-${t.id} (relevo: ${reason})` }); } catch {}
   const id = insert('handoffs', { task_id: t.id, conversation_id: t.conversation_id, from_agent_id: t.agent_id, to_agent_id: to.agent_id || null,
-    to_user_id: to.user_id || null, reason, snapshot_md: snapshot(t), commit_sha: sha, created_by: userId, at: now() });
+    to_user_id: to.user_id || null, reason, snapshot_md: await snapshot(t), commit_sha: sha, created_by: userId, at: now() });
   emit('handoff', { id, task_id: t.id });
   return id;
 }
@@ -582,7 +587,7 @@ async function handoffTask(taskId, { agent_id, model, effort, user_id, reason = 
   const last = one('select * from handoffs where task_id=? and to_agent_id is null and to_user_id is null order by id desc limit 1', taskId);
   let hid;
   if (last) { update('handoffs', last.id, { to_agent_id: agent_id || null, to_user_id: user_id || null, reason: last.reason + (reason !== last.reason ? ' → ' + reason : '') }); hid = last.id; }
-  else hid = createHandoff(taskId, reason, userId, { agent_id, user_id });
+  else hid = await createHandoff(taskId, reason, userId, { agent_id, user_id });
   const h = one('select * from handoffs where id=?', hid);
   const from = agentOf(t.agent_id);
   if (user_id) {
@@ -603,24 +608,21 @@ async function handoffTask(taskId, { agent_id, model, effort, user_id, reason = 
 }
 
 // ---------- aprobar / devolver ----------
-function approveTask(taskId, userId, { merge = false } = {}) {
+async function approveTask(taskId, userId, { merge = false } = {}) {
   const t = one('select * from tasks where id=?', taskId);
   if (!['revision', 'esperando'].includes(t.status)) throw new Error('Solo se aprueban tareas en revisión');
   let mergeInfo = null;
   if (merge && t.worktree_path) {
-    const f = one('select * from project_folders where id=?', t.folder_id);
-    const cur = git(f.path, 'rev-parse', '--abbrev-ref', 'HEAD');
-    if (cur !== t.base_branch) throw new Error(`La carpeta base está en la rama ${cur}, no en ${t.base_branch}`);
-    try { git(f.path, 'merge', '--no-ff', '-m', `oficina: tarea #${t.id} ${t.title}`, t.branch); mergeInfo = 'fusionada'; }
-    catch (e) {
-      tryGit(f.path, 'merge', '--abort');
+    const f = folderOf(t);
+    const r = await host.call(machineOfTask(t), 'merge', { repo: f.path, branch: t.branch, base_branch: t.base_branch, message: `oficina: tarea #${t.id} ${t.title}`, worktree_path: t.worktree_path });
+    if (r.error) throw new Error(r.error);
+    if (r.conflict) {
       const nid = createTask({ project_id: t.project_id, area_id: t.area_id, folder_id: t.folder_id, title: `Resolver conflicto al fusionar tarea #${t.id}`,
-        prompt: `Fusiona la rama ${t.branch} en ${t.base_branch} resolviendo los conflictos. Error de git:\n${e.stderr || e.message}`, agent_id: t.agent_id, priority: 'alta' }, userId);
+        prompt: `Fusiona la rama ${t.branch} en ${t.base_branch} resolviendo los conflictos. Error de git:\n${r.conflict}`, agent_id: t.agent_id, priority: 'alta' }, userId);
       notify('fallo', `Conflicto al fusionar tarea #${t.id}`, `Se creó la tarea #${nid} para resolverlo.`, `#/tarea/${nid}`);
       throw new Error(`Conflicto al fusionar. Se creó la tarea #${nid} para resolverlo.`);
     }
-    tryGit(f.path, 'worktree', 'remove', '--force', t.worktree_path);
-    tryGit(f.path, 'branch', '-d', t.branch);
+    mergeInfo = 'fusionada';
     changeTask(t.id, { worktree_path: null }, userId);
   }
   setStatus(t.id, 'completada', userId, { merge: mergeInfo }, true);
@@ -665,7 +667,7 @@ function order66(userId) {
   setSetting('queue_paused', true);
   const n = queue.length + active.size;
   for (const it of queue.splice(0)) finishConv(it, { end_reason: 'abortado', final: '' });
-  for (const a of active.values()) { a.aborted = true; kill(a.proc); }
+  for (const a of active.values()) if (a.runId) { a.aborted = true; host.runOp(a.runId, 'killRun'); }
   log(userId, 'sistema', null, 'orden66', { detenidos: n });
   notify('sistema', 'Orden 66 ejecutada', `${n} ejecuciones detenidas. La cola está en pausa.`, '#/puente');
   emit('queue', { paused: true });
@@ -673,6 +675,6 @@ function order66(userId) {
 }
 function resumeQueue(userId) { setSetting('queue_paused', false); log(userId, 'sistema', null, 'reanudar_cola'); emit('queue', { paused: false }); pump(); }
 
-module.exports = { DEFAULT_EXCLUDE, canon, ADAPTERS, STATUS, RULES, RULES_CHAT, queue, active, pendingPerms, runTurn, runTask, runTaskBg, abortConv, answerPermission, setStatus, changeTask,
-  createTask, approveTask, returnTask, handoffTask, createHandoff, snapshot, taskPrompt, validFolder, isGit, tryGit, workdir, recover, order66,
+module.exports = { DEFAULT_EXCLUDE, ADAPTERS, STATUS, RULES, RULES_CHAT, queue, active, pendingPerms, runTurn, runTask, runTaskBg, abortConv, answerPermission, setStatus, changeTask,
+  createTask, approveTask, returnTask, handoffTask, createHandoff, snapshot, taskPrompt, workdir, folderOf, machineOfTask, machineOfConv, recover, order66,
   resumeQueue, quotaTick, parseReset, saveLimits, markQuota, pump, question, isPaused, depsPending };

@@ -157,7 +157,7 @@ function gitRepo(name) {
   await t('segunda carpeta: la tarea corre en la carpeta elegida', async () => {
     const id = (await api('POST', '/api/tasks', { project_id: pid, folder_id: folder2, title: 'En docs', prompt: 'x', agent_id: fake, run: true })).id;
     await until(() => task(id).status === 'revision');
-    assert.ok(task(id).worktree_path.startsWith(R.canon(repo2)));
+    assert.ok(task(id).worktree_path.startsWith(require('./host').local.canon(repo2)));
   });
 
   await t('error → fallida; timeout mata el proceso', async () => {

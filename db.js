@@ -57,6 +57,10 @@ create table if not exists proposals (id integer primary key, review_id integer,
   effort text, suggested_area text, suggested_agent text, votes integer default 1, kind text default 'tarea', status text default 'propuesta',
   discard_reason text, task_id integer, conversation_id integer, project_id integer, decided_by integer, at text);
 create table if not exists settings (key text primary key, value text);
+create table if not exists machines (id integer primary key, name text not null, is_local integer default 0, token_hash text, info text,
+  last_seen text, created_by integer, created_at text, deleted_at text);
+create table if not exists attachments (id integer primary key, task_id integer, conversation_id integer, name text not null, mime text,
+  size integer, stored text not null, uploaded_by integer, at text);
 
 create virtual table if not exists fts using fts5(kind unindexed, ref unindexed, title, body);
 create trigger if not exists fts_msg after insert on messages begin
@@ -76,6 +80,13 @@ create index if not exists ix_msg_conv on messages(conversation_id);
 create index if not exists ix_runs_conv on runs(conversation_id);
 create index if not exists ix_activity_at on activity(at);
 `);
+
+// migraciones simples: columnas agregadas después de la primera versión
+const addCol = (t, c, def) => { if (!db.prepare(`pragma table_info(${t})`).all().some(x => x.name === c)) db.exec(`alter table ${t} add column ${c} ${def}`); };
+addCol('project_folders', 'machine_id', 'integer');
+addCol('conversations', 'machine_id', 'integer');
+addCol('users', 'email', 'text');
+fs.mkdirSync(path.join(DATA0, 'attachments'), { recursive: true });
 
 const now = () => new Date().toISOString();
 const all = (sql, ...p) => db.prepare(sql).all(...p);
@@ -102,24 +113,12 @@ function log(user_id, entity, entity_id, action, detail = {}) {
   emit('activity', { entity, entity_id, action });
 }
 
-// Notificación: SSE a la oficina; si no hay ninguna pestaña conectada, toast de Windows
+// Notificación: SSE a la oficina; si no hay ninguna pestaña conectada, toast de Windows en las máquinas (host.js)
 const PORT = Number(process.env.OFICINA_PORT || 4242);
-const xml = s => String(s ?? '').replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
-function toast(title, body, link) {
-  if (process.platform !== 'win32' || process.env.OFICINA_NO_TOAST) return;
-  const x = `<toast activationType="protocol" launch="http://127.0.0.1:${PORT}/${xml(link || '')}"><visual><binding template="ToastGeneric"><text>${xml(title)}</text><text>${xml(body).slice(0, 300)}</text></binding></visual></toast>`;
-  const ps = `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-$d = New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Console]::In.ReadToEnd())
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($d))`;
-  const p = require('node:child_process').spawn('powershell', ['-NoProfile', '-Command', ps], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
-  p.on('error', () => {});
-  p.stdin.end(x);
-}
 function notify(kind, title, body = '', link = '') {
   const id = insert('notifications', { kind, title, body: String(body).slice(0, 2000), link, at: now() });
   emit('notify', { id, kind, title, body: String(body).slice(0, 500), link });
-  if (bus.listenerCount('ev') === 0) toast(title, body, link);
+  if (bus.listenerCount('ev') === 0 && !process.env.OFICINA_NO_TOAST) bus.emit('toast', { title, body, link });
   return id;
 }
 
@@ -133,7 +132,7 @@ if (!one('select 1 from areas limit 1')) {
 }
 if (!one('select 1 from agents limit 1')) {
   const Q = ['usage limit', 'rate limit', '\\b429\\b', 'quota', 'insufficient credits', 'credit balance', 'try again at', 'limit reached'];
-  const ccEntry = path.join(process.env.APPDATA || '', 'npm', 'node_modules', 'command-code', 'dist', 'index.mjs');
+  const ccEntry = '%APPDATA%/npm/node_modules/command-code/dist/index.mjs'; // se expande en la máquina que ejecuta
   const ag = [
     { key: 'claude', name: 'Claude', adapter: 'claude', exe: 'claude', color: '#ff8c42',
       models: ['sonnet', 'opus', 'haiku', 'fable'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'sonnet', default_effort: 'medium' },
@@ -141,7 +140,7 @@ if (!one('select 1 from agents limit 1')) {
       models: ['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-6-luna'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'gpt-5.6-terra', default_effort: 'medium' },
     { key: 'antigravity', name: 'Antigravity', adapter: 'agy', exe: 'agy', color: '#4fa3ff',
       models: ['gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.1-pro-high', 'claude-sonnet-4-6', 'claude-opus-4-6-thinking'], efforts: ['low', 'medium', 'high'], default_model: 'gemini-3.8-flash-high', default_effort: 'medium' },
-    { key: 'commandcode', name: 'CommandCode', adapter: 'commandcode', exe: process.execPath, pre_args: [ccEntry], color: '#ff4d4d',
+    { key: 'commandcode', name: 'CommandCode', adapter: 'commandcode', exe: 'node', pre_args: [ccEntry], color: '#ff4d4d',
       models: ['deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'moonshotai/kimi-k3', 'zai-org/glm-5.3', 'qwen/qwen3.8-max'], efforts: ['high', 'max'], default_model: 'deepseek/deepseek-v4-flash', default_effort: 'high' },
   ];
   for (const x of ag) insert('agents', { ...x, pre_args: JSON.stringify(x.pre_args || []), models: JSON.stringify(x.models), efforts: JSON.stringify(x.efforts), quota_patterns: JSON.stringify(Q) });
@@ -157,4 +156,4 @@ if (!one('select 1 from agents limit 1')) {
   for (const [an, title, prompt] of tpl) insert('templates', { area_id: areas.find(a => a.name === an).id, title, prompt });
 }
 
-module.exports = { db, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, toast, setting, setSetting };
+module.exports = { db, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting };
