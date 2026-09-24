@@ -711,8 +711,10 @@ async function handle(req, res) {
     }
     return;
   }
-  const f = path.resolve(PUB, '.' + (url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname)));
-  if (!f.startsWith(PUB) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end('404'); }
+  let f = '';
+  try { f = path.resolve(PUB, '.' + (url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname))); } catch {}
+  // cualquier ruta que no sea un archivo público → al login (la SPA manda a la estación si ya hay sesión)
+  if (!f.startsWith(PUB + path.sep) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(302, { Location: '/#/login' }); return res.end(); }
   res.writeHead(200, { 'Content-Type': MIME[path.extname(f)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
   fs.createReadStream(f).pipe(res);
 }

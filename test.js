@@ -394,6 +394,12 @@ function gitRepo(name) {
       assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/);
       assert.match(r.headers.get('strict-transport-security'), /max-age/);
       assert.equal((await fetch(u('/api/worker/hello'), { method: 'POST', body: '{}' })).status, 401);
+      for (const p of ['/login', '/no/existe', '/%E0%A4%A', '/../server.js']) {
+        const x = await fetch(u(p), { redirect: 'manual' });
+        assert.equal(x.status, 302, p); assert.equal(x.headers.get('location'), '/#/login', p);
+      }
+      assert.equal((await fetch(u('/app.js'))).status, 200);
+      assert.equal((await fetch(u('/api/no-existe'))).status, 404);
     } finally { g.kill(); }
   });
 
