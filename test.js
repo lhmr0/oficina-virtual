@@ -1,0 +1,335 @@
+// Self-check end-to-end con agentes falsos. Uso: node --no-warnings test.js
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-test-'));
+process.env.OFICINA_DATA = path.join(TMP, 'data');
+process.env.OFICINA_NO_TOAST = '1';
+const PORT = 4300 + Math.floor(Math.random() * 500);
+process.env.OFICINA_PORT = String(PORT);
+
+const { startServer } = require('./server');
+const { one, all, insert, update, bus } = require('./db');
+const R = require('./runner');
+const C = require('./council');
+
+// agente falso: decide su respuesta según palabras clave del prompt (stdin)
+const FAKE = `let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const fs=require('fs');
+if(s.includes('Consejo Jedi')||s.includes('moderador'))return console.log('Aquí va:\\n\`\`\`json\\n'+JSON.stringify({propuestas:[{title:'Agregar pruebas',description:'Cubrir salida.txt',impact:'alto',effort:'bajo',area:'Desarrollo',agent:'fake'},{title:'Documentar API',description:'README',impact:'medio',effort:'bajo',area:'Documentación'}]})+'\\n\`\`\`');
+if(s.includes('JSONMALO'))return console.log('no hay json aquí');
+if(s.includes('Descompón'))return console.log(JSON.stringify({subtareas:[{title:'Sub A',prompt:'a',area:'Análisis'},{title:'Sub B',prompt:'b',area:'Desarrollo',depends_on:[0]}]}));
+if(s.includes('# RELEVO')){fs.writeFileSync('relevo-prompt.txt',s);return console.log('Continué.\\n[[LISTO]] Relevo completado');}
+if(s.includes('PREGUNTA'))return console.log('Necesito saber algo.\\n[[CONSULTA]] ¿Cómo se llama el archivo?');
+if(s.includes('CUOTA')){console.error("You've hit your usage limit. try again at 3:00 PM");process.exit(1)}
+if(s.includes('FALLA')){console.error('boom');process.exit(1)}
+if(s.includes('LENTO'))return setTimeout(()=>{},600000);
+fs.mkdirSync('.oficina',{recursive:true});fs.writeFileSync('.oficina/progreso.md','- [x] paso 1');
+fs.writeFileSync('salida.txt','hecho '+s.length);console.log('Hecho.\\n[[LISTO]] Creé salida.txt');});`;
+
+let cookie = '';
+async function api(method, url, body, raw) {
+  const res = await fetch(`http://127.0.0.1:${PORT}${url}`, { method, headers: { 'Content-Type': 'application/json', cookie }, body: body ? JSON.stringify(body) : undefined });
+  const sc = res.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0];
+  if (raw) return res;
+  const j = await res.json().catch(() => null);
+  if (!res.ok) { const e = new Error(j?.error || res.status); e.status = res.status; throw e; }
+  return j;
+}
+const rejects = async (p, re) => { try { await p; } catch (e) { if (re) assert.match(e.message, re); return e; } assert.fail('se esperaba error'); };
+async function until(fn, ms = 15000, msg = 'condición') {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { const v = await fn(); if (v) return v; await new Promise(r => setTimeout(r, 100)); }
+  assert.fail('timeout esperando ' + msg);
+}
+const task = id => one('select * from tasks where id=?', id);
+const events = [];
+bus.on('ev', e => events.push(e));
+
+function gitRepo(name) {
+  const d = path.join(TMP, name); fs.mkdirSync(d);
+  const g = (...a) => execFileSync('git', ['-C', d, ...a], { stdio: 'pipe' });
+  g('init', '-q', '-b', 'main'); fs.writeFileSync(path.join(d, 'README.md'), '# repo');
+  g('add', '-A'); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init');
+  return d;
+}
+
+(async () => {
+  const server = await startServer(PORT);
+  let step = '';
+  const ok = s => { step = s; console.log('✔', s); };
+  try {
+    // --- auth ---
+    assert.equal((await api('GET', '/api/setup')).needed, true);
+    await api('POST', '/api/setup', { username: 'vader', password: 'secreto1', name: 'Darth' });
+    await rejects(api('POST', '/api/setup', { username: 'x', password: 'secreto1' }), /Ya existe/);
+    cookie = '';
+    await rejects(api('GET', '/api/me'), /Inicia sesión/);
+    await rejects(api('POST', '/api/login', { username: 'vader', password: 'mal' }), /incorrectos/);
+    for (let i = 0; i < 4; i++) await rejects(api('POST', '/api/login', { username: 'vader', password: 'mal' }));
+    await rejects(api('POST', '/api/login', { username: 'vader', password: 'secreto1' }), /Demasiados intentos/);
+    ok('auth: setup único, login incorrecto, bloqueo tras 5 intentos');
+  } catch (e) { console.error('✘', step, e); }
+
+  // vader quedó bloqueado 5 min: seguimos con otro admin creado directo en BD
+  const { hashPw } = require('./server');
+  insert('users', { username: 'leia', name: 'Leia', pass_hash: hashPw('secreto1'), role: 'admin', created_at: new Date().toISOString() });
+  insert('users', { username: 'r2', name: 'R2', pass_hash: hashPw('secreto1'), role: 'observador', created_at: new Date().toISOString() });
+  let failed = 0;
+  const t = async (name, fn) => { try { await fn(); console.log('✔', name); } catch (e) { failed++; console.error('✘', name, '\n  ', e.stack || e); } };
+
+  await t('login admin y roles (observador no ejecuta)', async () => {
+    cookie = ''; await api('POST', '/api/login', { username: 'r2', password: 'secreto1' });
+    assert.equal((await api('GET', '/api/me')).role, 'observador');
+    await rejects(api('POST', '/api/projects', { name: 'x' }), /permiso/);
+    cookie = ''; await api('POST', '/api/login', { username: 'leia', password: 'secreto1' });
+    assert.equal((await api('GET', '/api/me')).username, 'leia');
+  });
+
+  // agentes falsos
+  const mk = (key, extra = {}) => insert('agents', { key, name: key, adapter: 'fake', exe: process.execPath, pre_args: JSON.stringify(['-e', FAKE]), models: '["m1"]', efforts: '["low"]',
+    default_model: 'm1', default_effort: 'low', max_concurrent: 1, timeout_min: 1, quota_patterns: JSON.stringify(['usage limit', 'try again at']), color: '#fff', ...extra });
+  const fake = mk('fake'), fake2 = mk('fake2'), fake3 = mk('fake3');
+  const areas = all('select * from areas');
+  const dev = areas.find(a => a.name === 'Desarrollo').id, docs = areas.find(a => a.name === 'Documentación').id, ana = areas.find(a => a.name === 'Análisis').id;
+  update('areas', dev, { fallback_chain: JSON.stringify([fake, fake2]) });
+
+  const repo = gitRepo('repo'), repo2 = gitRepo('repo2');
+  let pid, folder1, folder2, regPid;
+
+  await t('proyectos: rutas inválidas rechazadas, 2 carpetas, solo-registro', async () => {
+    await rejects(api('POST', '/api/projects', { name: 'Malo', folders: [{ path: 'C:\\' }] }), /raíz/);
+    await rejects(api('POST', '/api/projects', { name: 'Malo', folders: [{ path: path.join(TMP, 'noexiste') }] }), /no existe/);
+    pid = (await api('POST', '/api/projects', { name: 'Estrella', status: 'activo', briefing: 'Usa español.', folders: [{ label: 'back', path: repo }, { label: 'docs', path: repo2 }] })).id;
+    const p = (await api('GET', '/api/projects')).find(x => x.id === pid);
+    assert.equal(p.kind, 'con_carpetas'); assert.equal(p.folders.length, 2); assert.equal(p.folders[0].is_git, 1);
+    [folder1, folder2] = p.folders.map(f => f.id);
+    regPid = (await api('POST', '/api/projects', { name: 'Solo notas' })).id;
+    assert.equal((await api('GET', '/api/projects')).find(x => x.id === regPid).kind, 'solo_registro');
+  });
+
+  await t('tarea humana: se mueve sin runner; transiciones inválidas rechazadas; historial con autor', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Llamar a Yoda', executor: 'humano' })).id;
+    await api('POST', `/api/tasks/${id}/move`, { status: 'revision' });
+    await rejects(api('PUT', `/api/tasks/${id}`, { status: 'bloqueada' }), /Transición no permitida/);
+    await api('PUT', `/api/tasks/${id}`, { status: 'completada', priority: 'alta' });
+    assert.equal(task(id).status, 'completada');
+    const h = all('select * from task_history where task_id=?', id);
+    assert.ok(h.some(x => x.field === 'priority' && x.new_value === 'alta' && x.user_id));
+    assert.ok(one(`select 1 from activity where entity='tarea' and entity_id=? and action='estado' and user_id is not null`, id));
+  });
+
+  await t('agente sin carpeta corre en data/sandbox y termina en revisión con [[LISTO]]', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Redactar', prompt: 'escribe', agent_id: fake, run: true })).id;
+    await until(() => task(id).status === 'revision', 15000, 'revision');
+    assert.ok(fs.existsSync(path.join(process.env.OFICINA_DATA, 'sandbox', 'task-' + id, 'salida.txt')));
+    assert.match(task(id).summary, /Creé salida/);
+    const d = await api('GET', `/api/tasks/${id}`);
+    assert.ok(d.files.some(f => f.name === 'salida.txt'));
+    assert.ok(events.some(e => e.type === 'run.log' && e.data.task_id === id));
+  });
+
+  let qid;
+  await t('consulta → esperando + SSE consulta; respuesta reanuda; worktree + diff; aprobar y fusionar', async () => {
+    qid = (await api('POST', '/api/tasks', { project_id: pid, folder_id: folder1, area_id: dev, title: 'Crear archivo', prompt: 'PREGUNTA primero', agent_id: fake })).id;
+    await api('POST', `/api/tasks/${qid}/run`, {});
+    await until(() => task(qid).status === 'esperando', 15000, 'esperando');
+    assert.ok(events.some(e => e.type === 'notify' && e.data.kind === 'consulta'));
+    const wt = task(qid).worktree_path;
+    assert.ok(wt && fs.existsSync(wt) && wt.includes('.oficina-worktrees'));
+    const sess = one('select session_id from conversations where id=?', task(qid).conversation_id).session_id;
+    await api('POST', `/api/tasks/${qid}/reply`, { text: 'se llama salida.txt' });
+    await until(() => task(qid).status === 'revision', 15000, 'revision');
+    assert.equal(one('select session_id from conversations where id=?', task(qid).conversation_id).session_id, sess, 'misma sesión');
+    assert.equal(one('select count(*) n from runs where task_id=?', qid).n, 2);
+    const diff = await api('GET', `/api/tasks/${qid}/diff`);
+    assert.match(diff.diff, /salida\.txt/);
+    assert.ok(!/progreso\.md/.test(diff.diff), '.oficina excluido de git');
+    await api('POST', `/api/tasks/${qid}/approve`, { merge: true });
+    assert.equal(task(qid).status, 'completada');
+    assert.ok(fs.existsSync(path.join(repo, 'salida.txt')), 'fusionado en main');
+    assert.ok(!/.ijfw/.test(diff.diff), 'estado de hooks excluido');
+    assert.ok(!fs.existsSync(wt), 'worktree limpiado');
+  });
+
+  await t('segunda carpeta: la tarea corre en la carpeta elegida', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: pid, folder_id: folder2, title: 'En docs', prompt: 'x', agent_id: fake, run: true })).id;
+    await until(() => task(id).status === 'revision');
+    assert.ok(task(id).worktree_path.startsWith(R.canon(repo2)));
+  });
+
+  await t('error → fallida; timeout mata el proceso', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Falla', prompt: 'FALLA', agent_id: fake, run: true })).id;
+    await until(() => task(id).status === 'fallida');
+    update('agents', fake3, { timeout_min: 0.02 });
+    const id2 = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Lento', prompt: 'LENTO', agent_id: fake3, run: true })).id;
+    await until(() => task(id2).status === 'fallida', 15000, 'timeout');
+    assert.equal(one('select end_reason from runs where task_id=? order by id desc', id2).end_reason, 'timeout');
+    update('agents', fake3, { timeout_min: 1 });
+  });
+
+  await t('cola respeta max_concurrent', async () => {
+    const a = (await api('POST', '/api/tasks', { project_id: regPid, title: 'L1', prompt: 'LENTO', agent_id: fake3, run: true })).id;
+    const b = (await api('POST', '/api/tasks', { project_id: regPid, title: 'L2', prompt: 'escribe', agent_id: fake3, run: true })).id;
+    await until(() => task(a).status === 'en_curso');
+    await new Promise(r => setTimeout(r, 500));
+    assert.equal(task(b).status, 'en_cola');
+    await api('POST', `/api/tasks/${a}/abort`, {});
+    await until(() => task(b).status === 'revision', 15000, 'b corre tras abortar a');
+    assert.equal(task(a).status, 'pendiente');
+  });
+
+  await t('cuota → pausada_cuota + snapshot + checkpoint + reset; relevo automático a otro agente con snapshot', async () => {
+    update('areas', dev, { auto_fallback: 1 });
+    const id = (await api('POST', '/api/tasks', { project_id: pid, folder_id: folder1, area_id: dev, title: 'Cuota', prompt: 'CUOTA', agent_id: fake, run: true })).id;
+    await until(() => one('select 1 from handoffs where task_id=?', id), 15000, 'handoff');
+    const ag = one('select * from agents where id=?', fake);
+    assert.equal(ag.status, 'sin_cuota');
+    assert.equal(new Date(ag.quota_reset_at).getMinutes(), 0);
+    const h = one('select * from handoffs where task_id=?', id);
+    assert.match(h.snapshot_md, /Relevo de la tarea/); assert.match(h.snapshot_md, /usage limit/);
+    await until(() => task(id).status === 'revision' && task(id).agent_id === fake2, 20000, 'relevo automático');
+    const wt = task(id).worktree_path;
+    assert.match(fs.readFileSync(path.join(wt, 'relevo-prompt.txt'), 'utf8'), /Continúas el trabajo que dejó fake/);
+    assert.equal(one('select to_agent_id from handoffs where task_id=?', id).to_agent_id, fake2);
+    update('areas', dev, { auto_fallback: 0 });
+    update('agents', fake, { status: 'disponible', quota_reset_at: null, last_error: null });
+  });
+
+  await t('relevo manual a otro agente y a una persona', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Manual', prompt: 'PREGUNTA', agent_id: fake, run: true })).id;
+    await until(() => task(id).status === 'esperando');
+    await api('POST', `/api/tasks/${id}/handoff`, { agent_id: fake2, reason: 'prefiero otro' });
+    await until(() => task(id).agent_id === fake2 && task(id).status === 'revision' && one('select count(*) n from runs where task_id=?', id).n === 2, 15000, 'relevo manual');
+    await api('POST', `/api/tasks/${id}/handoff`, { user_id: 1 });
+    assert.equal(task(id).executor, 'humano'); assert.equal(task(id).status, 'pendiente');
+  });
+
+  await t('dependencias: bloqueada hasta completar y luego se ejecuta sola', async () => {
+    const a = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Dep A', executor: 'humano' })).id;
+    const b = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Dep B', prompt: 'x', agent_id: fake2, depends_on: [a] })).id;
+    assert.equal(task(b).status, 'bloqueada');
+    await rejects(api('POST', `/api/tasks/${b}/run`, {}), /dependencias/);
+    await api('PUT', `/api/tasks/${a}`, { status: 'completada' });
+    await until(() => task(b).status === 'revision', 15000, 'dependiente ejecutada');
+  });
+
+  let cid;
+  await t('Cantina: consulta rápida multi-turno, cambio de agente, convertir en tarea, FTS', async () => {
+    cid = (await api('POST', '/api/conversations', { agent_id: fake, text: 'PREGUNTA sobre el sable azul' })).id;
+    await until(() => one('select status from conversations where id=?', cid).status === 'esperando');
+    await api('POST', `/api/conversations/${cid}/reply`, { text: 'sigue' });
+    await until(() => one('select count(*) n from runs where conversation_id=?', cid).n === 2 && one('select status from conversations where id=?', cid).status === 'inactiva');
+    await api('POST', `/api/conversations/${cid}/switch`, { agent_id: fake2 });
+    await api('POST', `/api/conversations/${cid}/reply`, { text: 'continúa tú' });
+    await until(() => one('select count(*) n from runs where conversation_id=? and agent_id=?', cid, fake2).n === 1 && !['en_curso', 'en_cola'].includes(one('select status from conversations where id=?', cid).status));
+    assert.match(one('select context from conversations where id=?', cid).context, /sable azul/, 'el nuevo agente recibe el historial');
+    const tid = (await api('POST', `/api/conversations/${cid}/to-task`, { project_id: regPid, area_id: docs })).id;
+    assert.match(task(tid).prompt, /sable azul/);
+    assert.equal(one('select task_id from conversations where id=?', cid).task_id, tid);
+    const s = await api('GET', '/api/search?q=sable');
+    assert.ok(s.some(x => x.kind === 'mensaje' && x.link === `#/cantina/${cid}`));
+    assert.ok(s.some(x => x.kind === 'tarea'));
+    const h = await api('GET', '/api/history/chats');
+    assert.ok(h.rows.some(x => x.id === cid));
+  });
+
+  await t('papelera: soft-delete y restaurar', async () => {
+    await api('DELETE', `/api/conversations/${cid}`);
+    assert.ok((await api('GET', '/api/history/papelera')).rows.some(x => x.entity === 'conversations' && x.id === cid));
+    await api('POST', '/api/restore', { entity: 'conversations', id: cid });
+    assert.equal(one('select deleted_at from conversations where id=?', cid).deleted_at, null);
+  });
+
+  await t('parser de límites Claude/Codex → agent_limits', async () => {
+    const st = { limits: [] };
+    R.ADAPTERS.claude.parse({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', unifiedWindows: { five_hour: { utilization: 0.31, resetsAt: 1790281800 }, seven_day: { utilization: 0.85, resetsAt: 1790460000 } } } }, st, () => {});
+    R.ADAPTERS.codex.parse({ type: 'token_count', rate_limits: { primary: { used_percent: 42, resets_in_seconds: 600 } } }, st, () => {});
+    R.saveLimits(fake, st.limits);
+    const l = all(`select * from agent_limits where agent_id=? and source='cli'`, fake);
+    assert.equal(l.find(x => x.win === 'seven_day').used_value, 85);
+    assert.equal(l.find(x => x.win === 'primary').used_value, 42);
+    assert.match(R.parseReset("Claude AI usage limit reached|1790281800"), /^2026-/);
+  });
+
+  await t('Puente de Mando: secciones y agente no encontrado', async () => {
+    const bad = insert('agents', { key: 'fantasma', name: 'Fantasma', adapter: 'fake', exe: path.join(TMP, 'noexiste.exe'), enabled: 1 });
+    await api('POST', '/api/limits', { agent_id: fake, win: 'dia', metric: 'runs', limit_value: 2 });
+    const s = await api('POST', '/api/status/scan');
+    for (const k of ['agents', 'work', 'folders', 'system']) assert.ok(s[k], k);
+    assert.equal(s.agents.find(a => a.id === bad).state, 'no_encontrado');
+    assert.ok(s.agents.find(a => a.id === fake).limits_manual[0].pct >= 80);
+    assert.ok(events.some(e => e.type === 'notify' && e.data.kind === 'limite'), 'alerta 80%');
+    assert.ok(s.folders.length >= 2);
+    update('agents', bad, { enabled: 0 });
+  });
+
+  await t('Consejo: digest, JSON inválido, consolidación con votos, aceptar crea tarea, descartar', async () => {
+    const d = await api('POST', '/api/council/digest', { scope: { project_ids: [pid], last_n: 5 } });
+    assert.match(d.digest_md, /Crear archivo/); assert.match(d.digest_md, /salida\.txt/);
+    assert.throws(() => C.validProposals(C.extractJSON('nada')), /JSON/);
+    const merged = C.consolidate([[{ title: 'Agregar pruebas', description: 'a', impact: 'alto', effort: 'bajo' }], [{ title: 'agregar  PRUEBAS!', description: 'abc', impact: 'alto', effort: 'bajo' }]]);
+    assert.equal(merged.length, 1); assert.equal(merged[0].votes, 2);
+    const rid = (await api('POST', '/api/council', { scope: { project_ids: [pid] }, lenses: ['siguiente', 'pruebas'], agents: [{ agent_id: fake }, { agent_id: fake2 }], moderator: { agent_id: fake3 } })).id;
+    await until(() => one('select status from reviews where id=?', rid).status !== 'en_curso', 20000, 'consejo');
+    const rv = await api('GET', `/api/council/${rid}`);
+    assert.equal(rv.review.status, 'lista');
+    const p = rv.proposals.find(x => x.title === 'Agregar pruebas');
+    assert.equal(p.votes, 2);
+    const tid = (await api('POST', `/api/proposals/${p.id}/accept`, {})).task_id;
+    assert.equal(task(tid).proposal_id, p.id); assert.equal(task(tid).area_id, dev); assert.equal(task(tid).agent_id, fake);
+    const other = rv.proposals.find(x => x.title === 'Documentar API');
+    await api('POST', `/api/proposals/${other.id}/decide`, { status: 'descartada', reason: 'ya existe' });
+    assert.match(C.digest({ project_ids: [pid] }).digest_md, /\[descartada\] Documentar API — motivo: ya existe/);
+    // agente que no devuelve JSON → sin propuestas, sin romper
+    const cid2 = insert('conversations', { kind: 'consejo', title: 't', agent_id: fake, mode: 'plan' });
+    const res = await R.runTurn(cid2, null, { prompt: 'JSONMALO' });
+    assert.throws(() => C.validProposals(C.extractJSON(res.final)));
+  });
+
+  await t('descomponer tarea en subtareas con dependencias; misión encadenada', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, area_id: ana, title: 'Grande', prompt: 'x', agent_id: fake })).id;
+    const { ids } = await api('POST', `/api/tasks/${id}/decompose`);
+    assert.equal(ids.length, 2); assert.deepEqual(JSON.parse(task(ids[1]).depends_on), [ids[0]]); assert.equal(task(ids[0]).parent_id, id);
+    const m = await api('POST', '/api/missions', { project_id: regPid, title: 'Hiperimpulsor', prompt: 'reparar', stages: [{ area_id: ana, agent_id: fake }, { area_id: dev, agent_id: fake2 }] });
+    assert.equal(task(m.ids[1]).status, 'bloqueada');
+  });
+
+  await t('Orden 66 detiene todo y pausa la cola', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'L', prompt: 'LENTO', agent_id: fake3, run: true })).id;
+    await until(() => task(id).status === 'en_curso');
+    const r = await api('POST', '/api/order66');
+    assert.ok(r.stopped >= 1);
+    await until(() => task(id).status === 'pendiente');
+    await api('POST', `/api/tasks/${id}/run`, {});
+    await new Promise(r => setTimeout(r, 400));
+    assert.equal(task(id).status, 'en_cola', 'la cola en pausa no arranca nada');
+    await api('POST', '/api/queue/resume');
+    await until(() => task(id).status === 'en_curso');
+    await api('POST', `/api/tasks/${id}/abort`);
+    await until(() => task(id).status === 'pendiente');
+  });
+
+  await t('historial exporta CSV y timeline', async () => {
+    const res = await api('GET', '/api/history/bitacora?format=csv', null, true);
+    assert.match(await res.text(), /entity/);
+    assert.ok((await api('GET', `/api/history/tareas/${qid}/timeline`)).length > 3);
+  });
+
+  await t('recuperación tras reinicio: en_curso → esperando', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Rec', executor: 'humano' })).id;
+    const c2 = insert('conversations', { kind: 'tarea', task_id: id, status: 'en_curso', agent_id: fake });
+    update('tasks', id, { status: 'en_curso', conversation_id: c2 });
+    insert('runs', { conversation_id: c2, task_id: id, agent_id: fake, started_at: new Date().toISOString() });
+    R.recover();
+    assert.equal(task(id).status, 'esperando');
+    assert.equal(one('select end_reason from runs where conversation_id=?', c2).end_reason, 'interrumpido');
+  });
+
+  server.close();
+  for (const a of R.active.values()) try { process.kill(a.proc.pid); } catch {}
+  console.log(failed ? `\n${failed} FALLARON` : '\nTODO OK');
+  process.exit(failed ? 1 : 0);
+})();
