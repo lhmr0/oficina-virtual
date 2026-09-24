@@ -59,7 +59,7 @@ const ADAPTERS = {
         a.push('--input-format', 'stream-json', '--permission-mode', 'default', '--permission-prompt-tool', 'stdio');
         return { args: a, stdin: JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } }) + '\n', keepOpen: true };
       }
-      a.push('--permission-mode', c.mode === 'plan' ? 'plan' : 'acceptEdits');
+      a.push('--permission-mode', c.mode === 'plan' ? 'plan' : 'bypassPermissions'); // editar: sin terminal no hay a quién pedir permiso
       return { args: a, stdin: prompt };
     },
     newSession: () => crypto.randomUUID(),
@@ -86,7 +86,8 @@ const ADAPTERS = {
     args(c, { first, prompt }) {
       const a = ['exec'];
       if (!first) a.push('resume');
-      a.push('--json', '--skip-git-repo-check', '-c', `sandbox_mode="${c.mode === 'plan' ? 'read-only' : 'workspace-write'}"`);
+      // editar = sin sandbox (el sandbox de Windows no ve las credenciales de git: push/deploy fallaban); plan = solo lectura
+      a.push('--json', '--skip-git-repo-check', ...(c.mode === 'plan' ? ['-c', 'sandbox_mode="read-only"'] : ['--dangerously-bypass-approvals-and-sandbox']));
       if (c.model) a.push('-m', c.model);
       if (c.effort) a.push('-c', `model_reasoning_effort="${c.effort}"`);
       if (!first) a.push(c.session_id);
@@ -235,6 +236,11 @@ async function start(item, mid) {
   const lastRun = one('select * from runs where conversation_id=? order by id desc limit 1', c.id);
   const att = attachmentsFor(cc, first ? null : lastRun);
   let prompt = item.prompt;
+  if (first && lastRun) {
+    const hist = all(`select role,text from messages where conversation_id=? and kind!='nota' order by id desc limit 20`, c.id).reverse();
+    prompt = [task ? taskPrompt(task) : RULES_CHAT, '# Conversación hasta ahora (la sesión anterior se perdió; retoma desde aquí)',
+      hist.map(m => `**${m.role}:** ${m.text}`).join('\n\n'), '# Mensaje actual', item.prompt].join('\n\n');
+  }
   if (att.all.length) {
     try {
       const rel = await host.call(mid, 'putFiles', { cwd, files: att.all.map(a => ({ id: a.id, name: a.name, size: a.size })) });
@@ -279,6 +285,7 @@ async function start(item, mid) {
       let o = null; try { o = JSON.parse(ev.line); } catch {}
       try { ad.parse(ag.adapter === 'fake' ? ev.line : (o ?? null) || {}, st, out); } catch (e) { out('⚠ parser: ' + e.message); }
       if (!o && ag.adapter !== 'fake') out(ev.line);
+      if (st.sessionId && st.sessionId !== st.savedSid) { st.savedSid = st.sessionId; update('conversations', c.id, { session_id: st.sessionId }); }
       if (st.done && b.keepOpen && !st.ended) { st.ended = true; host.runOp(runId, 'endRun'); }
     } else if (ev.t === 'err') {
       errTail = (errTail + ev.text).slice(-3000);
@@ -658,8 +665,13 @@ function createTask(d, userId) {
 }
 
 // ---------- arranque / emergencias ----------
+const orphans = new Map(); // runId → máquina: procesos que pueden seguir vivos en la PC tras un reinicio del servidor
+bus.on('machine.online', mid => { for (const [runId, m] of orphans) if (m === mid) { orphans.delete(runId); host.call(mid, 'killRun', { runId }).catch(() => {}); } });
 function recover() {
-  for (const r of all('select * from runs where ended_at is null')) update('runs', r.id, { ended_at: now(), end_reason: 'interrumpido' });
+  for (const r of all('select * from runs where ended_at is null')) {
+    update('runs', r.id, { ended_at: now(), end_reason: 'interrumpido' });
+    const c = conv(r.conversation_id); if (c) orphans.set(r.id, machineOfConv(c));
+  }
   for (const c of all(`select * from conversations where status in ('en_curso','en_cola')`)) {
     update('conversations', c.id, { status: 'esperando' });
     insert('messages', { conversation_id: c.id, role: 'sistema', text: 'El servidor se reinició y la ejecución se interrumpió. Responde (ej. "continúa") para reanudar la sesión.', kind: 'nota', at: now() });

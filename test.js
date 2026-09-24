@@ -22,6 +22,7 @@ if(s.includes('Consejo Jedi')||s.includes('moderador'))return console.log('Aquí
 if(s.includes('JSONMALO'))return console.log('no hay json aquí');
 if(s.includes('ADJUNTO')&&!s.includes('# RELEVO')){const t=fs.readFileSync('.oficina/adjuntos/nota.txt','utf8');fs.writeFileSync('salida.txt',t);return console.log('Leí: '+t+'\\n[[LISTO]] Leí: '+t);}
 if(s.includes('Descompón'))return console.log(JSON.stringify({subtareas:[{title:'Sub A',prompt:'a',area:'Análisis'},{title:'Sub B',prompt:'b',area:'Desarrollo',depends_on:[0]}]}));
+if(s.includes('sesión anterior se perdió')){fs.writeFileSync('ctx-prompt.txt',s);return console.log('[[LISTO]] retomé');}
 if(s.includes('# RELEVO')){fs.writeFileSync('relevo-prompt.txt',s);return console.log('Continué.\\n[[LISTO]] Relevo completado');}
 if(s.includes('PREGUNTA'))return console.log('Necesito saber algo.\\n[[CONSULTA]] ¿Cómo se llama el archivo?');
 if(s.includes('CUOTA')){console.error("You've hit your usage limit. try again at 3:00 PM");process.exit(1)}
@@ -327,6 +328,16 @@ function gitRepo(name) {
     R.recover();
     assert.equal(task(id).status, 'esperando');
     assert.equal(one('select end_reason from runs where conversation_id=?', c2).end_reason, 'interrumpido');
+    // turno cortado antes de capturar la sesión: al continuar recibe la tarea y el chat, no solo "continúa"
+    const id3 = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Comparar ofertas', prompt: 'OBJETIVO-ORIGINAL', agent_id: fake })).id;
+    const c3 = insert('conversations', { kind: 'tarea', task_id: id3, status: 'en_curso', agent_id: fake, model: 'm1', effort: 'low', mode: 'editar' });
+    update('tasks', id3, { status: 'en_curso', conversation_id: c3 });
+    insert('runs', { conversation_id: c3, task_id: id3, agent_id: fake, started_at: new Date().toISOString() });
+    R.recover();
+    await api('POST', `/api/tasks/${id3}/reply`, { text: 'continúa' });
+    await until(() => task(id3).status === 'revision', 15000, 'revisión tras retomar');
+    const ctx = fs.readFileSync(path.join(process.env.OFICINA_DATA, 'sandbox', 'task-' + id3, 'ctx-prompt.txt'), 'utf8');
+    assert.match(ctx, /OBJETIVO-ORIGINAL/); assert.match(ctx, /continúa/);
   });
 
   // ---------- agente de campo remoto (worker.js en otro proceso) ----------
@@ -372,6 +383,15 @@ function gitRepo(name) {
     await until(() => task(id2).status === 'revision', 25000, 'arranca al reconectar');
   });
   worker?.kill();
+
+  await t('fin de run aunque un hijo huérfano retenga stdout (hooks del CLI)', async () => {
+    const H = require('./hostops').create({ dataDir: path.join(TMP, 'orf') });
+    const child = `require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},20000)'],{stdio:'inherit'}).unref();console.log('[[LISTO]] ok')`;
+    const t0 = Date.now(), evs = [];
+    await new Promise(res => H.spawnRun({ runId: 'orf1', exe: process.execPath, args: ['-e', child], cwd: TMP }, e => { evs.push(e); if (e.t === 'exit') res(); }));
+    assert.ok(Date.now() - t0 < 10000, 'debió terminar por la gracia de 3 s');
+    assert.ok(evs.some(e => e.t === 'out' && /LISTO/.test(e.line)));
+  });
 
   await t('modo Google (VPS): sin contraseñas, redirección PKCE, estado inválido y cabeceras de seguridad', async () => {
     const GP = PORT + 1;

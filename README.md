@@ -33,7 +33,7 @@ Requisitos: Node 22+, git, y los CLIs de los agentes instalados y con sesión in
 4. Si se agota la cuota: checkpoint git + snapshot de relevo; eliges quién continúa (o relevo automático por la cadena del área).
 5. Modo **supervisado** (Claude): cada permiso que pide aparece en vivo para aprobar/denegar.
 
-⚠ En modo *Editar* los agentes auto-aceptan cambios dentro de su carpeta de trabajo.
+⚠ En modo *Editar* los agentes trabajan sin pedir permiso y sin sandbox (Claude `bypassPermissions`, Codex `--dangerously-bypass-approvals-and-sandbox`, agy `--dangerously-skip-permissions`, CommandCode `auto-accept`): pueden ejecutar comandos, hacer push y desplegar con tus credenciales, igual que tu CLI. *Plan* es solo lectura; *Supervisado* (Claude) te pide cada permiso.
 
 ## En el VPS con la PC como ejecutora (acceso desde cualquier lado)
 

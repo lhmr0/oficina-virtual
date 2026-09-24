@@ -19,7 +19,7 @@ function agentPicker(p, sel = {}, { modes = true, blank = false } = {}) {
     <div><label class="l" for="${p}agent">Agente</label><select id="${p}agent" name="agent_id">${opts(agentsOn().map(x => [x.id, x.name + (x.status === 'sin_cuota' ? ' (sin cuota)' : '')]), a?.id, blank ? '— por defecto del área —' : null)}</select></div>
     <div><label class="l" for="${p}model">Modelo</label><select id="${p}model" name="model">${modelOpts(a, sel.model)}</select></div>
     <div><label class="l" for="${p}effort">Esfuerzo</label><select id="${p}effort" name="effort">${opts((a?.efforts || []).map(e => [e, e]), sel.effort || a?.default_effort, '—')}</select></div>
-    ${modes ? `<div><label class="l" for="${p}mode">Modo</label><select id="${p}mode" name="mode">${opts([['editar', 'Editar (auto-acepta cambios)'], ['plan', 'Plan / solo lectura'], ['supervisado', 'Supervisado (aprobar permisos, Claude)']], sel.mode || 'editar')}</select></div>` : ''}
+    ${modes ? `<div><label class="l" for="${p}mode">Modo</label><select id="${p}mode" name="mode">${opts([['editar', 'Editar (autónomo: aprueba todo, como tu CLI)'], ['plan', 'Plan / solo lectura'], ['supervisado', 'Supervisado (aprobar permisos, Claude)']], sel.mode || 'editar')}</select></div>` : ''}
   </div>`;
 }
 function bindPicker(root, p) {

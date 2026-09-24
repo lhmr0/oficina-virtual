@@ -196,7 +196,11 @@ $d = New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Console]::In.ReadT
     if (stdin != null) { p.stdin.write(stdin); if (!keepOpen) p.stdin.end(); } else p.stdin.end();
     p.stdout.on('data', d => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).replace(/\r$/, ''); buf = buf.slice(i + 1); if (line.trim()) onEvent({ t: 'out', line }); } });
     p.stderr.on('data', d => onEvent({ t: 'err', text: String(d) }));
-    p.on('close', code => { if (buf.trim()) onEvent({ t: 'out', line: buf.trim() }); runs.delete(runId); onEvent({ t: 'exit', code, error: errored }); });
+    let done = false;
+    const fin = code => { if (done) return; done = true; if (buf.trim()) onEvent({ t: 'out', line: buf.trim() }); runs.delete(runId); onEvent({ t: 'exit', code, error: errored }); };
+    p.on('close', fin);
+    // ponytail: si un proceso hijo huérfano (hooks/plugins del CLI) hereda stdout, 'close' nunca llega: tras salir, 3 s de gracia y cerramos
+    p.on('exit', code => setTimeout(() => { if (!done) { p.stdout.destroy(); p.stderr.destroy(); fin(code); } }, 3000));
     return { pid: p.pid ?? null };
   }
 
