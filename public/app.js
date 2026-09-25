@@ -1,5 +1,5 @@
 // Arranque, login, shell, router, tiempo real (SSE) y bandeja de pendientes
-import { S, get, post, put, h, $, $, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme } from './core.js';
+import { S, get, post, put, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme } from './core.js';
 import { sprite } from './sprites.js';
 import { VIEWS, taskForm, missionForm } from './views.js';
 
