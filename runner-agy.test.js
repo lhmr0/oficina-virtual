@@ -16,8 +16,10 @@ const run = parse([
   step('agent_response', 'ACTIVE', { text_delta: 'Voy a ' }),
   step('agent_response', 'DONE', { text_delta: 'revisar.' }),
   step('tool', 'ACTIVE', { tool_name: 'run_command' }),
-  step('tool', 'DONE', { tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'echo hola' }, output: 'hola\r\n' } }),
+  step('tool', 'DONE', { tool_name: 'tool', tool_info: { name: 'run_command', parameters: { CommandLine: 'echo hola' }, output: 'hola\r\n' } }),
   step('tool', 'DONE', { tool_info: { name: 'write_to_file', parameters: { TargetFile: 'nota.txt' }, error: { type: 'WriteError', message: 'Permiso denegado' } } }),
+  step('tool', 'DONE', { tool_name: 'tool', tool_info: { name: 'system_message' } }),
+  step('tool', 'DONE', { tool_name: 'tool' }),
   step('checkpoint', 'DONE'),
   { event: 'result', result: { response: 'Voy a revisar.', status: 'SUCCESS', conversation_id: 'conversation-1' } },
 ]);
