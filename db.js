@@ -138,7 +138,7 @@ if (!one('select 1 from agents limit 1')) {
     { key: 'claude', name: 'Claude', adapter: 'claude', exe: 'claude', color: '#ff8c42',
       models: ['sonnet', 'opus', 'haiku', 'fable'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'sonnet', default_effort: 'medium' },
     { key: 'codex', name: 'Codex', adapter: 'codex', exe: 'codex', color: '#3ddc84',
-      models: ['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-6-luna'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'gpt-5.6-terra', default_effort: 'medium' },
+      models: ['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'gpt-5.6-terra', default_effort: 'medium' },
     { key: 'antigravity', name: 'Antigravity', adapter: 'agy', exe: 'agy', color: '#4fa3ff',
       models: ['gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.1-pro-high', 'claude-sonnet-4-6', 'claude-opus-4-6-thinking'], efforts: ['low', 'medium', 'high'], default_model: 'gemini-3.8-flash-high', default_effort: 'medium' },
     { key: 'commandcode', name: 'CommandCode', adapter: 'commandcode', exe: 'node', pre_args: [ccEntry], color: '#ff4d4d',

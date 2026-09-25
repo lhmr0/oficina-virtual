@@ -49,6 +49,12 @@ async function workdir(t) {
 // ---------- adaptadores ----------
 // args(c, ctx) → {args, stdin}; parse(obj|string, st) acumula en st: sessionId, final, error, tokens, cost, limits[], permission
 const cap = (s, n = 24000) => s.length > n ? s.slice(0, n / 2) + '\n…[recortado]…\n' + s.slice(-n / 2) : s;
+function codexFallback(model, defaultModel, available) {
+  const alternatives = (Array.isArray(available) ? available : []).filter(m => m && m !== model);
+  return alternatives.includes(defaultModel) ? defaultModel
+    : alternatives.includes('gpt-5.6-terra') ? 'gpt-5.6-terra'
+    : alternatives[0] || null;
+}
 const ADAPTERS = {
   claude: {
     args(c, { first, prompt, supervised }) {
@@ -105,7 +111,7 @@ const ADAPTERS = {
       }
       if (o.type === 'turn.completed') { st.error = null; st.tin = o.usage?.input_tokens || 0; st.tcache = o.usage?.cached_input_tokens || 0; st.tout = o.usage?.output_tokens || 0; }
       if (o.type === 'turn.failed') st.error = o.error?.message || 'turn.failed';
-      if (o.type === 'error') st.error = o.message;
+      if (o.type === 'error') st.error = o.message || o.error?.message || String(o.error || 'error');
       const rl = o.rate_limits || o.msg?.rate_limits || o.info?.rate_limits;
       if (rl) for (const [w, v] of Object.entries(rl)) if (v && v.used_percent != null)
         st.limits.push({ win: w, pct: v.used_percent, resets: v.resets_at || (v.resets_in_seconds ? Date.now() / 1000 + v.resets_in_seconds : null) });
@@ -126,12 +132,26 @@ const ADAPTERS = {
     parse(o, st, out) {
       if (o.event === 'init') st.sessionId = o.conversation_id;
       const s = o.step_update;
-      if (s?.text_delta) { st.buf = (st.buf || '') + s.text_delta; }
-      if (s?.state === 'DONE' && st.buf) { out('💬 ' + st.buf); st.buf = ''; }
-      if (s?.step_type && s.step_type !== 'agent_response' && s.step_type !== 'user_input' && s.state === 'DONE') out('🔧 ' + s.step_type);
+      if (s?.step_type === 'agent_response') {
+        if (s.text_delta) st.buf = (st.buf || '') + s.text_delta;
+        if (s.state === 'DONE' && st.buf) { out('💬 ' + st.buf); st.buf = ''; st.agyResponseShown = true; }
+      }
+      if (s?.step_type === 'tool' && s.state === 'DONE') {
+        const info = s.tool_info || {};
+        const name = s.tool_name || info.name || 'herramienta';
+        const compact = value => typeof value === 'string' ? value : JSON.stringify(value);
+        const params = info.parameters;
+        const detail = params && Object.keys(params).length
+          ? (params.CommandLine || params.command || params.command_line || compact(params)) : '';
+        out(`🔧 ${name}${detail ? ' · ' + cap(detail, 400) : ''}`);
+        if (info.output != null && info.output !== '') out('  ↳ ' + cap(compact(info.output).trim(), 1000));
+        if (info.error) out('⚠ ' + name + ': ' + cap(compact(info.error), 500));
+      }
       if (o.event === 'result') {
         const r = o.result || {};
         st.final = r.response || ''; st.sessionId = r.conversation_id || st.sessionId;
+        if (st.buf) { out('💬 ' + st.buf); st.buf = ''; st.agyResponseShown = true; }
+        if (st.final && !st.agyResponseShown) out('💬 ' + st.final);
         st.tcache = r.usage?.cache_read_tokens || 0; st.tin = (r.usage?.input_tokens || 0) + st.tcache; st.tout = r.usage?.output_tokens || 0; // agy informa la caché aparte
         if (r.status && r.status !== 'SUCCESS') st.error = r.error || r.status;
       }
@@ -221,7 +241,7 @@ async function start(item, mid) {
   const ag = agentOf(c.agent_id);
   const ad = ADAPTERS[ag.adapter];
   const task = taskOfConv(c);
-  const first = !c.session_id;
+  let first = !c.session_id;
   if (first && ad.newSession) update('conversations', c.id, { session_id: ad.newSession() });
   const cc = conv(c.id);
   // reservar el cupo antes de cualquier await para que pump() no lance dos veces
@@ -233,6 +253,23 @@ async function start(item, mid) {
     cwd = task ? (await workdir(one('select * from tasks where id=?', task.id))).cwd
       : cc.folder_path || (await host.call(mid, 'workdir', { sandbox: 'conv-' + c.id })).cwd;
   } catch (e) { active.delete(key); throw e; }
+  // El catálogo del agente puede quedar desactualizado; consulta la máquina que ejecutará Codex.
+  if (ag.adapter === 'codex' && cc.model) {
+    try {
+      const available = await host.call(mid, 'detectModels', { adapter: 'codex', exe: ag.exe, pre_args: J(ag.pre_args, []) });
+      if (available.length && !available.includes(cc.model)) {
+        const previous = cc.model;
+        const next = codexFallback(previous, ag.default_model, available);
+        if (next) {
+          cc.model = next;
+          first = true;
+          update('conversations', c.id, { model: next, session_id: null });
+          if (task) update('tasks', task.id, { model: next });
+          item.modelNotice = `El modelo ${previous} no está disponible en esta máquina; se usará ${next}.`;
+        }
+      }
+    } catch { /* Sin catálogo local: el CLI validará el modelo al ejecutar. */ }
+  }
   const lastRun = one('select * from runs where conversation_id=? order by id desc limit 1', c.id);
   const att = attachmentsFor(cc, first ? null : lastRun);
   let prompt = item.prompt;
@@ -259,6 +296,7 @@ async function start(item, mid) {
   const out = line => { fs.writeSync(logf, line + '\n'); emit('run.log', { run_id: runId, conv_id: c.id, task_id: task?.id ?? null, line }); };
   const mname = host.machine(mid)?.name || '';
   out(`▶ ${ag.name} · ${cc.model || 'modelo por defecto'} · ${cc.effort || '-'} · turno ${turn} · ${mname} · ${cwd}`);
+  if (item.modelNotice) { out('ℹ ' + item.modelNotice); item.modelNotice = null; }
 
   const st = { limits: [], final: '', error: null, tin: 0, tout: 0, cost: 0 };
   Object.assign(act, { st, runId });
@@ -303,7 +341,6 @@ async function start(item, mid) {
 
   const code = await exited;
   clearTimeout(timer);
-  active.delete(runId);
   for (const [k, v] of pendingPerms) if (v.runId === runId) pendingPerms.delete(k);
 
   // clasificar
@@ -317,18 +354,40 @@ async function start(item, mid) {
   else if (/\[\[CONSULTA\]\]/.test(st.final)) end_reason = 'consulta';
   else if (/\[\[LISTO\]\]/.test(st.final)) end_reason = 'listo';
   else end_reason = 'sin_marcador';
+  let retryModel = null;
+  if (ag.adapter === 'codex' && !item.codexModelRetried && /model is not supported when using Codex with a ChatGPT account/i.test(errText)) {
+    let available = [];
+    try { available = await host.call(mid, 'detectModels', { adapter: 'codex', exe: ag.exe, pre_args: J(ag.pre_args, []) }); } catch {}
+    retryModel = act.aborted ? null : codexFallback(cc.model, ag.default_model, available);
+    if (retryModel) {
+      const previous = cc.model;
+      update('conversations', c.id, { model: retryModel, session_id: null, status: 'en_cola' });
+      if (task) update('tasks', task.id, { model: retryModel });
+      item.codexModelRetried = true;
+      item.modelNotice = `Codex rechazó ${previous}; se reintenta con ${retryModel}.`;
+    }
+  }
+  if (act.aborted) { retryModel = null; end_reason = 'abortado'; }
   out(`■ fin: ${end_reason} (exit ${code})${errText ? ' · ' + errText.slice(0, 300) : ''}`);
   fs.closeSync(logf);
 
   // costo: el que informa el CLI (Claude) o estimado con la tabla de precios del agente (caché al 10 % si no hay precio propio)
   const pr = J(ag.prices, {})[cc.model || ag.default_model];
   if (!st.cost && pr) st.cost = ((st.tin - (st.tcache || 0)) * pr[0] + (st.tcache || 0) * (pr[2] ?? pr[0] / 10) + st.tout * pr[1]) / 1e6;
-  if (st.sessionId && st.sessionId !== cc.session_id) update('conversations', c.id, { session_id: st.sessionId });
+  if (!retryModel && st.sessionId && st.sessionId !== cc.session_id) update('conversations', c.id, { session_id: st.sessionId });
   update('runs', runId, { ended_at: now(), exit_code: code, end_reason, tokens_in: st.tin, tokens_out: st.tout, cost_usd: st.cost });
   saveLimits(ag.id, st.limits);
   if (end_reason === 'cuota') markQuota(ag, errText || '', st.resetAt);
   else if (end_reason !== 'error') update('agents', ag.id, { last_error: null });
   if (end_reason === 'error') update('agents', ag.id, { last_error: errText.slice(0, 500) });
+
+  active.delete(runId);
+  if (retryModel) {
+    queue.push(item);
+    queue.sort((a, b) => a.pri - b.pri || a.at - b.at);
+    pump();
+    return;
+  }
 
   await finishConv(item, { run_id: runId, end_reason, final: st.final, error: errText, code });
   refreshAgentStatus(ag.id);
@@ -694,6 +753,6 @@ function order66(userId) {
 }
 function resumeQueue(userId) { setSetting('queue_paused', false); log(userId, 'sistema', null, 'reanudar_cola'); emit('queue', { paused: false }); pump(); }
 
-module.exports = { DEFAULT_EXCLUDE, ADAPTERS, STATUS, RULES, RULES_CHAT, queue, active, pendingPerms, runTurn, runTask, runTaskBg, abortConv, answerPermission, setStatus, changeTask,
+module.exports = { DEFAULT_EXCLUDE, ADAPTERS, STATUS, RULES, RULES_CHAT, codexFallback, queue, active, pendingPerms, runTurn, runTask, runTaskBg, abortConv, answerPermission, setStatus, changeTask,
   createTask, approveTask, returnTask, handoffTask, createHandoff, snapshot, taskPrompt, workdir, folderOf, machineOfTask, machineOfConv, recover, order66,
   resumeQueue, quotaTick, parseReset, saveLimits, markQuota, pump, question, isPaused, depsPending };

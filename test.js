@@ -256,6 +256,56 @@ function gitRepo(name) {
     assert.match(R.parseReset("Claude AI usage limit reached|1790281800"), /^2026-/);
   });
 
+  await t('Codex usa un modelo disponible al faltar el seleccionado', async () => {
+    assert.equal(R.codexFallback('gpt-6-luna', 'gpt-5.6-terra', ['gpt-5.6-sol', 'gpt-5.6-terra']), 'gpt-5.6-terra');
+    assert.equal(R.codexFallback('gpt-6-luna', 'gpt-6-luna', ['gpt-5.6-terra']), 'gpt-5.6-terra');
+    assert.equal(R.codexFallback('gpt-6-luna', 'gpt-5.6-terra', ['gpt-6-luna']), null);
+    assert.equal(R.codexFallback('gpt-6-luna', 'gpt-6-luna', ['gpt-6-luna']), null);
+    assert.equal(R.codexFallback('gpt-6-luna', 'gpt-5.6-terra', []), null);
+  });
+
+  await t('Codex reintenta una sola vez cuando la cuenta rechaza el modelo', async () => {
+    const H = require('./host');
+    const originalCall = H.call;
+    const cli = `if(process.argv.includes('bad')){console.log(JSON.stringify({type:'error',status:400,error:{type:'invalid_request_error',message:"The 'bad' model is not supported when using Codex with a ChatGPT account."}}));process.exit(1)}console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'[[LISTO]] correcto'}}));console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:1,output_tokens:1}}))`;
+    const codex = mk('codex-falso', { adapter: 'codex', pre_args: JSON.stringify(['-e', cli]), models: '["bad","good"]', default_model: 'good' });
+    let detectCount = 0, releaseDetect, releaseAbort = () => {};
+    const delayedDetect = new Promise(resolve => { releaseDetect = resolve; });
+    H.call = (mid, op, args) => op === 'detectModels'
+      ? (++detectCount === 2 ? delayedDetect : Promise.resolve(['bad', 'good']))
+      : originalCall(mid, op, args);
+    try {
+      const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Reintento Codex', prompt: 'prueba', agent_id: codex, model: 'bad', run: true })).id;
+      await until(() => detectCount === 2, 15000, 'catálogo tras error Codex');
+      const convId = task(id).conversation_id;
+      assert.ok([...R.active.values()].some(a => a.convId === convId), 'reserva activa mientras se consulta el catálogo');
+      assert.throws(() => R.runTurn(convId, null, { prompt: 'duplicado' }), /ya está en ejecución/);
+      releaseDetect(['bad', 'good']);
+      await until(() => task(id).status === 'revision', 15000, 'reintento Codex');
+      const runs = all('select model,end_reason from runs where task_id=? order by id', id);
+      assert.deepEqual(runs.map(r => r.model), ['bad', 'good']);
+      assert.deepEqual(runs.map(r => r.end_reason), ['error', 'listo']);
+      assert.equal(task(id).model, 'good');
+      assert.deepEqual(JSON.parse(one('select models from agents where id=?', codex).models), ['bad', 'good'], 'una máquina no cambia la lista global');
+      assert.equal(one('select session_id from conversations where id=?', task(id).conversation_id).session_id, null);
+      const missing = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Catálogo Codex', prompt: 'prueba', agent_id: codex, model: 'missing', run: true })).id;
+      await until(() => task(missing).status === 'revision', 15000, 'selección disponible Codex');
+      assert.deepEqual(all('select model from runs where task_id=?', missing).map(r => r.model), ['good']);
+      assert.equal(task(missing).model, 'good');
+      let abortDetects = 0;
+      const delayedAbort = new Promise(resolve => { releaseAbort = resolve; });
+      H.call = (mid, op, args) => op === 'detectModels'
+        ? (++abortDetects === 2 ? delayedAbort : Promise.resolve(['bad', 'good']))
+        : originalCall(mid, op, args);
+      const aborted = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Abortar Codex', prompt: 'prueba', agent_id: codex, model: 'bad', run: true })).id;
+      await until(() => abortDetects === 2, 15000, 'catálogo antes de abortar');
+      await api('POST', `/api/tasks/${aborted}/abort`, {});
+      releaseAbort(['bad', 'good']);
+      await until(() => task(aborted).status === 'pendiente', 15000, 'tarea Codex abortada');
+      assert.equal(all('select id from runs where task_id=?', aborted).length, 1, 'no se reencola tras abortar');
+    } finally { releaseDetect(['bad', 'good']); releaseAbort(['bad', 'good']); H.call = originalCall; }
+  });
+
   await t('Puente de Mando: secciones y agente no encontrado', async () => {
     const bad = insert('agents', { key: 'fantasma', name: 'Fantasma', adapter: 'fake', exe: path.join(TMP, 'noexiste.exe'), enabled: 1 });
     await api('POST', '/api/limits', { agent_id: fake, win: 'dia', metric: 'runs', limit_value: 2 });
