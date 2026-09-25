@@ -117,6 +117,76 @@ r('PUT', '/api/me', 'observador', ({ user, body }) => {
   return { ok: true };
 });
 
+// ---------- marcación (SICAPE) ----------
+let activeMarcacion = null;
+let lastMarcacionLog = [];
+let lastMarcacionResult = null;
+
+r('GET', '/api/me/marcacion', 'observador', async () => {
+  const mid = host.defaultMachine();
+  let found = null;
+  try { found = await host.call(mid, 'findMarcacion'); } catch {}
+  return {
+    found: !!found?.path,
+    path: found?.path || null,
+    running: !!activeMarcacion,
+    last_log: lastMarcacionLog,
+    last_result: lastMarcacionResult,
+  };
+});
+
+async function runMarcar({ user }) {
+  if (activeMarcacion) throw new HttpError(409, 'Ya hay una marcación en curso');
+  const mid = host.defaultMachine();
+  const found = await host.call(mid, 'findMarcacion').catch(() => null);
+  need(found?.path, 'No se encontró el archivo marcar-ahora.bat en la carpeta marcacion-sicape');
+
+  const scriptPath = found.path;
+  const cwd = found.dir || path.dirname(scriptPath);
+  const isWin = process.platform === 'win32';
+  const isJs = scriptPath.endsWith('.js');
+  const exe = isJs ? process.execPath : (isWin ? (process.env.ComSpec || 'cmd.exe') : (scriptPath.endsWith('.sh') ? 'sh' : scriptPath));
+  const args = isJs ? [scriptPath] : (isWin ? ['/c', scriptPath] : (scriptPath.endsWith('.sh') ? [scriptPath] : []));
+  const runId = 'marcar-' + Date.now();
+
+  lastMarcacionLog = [];
+  lastMarcacionResult = null;
+  activeMarcacion = { runId, user_id: user.id, started_at: now() };
+  emit('marcacion.status', { running: true, runId });
+
+  const onEvent = ev => {
+    if (ev.t === 'out' || ev.t === 'err') {
+      const text = ev.line || ev.text || '';
+      for (const l of text.split(/\r?\n/)) {
+        if (l) {
+          lastMarcacionLog.push(l);
+          emit('marcacion.log', { line: l, runId });
+        }
+      }
+    } else if (ev.t === 'exit') {
+      activeMarcacion = null;
+      lastMarcacionResult = { code: ev.code, error: ev.error, at: now() };
+      emit('marcacion.status', { running: false, code: ev.code, error: ev.error, runId });
+      log(user.id, 'usuario', user.id, 'marcar', { code: ev.code, ok: ev.code === 0 });
+    }
+  };
+
+  try {
+    await host.spawnRun(mid, { runId, exe, args, cwd }, onEvent);
+  } catch (err) {
+    activeMarcacion = null;
+    emit('marcacion.status', { running: false, error: err.message, runId });
+    throw err;
+  }
+  return { ok: true, runId };
+}
+r('POST', '/api/me/marcar', 'observador', runMarcar);
+r('POST', '/api/me/marcacion', 'observador', runMarcar);
+r('POST', '/api/me/marcacion/abort', 'observador', async () => {
+  if (activeMarcacion) await host.runOp(activeMarcacion.runId, 'killRun');
+  return { ok: true };
+});
+
 // ---------- catálogos ----------
 const agentPublic = a => ({ id: a.id, key: a.key, name: a.name, color: a.color, adapter: a.adapter, models: J(a.models, []), efforts: J(a.efforts, []), prices: J(a.prices, {}),
   default_model: a.default_model, default_effort: a.default_effort, enabled: !!a.enabled, status: a.status, quota_reset_at: a.quota_reset_at, max_concurrent: a.max_concurrent });
