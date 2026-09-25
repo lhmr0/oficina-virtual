@@ -87,8 +87,16 @@ function shell() {
   $('#projSel').onchange = e => { setProject(+e.target.value); mapSoon(0); if (current?.name === 'kanban') go('#/kanban/' + (S.project || 'todos')); };
   $('#drawerX').onclick = closeDrawer;
   const menu = $('#meMenu');
-  const toggleMenu = show => { menu.hidden = !show; $('#meBtn').setAttribute('aria-expanded', show); };
+  const placeMenu = () => {
+    if (menu.hidden) return;
+    const trigger = $('#meBtn').getBoundingClientRect();
+    const width = menu.getBoundingClientRect().width;
+    menu.style.setProperty('--menu-left', Math.max(8, Math.min(trigger.left, window.innerWidth - width - 8)) + 'px');
+    menu.style.setProperty('--menu-bottom', (window.innerHeight - trigger.top + 10) + 'px');
+  };
+  const toggleMenu = show => { menu.hidden = !show; $('#meBtn').setAttribute('aria-expanded', show); if (show) placeMenu(); };
   $('#meBtn').onclick = e => { e.stopPropagation(); toggleMenu(menu.hidden); };
+  window.addEventListener('resize', placeMenu);
   document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('#meMenu')) toggleMenu(false); });
   menu.addEventListener('click', e => { if (e.target.closest('a')) toggleMenu(false); });
   $('#logoutBtn').onclick = async () => { await post('/api/logout'); location.hash = '#/login'; location.reload(); };

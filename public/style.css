@@ -135,16 +135,16 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
 .logo { font: 10px var(--f-pixel); color: var(--yellow); white-space: nowrap; text-decoration: none; }
 .hud-tl select { width: auto; max-width: 220px; padding: 4px 6px; font-size: 13px; }
 .queue-paused { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 26; background: var(--red); color: #fff; font-size: 13px; padding: 6px 12px; }
-.dock { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 40; display: flex; gap: 4px; align-items: center; padding: 6px;
-  background: var(--dock-bg); box-shadow: 0 0 0 2px #000, 0 0 0 4px var(--line); max-width: calc(100vw - 16px); overflow-x: auto; }
-.dock > a, .dock > button { font: 500 13px var(--f-body); color: var(--text); background: transparent; border: 0; padding: 8px 10px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.dock { position: fixed; bottom: max(14px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 40; display: flex; gap: 6px; align-items: center; justify-content: space-between; width: min(780px, calc(100vw - 28px)); padding: 6px;
+  background: var(--dock-bg); box-shadow: 0 0 0 2px #000, 0 0 0 4px var(--line); }
+.dock > a, .dock > button { font: 500 13px var(--f-body); color: var(--text); background: transparent; border: 0; padding: 9px 12px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; min-width: 0; }
 .dock > a:hover, .dock > button:hover { background: var(--panel3); }
 .dock .dock-y { background: #ffe81f; color: #111; }
 .dock .dock-y:hover { background: #ffe81f; filter: brightness(1.1); }
 .dock-me { border-right: 1px solid var(--line) !important; }
 .bell { position: relative; }
 .bell .n { background: var(--red); color: #fff; font: 600 11px var(--f-body); padding: 0 5px; margin-left: 2px; }
-.menu { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); margin-left: -120px; z-index: 45; background: var(--panel); min-width: 220px; padding: 6px;
+.menu { position: fixed; bottom: var(--menu-bottom, 70px); left: var(--menu-left, 12px); z-index: 45; background: var(--panel); min-width: 220px; max-width: calc(100vw - 16px); max-height: min(70vh, 560px); overflow-y: auto; padding: 6px;
   box-shadow: 0 0 0 2px #000, 0 0 0 4px var(--line); display: flex; flex-direction: column; }
 .menu-head { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .menu a, .menu button { font: 14px var(--f-body); color: var(--text); background: none; border: 0; text-align: left; padding: 8px 10px; cursor: pointer; text-decoration: none; }
@@ -171,7 +171,7 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
 .err { color: var(--red); min-height: 22px; margin-top: 8px; }
 
 /* ---------- mapa de la estación ---------- */
-.map { min-height: 100vh; padding: 44px 14px 54px; overflow: auto; box-sizing: border-box; }
+.map { min-height: 100vh; padding: 76px 14px 88px; overflow: auto; box-sizing: border-box; }
 .station-layout { max-width: 1760px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; position: relative; }
 .station-top-row { display: flex; gap: 8px; align-items: stretch; width: 100%; flex: none; }
 .station-main { flex: 1 1 0; min-width: 0; }
@@ -201,7 +201,7 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
 .run-item .run-meta { font-size: 10px; color: var(--muted); }
 .run-status { font-size: 10px; display: inline-flex; align-items: center; gap: 3px; }
 .station-tab-btn {
-  position: fixed; right: 12px; top: 48px; z-index: 20; background: var(--panel); color: var(--text);
+  position: fixed; right: 14px; top: 14px; z-index: 20; background: var(--panel); color: var(--text);
   border: 2px solid var(--line); box-shadow: 0 0 0 2px #000, 0 0 0 3px var(--yellow);
   padding: 4px 8px; cursor: pointer; font: 500 11px var(--f-body); display: inline-flex; align-items: center; gap: 5px;
 }
@@ -215,11 +215,11 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
   margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px solid var(--line); flex: none;
 }
 .wing { display: flex; flex-wrap: wrap; gap: 6px; }
-.room2 { flex: 1 1 240px; min-height: 94px; position: relative; cursor: pointer; padding: 22px 8px 6px;
+.room2 { flex: 1 1 240px; min-height: 94px; position: relative; cursor: pointer; padding: 30px 8px 6px;
   background: repeating-conic-gradient(var(--floor) 0 25%, var(--floor2) 0 50%) 0 0 / 22px 22px;
-  box-shadow: inset 0 0 0 3px var(--wall), inset 0 6px 0 var(--wall), inset 0 0 0 4px color-mix(in srgb, var(--c) 35%, transparent);
+  box-shadow: inset 0 0 0 3px var(--wall), inset 0 8px 0 var(--wall), inset 0 0 0 5px color-mix(in srgb, var(--c) 58%, transparent), inset 0 18px 28px color-mix(in srgb, var(--c) 8%, transparent);
   overflow: hidden; }
-.room2:hover { box-shadow: inset 0 0 0 3px var(--wall), inset 0 6px 0 var(--wall), inset 0 0 0 4px var(--c); }
+.room2:hover { box-shadow: inset 0 0 0 3px var(--wall), inset 0 8px 0 var(--wall), inset 0 0 0 5px var(--c), inset 0 18px 28px color-mix(in srgb, var(--c) 12%, transparent); }
 .room2::after { content: ''; position: absolute; left: 50%; width: 44px; margin-left: -22px; height: 5px; background: var(--floor-base); box-shadow: 0 0 0 1px var(--wall); z-index: 3; } /* puerta al pasillo */
 .room2::before { content: ''; position: absolute; left: 50%; width: 6px; height: 3px; margin-left: -3px; background: var(--green); box-shadow: 0 0 5px var(--green); border-radius: 1px; z-index: 5; } /* led puerta */
 .wing:first-child .room2::after { bottom: 0; } .wing:last-child .room2::after { top: 0; }
@@ -252,10 +252,10 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
     repeating-conic-gradient(var(--floor) 0 25%, var(--floor2) 0 50%) 0 0 / 20px 20px;
 }
 
-.plaque { position: absolute; top: 4px; left: 8px; right: 8px; display: flex; align-items: center; gap: 6px; z-index: 4; }
+.plaque { position: absolute; top: 4px; left: 8px; right: 8px; display: flex; align-items: center; gap: 6px; z-index: 4; min-height: 23px; padding: 2px 6px; background: var(--panel); border-left: 3px solid var(--c); border-bottom: 1px solid color-mix(in srgb, var(--c) 55%, var(--line)); }
 .plaque b { font: 9px var(--f-pixel); color: var(--c); }
 .plaque small { font-size: 11px; }
-.room-code { font: 8px var(--f-mono); color: var(--muted); opacity: .75; letter-spacing: 1px; margin-left: 2px; }
+.room-code { font: 10px var(--f-mono); color: var(--muted); letter-spacing: 1px; margin-left: 2px; }
 .room2 .deco { position: absolute; right: 6px; bottom: 6px; opacity: .85; transform: scale(.85); transform-origin: bottom right; z-index: 1; }
 .desks2, .stools { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: flex-end; padding: 24px 8px 6px; z-index: 2; position: relative; }
 .desk { position: relative; display: flex-direction: column; align-items: center; width: 76px; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; font: inherit; display: flex; transition: transform 0.1s ease; }
@@ -268,7 +268,7 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
   0% { transform: translateY(0); filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)) brightness(1); }
   100% { transform: translateY(-1px); filter: drop-shadow(0 2px 4px rgba(255,140,66,0.3)) brightness(1.2); }
 }
-.desk .lbl { font-size: 11px; line-height: 1.15; text-align: center; color: var(--muted); max-width: 76px; margin-top: 2px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; font-weight: 500; }
+.desk .lbl { font-size: 11px; line-height: 1.15; text-align: center; color: var(--text); max-width: 76px; margin-top: 2px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; font-weight: 600; background: var(--panel); padding: 1px 3px; }
 .desk:hover .lbl { color: var(--text); }
 .desk.free { opacity: .35; cursor: default; }
 .desk.en_curso > .sprite { animation: screen 1.2s steps(2) infinite; }
@@ -280,14 +280,19 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
 .bubble.z { background: #c7d2ff; font-size: 8px; animation: none; }
 .bubble.o { background: var(--orange); }
 @keyframes bob { 50% { transform: translateY(-2px); } }
-.hall { position: relative; height: 56px; margin: 4px 0; background: repeating-linear-gradient(90deg, #10142b 0 20px, #131833 20px 40px); box-shadow: inset 0 0 0 2px #1c2250; overflow: hidden; }
+.hall { --hall-action-space: 190px; position: relative; height: 120px; margin: 6px 0; background: repeating-linear-gradient(90deg, var(--floor-base) 0 20px, var(--floor) 20px 40px); box-shadow: inset 0 0 0 2px var(--wall), inset 0 0 0 4px color-mix(in srgb, var(--holo) 30%, transparent); overflow: hidden; }
+.hall::after { content: ''; position: absolute; top: 76px; bottom: 3px; left: 4px; right: 4px; z-index: 1; pointer-events: none; background: color-mix(in srgb, var(--holo) 7%, transparent); border-top: 1px dashed color-mix(in srgb, var(--holo) 42%, var(--wall)); }
+.hall-crew { position: absolute; left: 8px; right: 8px; top: 6px; height: 68px; z-index: 2; display: flex; align-items: flex-end; gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.hall-crew::-webkit-scrollbar { display: none; }
+.hall-crew .avatar { position: relative; bottom: auto; flex: 1 0 72px; min-width: 72px; max-width: 110px; }
+.hall-crew .avatar .sprite { max-height: 28px; }
+.hall-crew .avatar:not(.sleeping) .sprite { animation: avatarIdle 1s steps(2) infinite alternate; }
+@keyframes avatarIdle { 50% { transform: translateY(-2px); } }
 .avatar { position: absolute; bottom: 4px; display: flex; flex-direction: column; align-items: center; z-index: 2; }
 .avatar .sprite { max-height: 38px; width: auto; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); }
-.avatar .tag { font-size: 10px; color: var(--muted); background: rgba(0,0,0,.75); padding: 1px 5px; margin-top: 1px; white-space: nowrap; border-radius: 2px; }
-.walker { animation: walk var(--d, 14s) steps(28) infinite alternate; }
-.walker .sprite { animation: step .3s steps(2) infinite; }
-@keyframes walk { from { left: 8%; } to { left: 86%; } }
-@keyframes step { 50% { transform: translateY(-2px); } }
+.avatar .tag { font-size: 10px; line-height: 1.1; color: #fff; background: #10142a; padding: 1px 5px; margin-top: 1px; white-space: nowrap; border-radius: 2px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.avatar-status { font-size: 9px; line-height: 1.1; color: #bfeecf; background: #102a21; padding: 1px 4px; white-space: nowrap; }
+.sleeping .avatar-status { color: #fbe0a9; background: #493419; }
 .sleeping .sprite { filter: grayscale(1) brightness(.6); }
 .bar { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 12px; background: #5a3a1a; box-shadow: 0 0 0 1px #000, inset 0 2px 0 #7a5230; z-index: 1; }
 .cantina2 { position: relative; }
@@ -297,18 +302,19 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
 .council-yoda { display: flex; align-items: center; justify-content: center; transform: translateY(-3px); }
 .council-yoda .sprite { max-height: 38px; width: auto; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.7)); }
 .council-dais { width: 100%; display: flex; justify-content: center; align-items: center; position: relative; z-index: 2; padding-top: 16px; }
-.hall-runner { position: absolute; top: 14px; bottom: 14px; left: 0; right: 0; background: repeating-linear-gradient(90deg, #1b234b 0 20px, #161c3d 20px 40px); box-shadow: 0 0 0 1px #263169; pointer-events: none; z-index: 0; }
-.hall-arrows { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); font: 9px var(--f-pixel); color: rgba(79,195,247,0.18); text-align: center; letter-spacing: 16px; pointer-events: none; user-select: none; }
+.hall-runner { position: absolute; top: 13px; bottom: 13px; left: 0; right: 0; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--holo) 12%, var(--floor)) 0 20px, var(--floor) 20px 40px); box-shadow: 0 0 0 1px var(--wall), inset 0 0 0 3px color-mix(in srgb, var(--holo) 8%, transparent); pointer-events: none; z-index: 0; }
+.hall-arrows { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); font: 9px var(--f-pixel); color: color-mix(in srgb, var(--holo) 32%, transparent); text-align: center; letter-spacing: 16px; pointer-events: none; user-select: none; }
 .hall-lamp { position: absolute; top: -1px; z-index: 1; pointer-events: none; filter: drop-shadow(0 2px 5px rgba(255,232,31,0.5)); }
-.hall-more-btn { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); z-index: 10; font: 10px var(--f-pixel); padding: 5px 12px; background: var(--panel); border: 2px solid var(--yellow); color: var(--yellow); cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.6); }
+.hall-more-btn { position: absolute; right: 12px; bottom: 8px; z-index: 10; font: 10px var(--f-pixel); padding: 5px 12px; background: var(--panel); border: 2px solid var(--yellow); color: var(--yellow); cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.6); max-width: calc(var(--hall-action-space) - 12px); }
 .hall-more-btn:hover { background: var(--yellow); color: #070913; }
 .mouse-droid-walker { position: absolute; bottom: 3px; z-index: 3; animation: mousePatrol var(--d, 10s) linear infinite; }
+.mouse-droid-walker .sprite { max-height: 28px; }
 @keyframes mousePatrol {
-  0% { left: 5%; transform: scaleX(1); }
+  0% { left: 8px; transform: scaleX(1); }
   49% { transform: scaleX(1); }
-  50% { left: 88%; transform: scaleX(-1); }
+  50% { left: max(8px, calc(100% - var(--hall-action-space) - 50px)); transform: scaleX(-1); }
   99% { transform: scaleX(-1); }
-  100% { left: 5%; transform: scaleX(1); }
+  100% { left: 8px; transform: scaleX(1); }
 }
 
 .deco-item { position: absolute; pointer-events: auto; z-index: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)); transition: transform 0.15s ease, filter 0.15s ease; }
@@ -361,7 +367,7 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
 .council-chair.left-chair { left: -30px; }
 .council-chair.right-chair { right: -30px; }
 
-.room-rug { position: absolute; top: 22px; left: 8px; right: 8px; bottom: 8px; border-radius: 4px; pointer-events: none; z-index: 0; opacity: 0.5; }
+.room-rug { position: absolute; top: 31px; left: 8px; right: 8px; bottom: 8px; border-radius: 4px; pointer-events: none; z-index: 0; opacity: .85; }
 .rug-doc {
   background: repeating-linear-gradient(0deg, rgba(79,195,247,0.06) 0 12px, transparent 12px 24px),
               repeating-linear-gradient(90deg, rgba(79,195,247,0.06) 0 12px, transparent 12px 24px),
@@ -517,22 +523,32 @@ dialog::backdrop { background: var(--dialog-backdrop); }
 [data-theme="blanco"] .desk.free, [data-theme="crema"] .desk.free { opacity: .45; }
 [data-theme="blanco"] .crawl-text, [data-theme="crema"] .crawl-text { color: #ffe81f; }
 [data-theme="blanco"] .avatar .tag, [data-theme="crema"] .avatar .tag { background: rgba(28,22,17,.75); color: #fff; }
+[data-theme="blanco"] .plaque b, [data-theme="crema"] .plaque b { color: color-mix(in srgb, var(--c) 40%, var(--text)); }
+[data-theme="blanco"] .avatar-status, [data-theme="crema"] .avatar-status { color: #14532d; background: #d9f3dd; }
+[data-theme="blanco"] .sleeping .avatar-status, [data-theme="crema"] .sleeping .avatar-status { color: #78350f; background: #fff0c7; }
+
+@media (min-width: 1200px) {
+  .room-doc .desks2, .room-dev .desks2 { padding-right: 155px; }
+  .cantina2 .stools { padding-right: 115px; }
+}
 
 @media (max-width: 820px) {
-  .map { min-height: 100vh; height: auto; padding: 48px 8px 64px; overflow-y: auto; overflow-x: hidden; }
+  .map { min-height: 100vh; height: auto; padding: 72px 8px calc(78px + env(safe-area-inset-bottom)); overflow-y: auto; overflow-x: hidden; }
   .floor { padding: 6px; box-shadow: 0 0 0 2px #000, 0 0 0 5px var(--wall); }
   .wing { gap: 6px; }
   .room2 {
-    flex: 1 1 calc(50% - 6px); min-width: 135px; min-height: 140px; padding: 24px 6px 6px;
+    flex: 1 1 calc(50% - 6px); min-width: 135px; min-height: 140px; padding: 30px 6px 6px;
     background-size: 20px 20px;
     box-shadow: inset 0 0 0 3px var(--wall), inset 0 6px 0 var(--wall), inset 0 0 0 4px color-mix(in srgb, var(--c) 35%, transparent);
   }
-  .room2:hover { box-shadow: inset 0 0 0 3px var(--wall), inset 0 6px 0 var(--wall), inset 0 0 0 4px var(--c); }
+  .room2:hover { box-shadow: inset 0 0 0 3px var(--wall), inset 0 8px 0 var(--wall), inset 0 0 0 5px var(--c); }
   .room2::after { width: 30px; margin-left: -15px; height: 4px; }
-  .plaque { top: 4px; left: 6px; right: 6px; gap: 4px; }
-  .plaque b { font-size: 8px; }
+  .plaque { top: 4px; left: 6px; right: 6px; gap: 4px; padding: 2px 4px; }
+  .plaque b { font-size: 7px; white-space: nowrap; flex: none; }
+  .plaque .room-code { display: none; }
   .plaque small { display: none; }
   .plaque .right { display: inline-block !important; font-size: 10px; background: rgba(0,0,0,.6); padding: 0 4px; }
+  .plaque .right { margin-left: auto; }
   [data-theme="blanco"] .plaque .right, [data-theme="crema"] .plaque .right { background: rgba(255,255,255,.8); color: var(--text); }
   .desks2, .stools { gap: 6px 8px; justify-content: center; padding: 24px 4px 6px; }
   .desk { width: 64px; }
@@ -541,8 +557,14 @@ dialog::backdrop { background: var(--dialog-backdrop); }
   .desk > .sprite { max-height: 25px; }
   .desk .lbl { max-width: 64px; font-size: 10px; -webkit-line-clamp: 1; margin-top: 1px; }
   .room2 .deco { opacity: .6; transform: scale(.65); transform-origin: bottom right; right: 4px; bottom: 4px; }
-  .hall { height: 50px; margin: 4px 0; }
-  .hall-more-btn { font-size: 8px; padding: 3px 6px; right: 4px; }
+  .hall { --hall-action-space: 164px; height: 114px; margin: 4px 0; }
+  .hall::after { top: 68px; }
+  .hall-crew { left: 5px; right: 5px; top: 3px; height: 62px; gap: 4px; }
+  .hall-crew .avatar { flex-basis: 56px; min-width: 56px; max-width: 68px; }
+  .hall-crew .avatar .sprite { max-height: 26px; }
+  .hall .mouse-droid-walker .sprite { max-height: 26px; }
+  .avatar-status { font-size: 8px; }
+  .hall-more-btn { font-size: 8px; padding: 3px 6px; right: 4px; bottom: 7px; gap: 3px; flex-wrap: wrap; justify-content: center; }
   .round-table { width: 72px; height: 38px; margin: 8px auto 0; }
   .council-yoda .sprite { max-height: 32px; }
   .bar { bottom: 6px; height: 10px; }
@@ -567,19 +589,22 @@ dialog::backdrop { background: var(--dialog-backdrop); }
   .hud-tl { left: 8px; top: 8px; right: 8px; }
   .hud-tl select { flex: 1; max-width: none; }
   .drawer-open .hud-tl { display: none; }
-  .dock { bottom: 6px; left: 6px; right: 6px; transform: none; justify-content: space-between; gap: 0; padding: 4px; }
+  .dock { bottom: calc(6px + env(safe-area-inset-bottom)); left: 6px; right: 6px; width: auto; transform: none; justify-content: space-between; gap: 0; padding: 4px; }
   .dock kbd, .dock-me span { display: none; }
   .dock > a, .dock > button { padding: 8px 5px; font-size: 12px; }
-  .menu { margin-left: 0; bottom: 64px; }
   .cantina { grid-template-columns: 1fr; }
   .kanban { grid-auto-columns: 82vw; }
   .matrix { grid-template-columns: 1fr; }
 }
 
+@media (max-width: 360px) {
+  .dock > a, .dock > button { font-size: 10px; padding-inline: 2px; }
+}
+
 @media (min-width: 821px) {
   .map {
     height: 100vh;
-    padding: 44px 14px 54px;
+    padding: 76px 14px 88px;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
@@ -639,8 +664,8 @@ dialog::backdrop { background: var(--dialog-backdrop); }
   }
   .station-main .hall {
     flex: none;
-    height: 58px;
-    margin: 4px 0;
+    height: 120px;
+    margin: 6px 0;
   }
   .station-aside {
     width: 280px;
@@ -702,7 +727,13 @@ dialog::backdrop { background: var(--dialog-backdrop); }
   }
 }
 
-@media (min-width: 821px) and (max-height: 500px) {
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+  .mouse-droid-walker { left: 8px; transform: none; }
+  .deco-bubble { animation: none !important; opacity: 1; transform: translateX(-50%); }
+}
+
+@media (min-width: 821px) and (max-height: 960px) {
   .map {
     height: auto;
     min-height: 100vh;
@@ -713,12 +744,20 @@ dialog::backdrop { background: var(--dialog-backdrop); }
     height: auto;
     flex: none;
   }
+  .station-top-row { flex: none; }
+  .station-main, .station-main .floor { height: auto; }
+  .station-main .floor { flex: none; }
+  .station-main .wing { flex: none; }
+  .station-main .room2 { height: auto; min-height: 218px; }
+  .station-main .desks2, .station-main .stools { flex: none; }
+  .station-aside { height: auto; max-height: 470px; }
   .station-kanban-box {
     height: auto;
     flex: none;
   }
   .station-kanban-box .kanban {
     height: auto;
+    flex: none;
   }
   .station-kanban-box .kcol {
     min-height: 180px;

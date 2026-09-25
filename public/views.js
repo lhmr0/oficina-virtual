@@ -330,10 +330,12 @@ const estacion = {
       <span class="hall-lamp" style="left:12%" title="Lámpara de mamparo">${sprite('bulkhead_lamp', '', 2)}</span>
       <span class="hall-lamp" style="left:38%" title="Lámpara de mamparo">${sprite('bulkhead_lamp', '', 2)}</span>
       <span class="hall-lamp" style="left:64%" title="Lámpara de mamparo">${sprite('bulkhead_lamp', '', 2)}</span>
-      <span class="avatar" style="left:3%" title="Tú">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3.8)}<span class="tag">${h(me.name.split(' ')[0])}</span></span>
-      ${idle.map((a, i) => a.status === 'sin_cuota' || !a.enabled
-        ? `<span class="avatar sleeping" style="left:${20 + i * 14}%" title="${h(a.name)} ${a.enabled ? 'sin cuota hasta ' + fmtDate(a.quota_reset_at) : 'apagado'}">${agentSprite(a, 3.8)}${a.enabled ? '<span class="bubble z">Zz</span>' : ''}<span class="tag">${h(a.name)}</span></span>`
-        : `<span class="avatar walker" style="--d:${12 + i * 3}s;animation-delay:-${i * 2}s" title="${h(a.name)} disponible">${agentSprite(a, 3.8)}<span class="tag">${h(a.name)}</span></span>`).join('')}
+      <div class="hall-crew">
+        <span class="avatar" title="Tú">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3.8)}<span class="tag">${h(me.name.split(' ')[0])}</span><span class="avatar-status">Tú</span></span>
+        ${idle.map(a => a.status === 'sin_cuota' || !a.enabled
+          ? `<span class="avatar sleeping" title="${h(a.name)} ${a.enabled ? 'sin cuota hasta ' + fmtDate(a.quota_reset_at) : 'apagado'}">${agentSprite(a, 3.8)}${a.enabled ? '<span class="bubble z">Zz</span>' : ''}<span class="tag">${h(a.name)}</span><span class="avatar-status">${a.enabled ? 'Sin cuota' : 'Apagado'}</span></span>`
+          : `<span class="avatar" title="${h(a.name)} disponible">${agentSprite(a, 3.8)}<span class="tag">${h(a.name)}</span><span class="avatar-status">Disponible</span></span>`).join('')}
+      </div>
       <span class="avatar mouse-droid-walker deco-interactive" data-interact="mouse" tabindex="0" role="button" style="--d:9s" title="Droide ratón MSE-6 (Patrulla y limpieza de pasillos)">${sprite('mousedroid', '', 2.6)}<span class="tag">MSE-6</span></span>
       <button type="button" class="hall-more-btn" id="btnMoreRooms" title="Ver Análisis, Puente de Mando y Archivos">
         🏛 <b>+ Más salas</b> <span class="chip" style="font-size:9px;padding:1px 5px;margin-left:2px">${moreCount}</span> ▾
