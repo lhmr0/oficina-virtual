@@ -143,10 +143,10 @@ async function runMarcar({ user }) {
 
   const scriptPath = found.path;
   const cwd = found.dir || path.dirname(scriptPath);
-  const isWin = process.platform === 'win32';
+  const isBat = /\.(bat|cmd)$/i.test(scriptPath);
   const isJs = scriptPath.endsWith('.js');
-  const exe = isJs ? process.execPath : (isWin ? (process.env.ComSpec || 'cmd.exe') : (scriptPath.endsWith('.sh') ? 'sh' : scriptPath));
-  const args = isJs ? [scriptPath] : (isWin ? ['/c', scriptPath] : (scriptPath.endsWith('.sh') ? [scriptPath] : []));
+  const exe = isJs ? process.execPath : (isBat ? 'cmd.exe' : (scriptPath.endsWith('.sh') ? 'sh' : scriptPath));
+  const args = isJs ? [scriptPath] : (isBat ? ['/c', scriptPath] : (scriptPath.endsWith('.sh') ? [scriptPath] : []));
   const runId = 'marcar-' + Date.now();
 
   lastMarcacionLog = [];

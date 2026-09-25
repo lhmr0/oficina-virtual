@@ -215,8 +215,12 @@ $d = New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Console]::In.ReadT
   };
 
   // Lanza un agente. onEvent({t:'out',line}|{t:'err',text}|{t:'exit',code,error})
-  function spawnRun({ runId, exe, args, cwd, env = {}, stdin, keepOpen }, onEvent) {
-    const e = resolveExe(exe), a = args.map(expand);
+  function spawnRun({ runId, exe, args = [], cwd, env = {}, stdin, keepOpen }, onEvent) {
+    let e = resolveExe(exe), a = (args || []).map(expand);
+    if (process.platform === 'win32' && /\.(bat|cmd)$/i.test(e)) {
+      a = ['/c', e, ...a];
+      e = process.env.ComSpec || 'cmd.exe';
+    }
     if (strict) {
       const base = path.basename(e).toLowerCase().replace(/\.(exe|cmd)$/, '');
       const ccEntry = e === process.execPath && /command-code[\\/]dist[\\/]index\.mjs$/i.test(a[0] || '');
