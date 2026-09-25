@@ -124,7 +124,64 @@ export async function missionForm() {
   };
 }
 
-// ===================== ESTACIÓN (mapa) =====================
+// ===================== ESTACIÓN (mapa) y KANBAN =====================
+const COLS = [['pendiente', 'Pendiente'], ['en_cola', 'En cola'], ['en_curso', 'En curso'], ['esperando', 'Esperando'], ['revision', 'Revisión'], ['completada', 'Completada'], ['atascadas', 'Atascadas']];
+const STUCK = ['bloqueada', 'pausada_cuota', 'fallida'];
+
+const kanbanCard = (t, showProject = true) => {
+  const a = agent(t.agent_id), ar = area(t.area_id);
+  const tp = showProject ? project(t.project_id) : null;
+  return `<div class="kcard" draggable="${canEdit()}" data-id="${t.id}" style="--c:${ar?.color || '#46529a'}" tabindex="0">
+    <div class="row" style="gap:6px"><small>#${t.id}</small>${tp ? `<span class="chip" style="border-color:${h(tp.color)}">${h(tp.name)}</span>` : ''}${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
+    <div class="t">${h(t.title)}</div>
+    <div class="meta">${t.executor === 'humano' ? `${sprite('rebel', '#ff8c42', 2)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${sprite('droid', a?.color, 2)}${h(a?.name || '—')} <span>${h(t.model || '')}${t.effort ? '·' + h(t.effort) : ''}</span>`}
+    ${t.status === 'en_curso' ? `<span class="chip st-en_curso">⏱ ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}${t.status === 'esperando' ? '<span class="chip st-esperando">? responde</span>' : ''}
+    ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div></div>`;
+};
+
+function bindKanbanDrag(root, getTasks) {
+  let dragId = null;
+  root.addEventListener('dragstart', e => {
+    const c = e.target.closest('.kcard');
+    if (!c) return;
+    dragId = +c.dataset.id;
+    c.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  root.addEventListener('dragend', e => {
+    e.target.closest?.('.kcard')?.classList.remove('dragging');
+    $$('.kcol', root).forEach(x => x.classList.remove('over'));
+  });
+  $$('.kcol', root).forEach(col => {
+    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
+    col.addEventListener('dragleave', () => col.classList.remove('over'));
+    col.addEventListener('drop', async e => {
+      e.preventDefault();
+      col.classList.remove('over');
+      if (!dragId) return;
+      const k = col.dataset.col;
+      const all = typeof getTasks === 'function' ? getTasks() : getTasks;
+      const cards = $$('.kcard', col).filter(c => +c.dataset.id !== dragId);
+      const after = cards.find(c => e.clientY < c.getBoundingClientRect().top + c.offsetHeight / 2);
+      const ord = id => all.find(t => t.id === +id)?.kanban_order ?? 0;
+      const i = after ? cards.indexOf(after) : cards.length;
+      const prev = i > 0 ? ord(cards[i - 1].dataset.id) : (cards[0] ? ord(cards[0].dataset.id) - 1000 : Date.now());
+      const next = after ? ord(after.dataset.id) : prev + 2000;
+      const t = all.find(x => x.id === dragId);
+      if (!t) return;
+      const status = k === 'atascadas' ? t.status : k;
+      if (status === 'en_curso' && t.executor === 'agente' && t.status !== 'en_curso' && !await confirmBox(`¿Ejecutar #${t.id} con ${agent(t.agent_id)?.name || 'el agente'}?`, 'Ejecutar')) return;
+      try {
+        await post(`/api/tasks/${dragId}/move`, { status: status === t.status ? undefined : status, kanban_order: (prev + next) / 2 });
+        refreshSoon(0);
+      } catch (err) {
+        fail(err);
+        refreshSoon(0);
+      }
+    });
+  });
+}
+
 // Se dibuja en la capa #map, siempre visible detrás del panel lateral.
 const AT_DESK = ['en_curso', 'en_cola', 'esperando', 'revision'];
 const LIVE = ['en_curso', 'en_cola', 'esperando'];
@@ -202,32 +259,59 @@ const estacion = {
 
     const sideHidden = localStorage.getItem('ov_station_aside') === '0';
     el.innerHTML = `<div class="station-layout">
-      <div class="station-main">
-        <div class="floor">
-          <div class="wing">${S.boot.areas.map(room).join('')}</div>
-          ${hall}
-          <div class="wing">${cantina}${consejo}${puente}${archivo}</div>
+      <div class="station-top-row">
+        <div class="station-main">
+          <div class="floor">
+            <div class="wing">${S.boot.areas.map(room).join('')}</div>
+            ${hall}
+            <div class="wing">${cantina}${consejo}${puente}${archivo}</div>
+          </div>
         </div>
+        <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Últimas ejecuciones">
+          <div class="station-aside-head">
+            <div class="row" style="gap:6px">
+              <span class="dot ok"></span>
+              <b class="pixel" style="font-size:9px;color:var(--yellow)">EJECUCIONES</b>
+            </div>
+            <div class="row" style="gap:4px">
+              <a href="#/archivos/ejecuciones" class="btn sm ghost" title="Ver historial">Historial</a>
+              <button type="button" class="btn sm ghost" id="hideSideBtn" title="Ocultar pestaña" aria-label="Ocultar">✕</button>
+            </div>
+          </div>
+          <div class="station-aside-body">
+            ${runsList.map(runItemHTML).join('') || '<div class="empty" style="padding:14px">Sin ejecuciones recientes</div>'}
+          </div>
+        </aside>
+        <button type="button" class="station-tab-btn" id="openSideBtn" ${sideHidden ? '' : 'hidden'} title="Ver últimas ejecuciones">
+          📡 <span>Ejecuciones</span>
+        </button>
       </div>
-      <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Últimas ejecuciones">
-        <div class="station-aside-head">
-          <div class="row" style="gap:6px">
-            <span class="dot ok"></span>
-            <b class="pixel" style="font-size:9px;color:var(--yellow)">EJECUCIONES</b>
+
+      <section class="station-kanban-box" id="stationKanban" aria-label="Tablero Kanban de tareas">
+        <div class="station-kanban-head">
+          <div class="row" style="gap:10px">
+            <span class="pixel" style="font-size:10px;color:var(--yellow)">■ TABLERO KANBAN</span>
+            <span class="chip">${vis.length} tareas</span>
+            ${S.project ? `<span class="chip" style="border-color:${h(project(S.project)?.color)}">${h(project(S.project)?.name)}</span>` : '<span class="chip">Todos los proyectos</span>'}
           </div>
-          <div class="row" style="gap:4px">
-            <a href="#/archivos/ejecuciones" class="btn sm ghost" title="Ver historial">Historial</a>
-            <button type="button" class="btn sm ghost" id="hideSideBtn" title="Ocultar pestaña" aria-label="Ocultar">✕</button>
+          <div class="row" style="gap:8px">
+            ${canEdit() ? '<button type="button" class="btn sm y" id="skNewTask">+ Nueva tarea</button>' : ''}
+            <a class="btn sm ghost" href="#/kanban/${S.project || 'todos'}">Ver kanban con filtros ↗</a>
           </div>
         </div>
-        <div class="station-aside-body">
-          ${runsList.map(runItemHTML).join('') || '<div class="empty" style="padding:14px">Sin ejecuciones recientes</div>'}
+        <div class="kanban" id="skGrid">
+          ${COLS.map(([k, l]) => {
+            const list = vis.filter(t => k === 'atascadas' ? STUCK.includes(t.status) : t.status === k).sort((a, b) => a.kanban_order - b.kanban_order);
+            return `<div class="kcol" data-col="${k}">
+              <div class="kcol-head"><span>${l}</span><span>${list.length}</span></div>
+              <div class="kcol-body">${list.map(t => kanbanCard(t, !S.project)).join('') || '<div class="empty" style="padding:16px 8px;font-size:11px">Sin tareas</div>'}</div>
+            </div>`;
+          }).join('')}
         </div>
-      </aside>
-      <button type="button" class="station-tab-btn" id="openSideBtn" ${sideHidden ? '' : 'hidden'} title="Ver últimas ejecuciones">
-        📡 <span>Ejecuciones</span>
-      </button>
+      </section>
     </div>`;
+
+    bindKanbanDrag(el, vis);
 
     el.onclick = e => {
       const hideBtn = e.target.closest('#hideSideBtn');
@@ -249,12 +333,19 @@ const estacion = {
         openBtn.hidden = true;
         return;
       }
+      const nt = e.target.closest('#skNewTask');
+      if (nt) {
+        e.preventDefault();
+        return taskForm({}, { project_id: S.project });
+      }
+      const kc = e.target.closest('.kcard');
+      if (kc) return go('#/tarea/' + kc.dataset.id);
       const d = e.target.closest('[data-task]'); if (d) return go('#/tarea/' + d.dataset.task);
       const c = e.target.closest('[data-chat]'); if (c) return go('#/cantina/' + c.dataset.chat);
       const g = e.target.closest('[data-go]'); if (g) return go(g.dataset.go);
       const r = e.target.closest('[data-area]'); if (r) roomModal(+r.dataset.area, vis);
     };
-    el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('[data-area],[data-go]')) e.target.click(); };
+    el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('[data-area],[data-go],.kcard')) e.target.click(); };
   },
 };
 function roomModal(areaId, tasks) {
@@ -363,8 +454,6 @@ async function projectCard(pid) {
 }
 
 // ===================== KANBAN =====================
-const COLS = [['pendiente', 'Pendiente'], ['en_cola', 'En cola'], ['en_curso', 'En curso'], ['esperando', 'Esperando'], ['revision', 'Revisión'], ['completada', 'Completada'], ['atascadas', 'Atascadas']];
-const STUCK = ['bloqueada', 'pausada_cuota', 'fallida'];
 const kanban = {
   refreshOn: ['task.updated', 'task.created', 'agent.status'],
   async render(el, r) {
@@ -376,16 +465,6 @@ const kanban = {
     const f = S.kf ||= { area: '', agent: '', pri: '', who: '' };
     const all = await get('/api/tasks' + (pid ? '?project_id=' + pid : ''));
     const tasks = all.filter(t => (!f.area || t.area_id === +f.area) && (!f.agent || t.agent_id === +f.agent) && (!f.pri || t.priority === f.pri) && (!f.who || t.assignee_user_id === +f.who));
-    const card = t => {
-      const a = agent(t.agent_id), ar = area(t.area_id);
-      const tp = pid ? null : project(t.project_id);
-      return `<div class="kcard" draggable="${canEdit()}" data-id="${t.id}" style="--c:${ar?.color || '#46529a'}" tabindex="0">
-        <div class="row" style="gap:6px"><small>#${t.id}</small>${tp ? `<span class="chip" style="border-color:${h(tp.color)}">${h(tp.name)}</span>` : ''}${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
-        <div class="t">${h(t.title)}</div>
-        <div class="meta">${t.executor === 'humano' ? `${sprite('rebel', '#ff8c42', 2)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${sprite('droid', a?.color, 2)}${h(a?.name || '—')} <span>${h(t.model || '')}${t.effort ? '·' + h(t.effort) : ''}</span>`}
-        ${t.status === 'en_curso' ? `<span class="chip st-en_curso">⏱ ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}${t.status === 'esperando' ? '<span class="chip st-esperando">? responde</span>' : ''}
-        ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div></div>`;
-    };
     el.innerHTML = `<div class="row"><h1 style="margin:0">Kanban</h1>
       <select id="kfProj" style="width:auto;max-width:260px" aria-label="Proyecto">${opts(S.boot.projects.map(x => [x.id, x.name]), pid || '', 'Todos los proyectos')}</select>${p ? chip('pendiente', PSTATUS[p.status]) : ''}
       <span class="right">${canEdit() ? '<button class="btn y" id="kt">+ Tarea</button><button class="btn" id="km">+ Misión</button>' : ''}<a class="btn o" href="#/consejo${pid ? '?project=' + pid : ''}">Consejo</a>${p ? '<button class="btn ghost" id="kf">Ficha</button>' : ''}</span></div>
@@ -397,7 +476,7 @@ const kanban = {
         <small class="muted">Arrastra a "En curso" para ejecutar con el agente asignado.</small></div>
       <div class="kanban">${COLS.map(([k, l]) => {
         const list = tasks.filter(t => k === 'atascadas' ? STUCK.includes(t.status) : t.status === k).sort((a, b) => a.kanban_order - b.kanban_order);
-        return `<div class="kcol" data-col="${k}"><div class="kcol-head"><span>${l}</span><span>${list.length}</span></div><div class="kcol-body">${list.map(card).join('')}</div></div>`;
+        return `<div class="kcol" data-col="${k}"><div class="kcol-head"><span>${l}</span><span>${list.length}</span></div><div class="kcol-body">${list.map(t => kanbanCard(t, !pid)).join('') || '<div class="empty" style="padding:16px 8px;font-size:11px">Sin tareas</div>'}</div></div>`;
       }).join('')}</div>`;
     $('#kt', el)?.addEventListener('click', () => taskForm({}, { project_id: pid }));
     $('#km', el)?.addEventListener('click', missionForm);
@@ -406,28 +485,7 @@ const kanban = {
     for (const [id, k] of [['#kfA', 'area'], ['#kfG', 'agent'], ['#kfP', 'pri'], ['#kfW', 'who']]) $(id, el).onchange = e => { f[k] = e.target.value; route(true); };
     el.onclick = e => { const c = e.target.closest('.kcard'); if (c) go('#/tarea/' + c.dataset.id); };
     el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('.kcard')) go('#/tarea/' + e.target.dataset.id); };
-    let dragId = null;
-    el.addEventListener('dragstart', e => { const c = e.target.closest('.kcard'); if (!c) return; dragId = +c.dataset.id; c.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
-    el.addEventListener('dragend', e => { e.target.closest?.('.kcard')?.classList.remove('dragging'); $$('.kcol', el).forEach(x => x.classList.remove('over')); });
-    $$('.kcol', el).forEach(col => {
-      col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
-      col.addEventListener('dragleave', () => col.classList.remove('over'));
-      col.addEventListener('drop', async e => {
-        e.preventDefault(); col.classList.remove('over');
-        if (!dragId) return;
-        const k = col.dataset.col;
-        const cards = $$('.kcard', col).filter(c => +c.dataset.id !== dragId);
-        const after = cards.find(c => e.clientY < c.getBoundingClientRect().top + c.offsetHeight / 2);
-        const ord = id => all.find(t => t.id === +id)?.kanban_order ?? 0;
-        const i = after ? cards.indexOf(after) : cards.length;
-        const prev = i > 0 ? ord(cards[i - 1].dataset.id) : (cards[0] ? ord(cards[0].dataset.id) - 1000 : Date.now());
-        const next = after ? ord(after.dataset.id) : prev + 2000;
-        const t = all.find(x => x.id === dragId);
-        const status = k === 'atascadas' ? t.status : k;
-        if (status === 'en_curso' && t.executor === 'agente' && t.status !== 'en_curso' && !await confirmBox(`¿Ejecutar #${t.id} con ${agent(t.agent_id)?.name || 'el agente'}?`, 'Ejecutar')) return;
-        try { await post(`/api/tasks/${dragId}/move`, { status: status === t.status ? undefined : status, kanban_order: (prev + next) / 2 }); refreshSoon(0); } catch (err) { fail(err); refreshSoon(0); }
-      });
-    });
+    bindKanbanDrag(el, all);
   },
 };
 
