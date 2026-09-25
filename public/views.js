@@ -3,7 +3,7 @@ import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS
   agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
   machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML } from './core.js';
 import { sprite, icon, ICON_NAMES } from './sprites.js';
-import { route, refreshSoon, loadBoot, setProject } from './app.js';
+import { route, refreshSoon, loadBoot, setProject, applyTheme } from './app.js';
 
 const go = hash => { location.hash = hash; };
 const ACTIVE = ['en_curso', 'en_cola', 'esperando'];
@@ -896,12 +896,14 @@ const config = {
       const me = S.boot.me, prefs = me.notif_prefs || {};
       body = `<form class="panel" id="meF"><div class="row">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 5)}<div><h2 style="margin:0">${h(me.name)}</h2><small>${h(me.username)} · ${h(me.role)} · ${h(S.boot.users.find(u => u.id === me.id)?.rank || '')}</small></div></div>
         <label class="l">Nombre</label><input name="name" value="${h(me.name)}"><label class="l">Nueva contraseña (vacío = no cambiar)</label><input name="password" type="password" minlength="6" autocomplete="new-password">
+        <label class="l">Tema</label><select name="theme" id="meTheme">${opts([['oscuro', 'Oscuro (espacio)'], ['crema', 'Crema (claro)']], prefs.theme || 'oscuro')}</select>
         <h3>Notificaciones de escritorio</h3>${NOTIF_KINDS.map(([k, l]) => `<label class="row"><input type="checkbox" name="n_${k}" ${prefs[k] !== false ? 'checked' : ''}> ${l}</label>`).join('')}
         <p class="muted">Permiso del navegador: ${'Notification' in window ? Notification.permission : 'no soportado'}. Si no hay pestañas abiertas, la oficina usa notificaciones de Windows.</p>
         <div class="row"><button class="btn y">Guardar</button>${'Notification' in window && Notification.permission !== 'granted' ? '<button class="btn" type="button" id="askN">Permitir notificaciones</button>' : ''}</div></form>`;
     }
     el.innerHTML = `<h1>Configuración</h1><div class="tabs">${tabs.map(([k, l]) => `<button data-ct="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>${body}`;
     $$('[data-ct]', el).forEach(b => b.onclick = () => go('#/config/' + b.dataset.ct));
+    $('#meTheme', el)?.addEventListener('change', e => applyTheme(e.target.value)); // vista previa; se guarda con «Guardar»
     const list = s => s.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
     el.onsubmit = async e => {
       e.preventDefault();
@@ -931,7 +933,7 @@ const config = {
         } else if (fm.dataset.tpl) { await put('/api/templates/' + fm.dataset.tpl, { ...f, area_id: +f.area_id || null }); holo('Plantilla guardada'); await loadBoot(); }
         else if (fm.id === 'newTpl') { await post('/api/templates', { ...f, area_id: +f.area_id || null }); await loadBoot(); route(true); }
         else if (fm.id === 'meF') {
-          const notif_prefs = Object.fromEntries(NOTIF_KINDS.map(([k]) => [k, f['n_' + k]]));
+          const notif_prefs = { ...Object.fromEntries(NOTIF_KINDS.map(([k]) => [k, f['n_' + k]])), theme: f.theme };
           await put('/api/me', { name: f.name, password: f.password || undefined, notif_prefs }); holo('Perfil guardado'); await loadBoot();
         }
         beep('ok');

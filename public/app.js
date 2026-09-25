@@ -41,7 +41,15 @@ async function loginView() {
 export async function loadBoot() {
   S.boot = await get('/api/bootstrap');
   if (S.project && !project(S.project)) S.project = null;
+  applyTheme(S.boot.me.notif_prefs?.theme);
 }
+// tema por usuario (se guarda en su perfil); localStorage solo evita el parpadeo al cargar
+export function applyTheme(t) {
+  t = t === 'crema' ? 'crema' : 'oscuro';
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('ov_theme', t); } catch {}
+}
+try { document.documentElement.dataset.theme = localStorage.getItem('ov_theme') || 'oscuro'; } catch {}
 // proyecto actual (null = todos): filtra el mapa y es el predeterminado del kanban y los formularios
 export function setProject(id) {
   S.project = id || null;
