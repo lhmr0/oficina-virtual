@@ -199,31 +199,59 @@ const estacion = {
     const busy = new Set([...tasks.filter(t => ACTIVE.includes(t.status)).map(t => t.agent_id), ...chats.filter(c => LIVE.includes(c.status)).map(c => c.agent_id)]);
     const desk = t => {
       const a = agent(t.agent_id);
-      const who = t.executor === 'humano' ? sprite('rebel', '#ff8c42', 3) : agentSprite(a, 3);
+      const who = t.executor === 'humano' ? sprite('rebel', '#ff8c42', 3.8) : agentSprite(a, 3.8);
       return `<button class="desk ${t.status}" data-task="${t.id}" title="#${t.id} ${h(t.title)} · ${STATUS[t.status]}${a ? ' · ' + h(a.name) : ''}">
-        <span class="who">${who}${BUB[t.status] || ''}</span>${sprite('desk', MON[t.status], 3)}<span class="lbl">${h(t.title)}</span></button>`;
+        <span class="who">${who}${BUB[t.status] || ''}</span>${sprite('desk', MON[t.status], 3.2)}<span class="lbl">${h(t.title)}</span></button>`;
     };
-    const free = `<span class="desk free" aria-hidden="true"><span class="who"></span>${sprite('desk', '#1d2447', 3)}<span class="lbl"></span></span>`;
+    const free = `<span class="desk free" aria-hidden="true"><span class="who"></span>${sprite('desk', '#1d2447', 3.2)}<span class="lbl"></span></span>`;
     const room = a => {
+      const isDoc = a.name.toLowerCase().includes('doc');
       const at = vis.filter(t => t.area_id === a.id && AT_DESK.includes(t.status));
       const shown = at.slice(0, 6), pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
+
+      const decos = isDoc ? `
+        <span class="deco-item" style="top:26px;right:10px" title="Estantería de holocrones y códices">${sprite('bookshelf', '', 3.2)}</span>
+        <span class="deco-item" style="bottom:8px;right:10px" title="Pizarra de documentación">${sprite('whiteboard', '', 2.8)}</span>
+        <span class="deco-item" style="top:26px;right:70px" title="Servidor de archivo">${sprite('server', '', 3)}</span>
+        <span class="deco-item" style="bottom:8px;right:75px" title="Planta sagrada del archivo">${sprite('bigplant', '', 2.8)}</span>
+        <div class="room-rug rug-doc"></div>
+      ` : `
+        <span class="deco-item" style="top:26px;right:10px" title="Pizarra de arquitectura y sprints">${sprite('whiteboard', '', 2.8)}</span>
+        <span class="deco-item" style="bottom:8px;right:10px" title="Caja de herramientas y repuestos">${sprite('crate', '', 3.2)}</span>
+        <span class="deco-item" style="top:26px;right:75px" title="Cluster de servidores de compilación">${sprite('server', '', 3)}</span>
+        <span class="deco-item" style="bottom:8px;right:70px" title="Planta de hangar">${sprite('plant', '', 3.4)}</span>
+        <div class="room-rug rug-dev"></div>
+      `;
+
       return `<section class="room2" data-area="${a.id}" style="--c:${a.color}" tabindex="0" role="button" aria-label="${h(a.alias)}: ${at.length} en actividad, ${pend} pendientes">
-        <div class="plaque">${icon(a.icon, 2)}<b>${h(a.alias)}</b><small>${h(a.name)}</small>${pend ? `<small class="right" title="Tareas pendientes">${pend} pend.</small>` : ''}</div>
-        <div class="desks2">${shown.map(desk).join('')}${Array(Math.max(0, 4 - shown.length)).fill(free).join('')}${at.length > 6 ? `<span class="more">+${at.length - 6}</span>` : ''}</div>
-        ${sprite('plant', '', 3, 'deco')}</section>`;
+        <div class="plaque">${icon(a.icon, 2.5)}<b>${h(a.alias)}</b><small>${h(a.name)}</small>${pend ? `<small class="right" title="Tareas pendientes">${pend} pend.</small>` : ''}</div>
+        <div class="desks2">${shown.map(desk).join('')}${Array(Math.max(0, 3 - shown.length)).fill(free).join('')}${at.length > 6 ? `<span class="more">+${at.length - 6}</span>` : ''}</div>
+        ${decos}
+      </section>`;
     };
     const live = chats.filter(c => LIVE.includes(c.status));
     const cantina = `<section class="room2 cantina2" data-go="#/cantina" style="--c:#ffe81f" tabindex="0" role="button" aria-label="Cantina: ${live.length} consultas activas">
-      <div class="plaque">${icon('cantina', 2)}<b>Cantina</b><small>Consultas rápidas</small></div>
-      <div class="stools">${live.map(c => `<button class="desk ${c.status}" data-chat="${c.id}" title="${h(c.title)}"><span class="who">${agentSprite(agent(c.agent_id), 3)}${c.status === 'esperando' ? BUB.esperando : ''}</span><span class="lbl">${h(c.title)}</span></button>`).join('') || '<span class="hint">Nadie en la barra</span>'}</div>
+      <div class="plaque">${icon('cantina', 2.5)}<b>Cantina</b><small>Consultas rápidas</small></div>
+      <div class="stools">${live.map(c => `<button class="desk ${c.status}" data-chat="${c.id}" title="${h(c.title)}"><span class="who">${agentSprite(agent(c.agent_id), 3.8)}${c.status === 'esperando' ? BUB.esperando : ''}</span><span class="lbl">${h(c.title)}</span></button>`).join('') || '<span class="hint">Nadie en la barra</span>'}</div>
       <div class="bar"></div>
-      <div class="cooler-deco" title="Dispensador de agua Gather">${sprite('cooler', '', 2)}</div>
+      <span class="deco-item cooler-deco" title="Dispensador de agua Gather">${sprite('cooler', '', 2.8)}</span>
+      <span class="deco-item" style="top:26px;right:12px" title="Estación de café y bebidas">${sprite('coffee', '', 3)}</span>
+      <span class="deco-item" style="bottom:8px;right:10px" title="Caja de provisiones">${sprite('crate', '', 3)}</span>
+      <span class="deco-item" style="bottom:8px;left:42px" title="Planta exótica de Tatooine">${sprite('plant', '', 2.8)}</span>
+      <div class="room-rug rug-cantina"></div>
     </section>`;
     const consejo = `<section class="room2 consejo2" data-go="#/consejo" style="--c:#b98cff" tabindex="0" role="button" aria-label="Sala del Consejo">
-      <div class="plaque">${icon('holocron', 2)}<b>Consejo Jedi</b><small>Propuestas de mejora</small></div>
-      <div class="round-table">
-        <span class="council-yoda" title="Maestro Yoda">${sprite('yoda', '', 2.5)}</span>
+      <div class="plaque">${icon('holocron', 2.5)}<b>Consejo Jedi</b><small>Propuestas de mejora</small></div>
+      <div class="council-dais">
+        <div class="round-table">
+          <span class="council-yoda" title="Gran Maestro Yoda">${sprite('yoda', '', 3.5)}</span>
+        </div>
       </div>
+      <span class="deco-item" style="top:26px;left:14px" title="Pedestal del Holocrón del Conocimiento">${sprite('pedestal', '', 3)}</span>
+      <span class="deco-item" style="top:26px;right:14px" title="Pedestal del Holocrón de la Sabiduría">${sprite('pedestal', '', 3)}</span>
+      <span class="deco-item" style="bottom:8px;left:14px" title="Planta sagrada del Templo">${sprite('bigplant', '', 2.8)}</span>
+      <span class="deco-item" style="bottom:8px;right:14px" title="Planta sagrada del Templo">${sprite('bigplant', '', 2.8)}</span>
+      <div class="room-rug rug-council"></div>
     </section>`;
     const me = S.boot.me;
     const idle = S.boot.agents.filter(a => !busy.has(a.id));
@@ -237,10 +265,10 @@ const estacion = {
 
     const hall = `<div class="hall" aria-label="Pasillo principal">
       <div class="hall-runner"></div>
-      <span class="avatar" style="left:3%" title="Tú">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3)}<span class="tag">${h(me.name.split(' ')[0])}</span></span>
+      <span class="avatar" style="left:3%" title="Tú">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3.8)}<span class="tag">${h(me.name.split(' ')[0])}</span></span>
       ${idle.map((a, i) => a.status === 'sin_cuota' || !a.enabled
-        ? `<span class="avatar sleeping" style="left:${20 + i * 14}%" title="${h(a.name)} ${a.enabled ? 'sin cuota hasta ' + fmtDate(a.quota_reset_at) : 'apagado'}">${agentSprite(a, 3)}${a.enabled ? '<span class="bubble z">Zz</span>' : ''}<span class="tag">${h(a.name)}</span></span>`
-        : `<span class="avatar walker" style="--d:${12 + i * 3}s;animation-delay:-${i * 2}s" title="${h(a.name)} disponible">${agentSprite(a, 3)}<span class="tag">${h(a.name)}</span></span>`).join('')}
+        ? `<span class="avatar sleeping" style="left:${20 + i * 14}%" title="${h(a.name)} ${a.enabled ? 'sin cuota hasta ' + fmtDate(a.quota_reset_at) : 'apagado'}">${agentSprite(a, 3.8)}${a.enabled ? '<span class="bubble z">Zz</span>' : ''}<span class="tag">${h(a.name)}</span></span>`
+        : `<span class="avatar walker" style="--d:${12 + i * 3}s;animation-delay:-${i * 2}s" title="${h(a.name)} disponible">${agentSprite(a, 3.8)}<span class="tag">${h(a.name)}</span></span>`).join('')}
       <button type="button" class="hall-more-btn" id="btnMoreRooms" title="Ver Análisis, Puente de Mando y Archivos">
         🏛 <b>+ Más salas</b> <span class="chip" style="font-size:9px;padding:1px 5px;margin-left:2px">${moreCount}</span> ▾
       </button>
