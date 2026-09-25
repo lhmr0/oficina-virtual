@@ -1,5 +1,5 @@
 // Núcleo del cliente: estado, API, helpers, widgets, modal, hologramas y sonido
-import { sprite } from './sprites.js';
+import { sprite, agentSprite } from './sprites.js';
 
 export const S = { boot: null, project: +localStorage.getItem('ov_project') || null, unseen: 0, sound: localStorage.getItem('ov_sound') !== '0', theme: localStorage.getItem('ov_theme') || 'oscuro' };
 
@@ -66,7 +66,7 @@ export const canEdit = () => S.boot?.me.role !== 'observador';
 export function agentChip(id, px = 2) {
   const a = agent(id);
   if (!a) return '<span class="muted">—</span>';
-  return `<span class="chip" style="border-color:${a.color}">${sprite('droid', a.color, px)}${h(a.name)}</span>`;
+  return `<span class="chip" style="border-color:${a.color}">${agentSprite(a, px)}${h(a.name)}</span>`;
 }
 export function userChip(id) {
   const u = user(id);

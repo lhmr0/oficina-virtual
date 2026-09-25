@@ -246,8 +246,20 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
 @keyframes step { 50% { transform: translateY(-2px); } }
 .sleeping .sprite { filter: grayscale(1) brightness(.6); }
 .bar { position: absolute; left: 8px; right: 8px; bottom: 6px; height: 10px; background: #5a3a1a; box-shadow: 0 0 0 1px #000, inset 0 2px 0 #7a5230; }
+.cantina2 { position: relative; }
 .cantina2 .stools { padding-bottom: 8px; }
-.round-table { width: 66px; height: 34px; margin: 10px auto 0; border-radius: 50%; background: #3a2a5a; box-shadow: 0 0 0 2px #000, inset 0 -4px 0 #2a1d44; }
+.cooler-deco { position: absolute; bottom: 4px; left: 6px; z-index: 3; }
+.round-table { position: relative; width: 66px; height: 34px; margin: 10px auto 0; border-radius: 50%; background: #3a2a5a; box-shadow: 0 0 0 2px #000, inset 0 -4px 0 #2a1d44; display: flex; align-items: center; justify-content: center; }
+.council-yoda { display: flex; align-items: center; justify-content: center; transform: translateY(-2px); }
+.hall-runner { position: absolute; top: 11px; bottom: 11px; left: 0; right: 0; background: repeating-linear-gradient(90deg, #1b234b 0 20px, #161c3d 20px 40px); box-shadow: 0 0 0 1px #263169; pointer-events: none; }
+.hall-more-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 10; font: 9px var(--f-pixel); padding: 4px 8px; background: var(--panel); border: 1px solid var(--yellow); color: var(--yellow); cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+.hall-more-btn:hover { background: var(--yellow); color: #070913; }
+.more-rooms-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 12px; }
+.more-room-card { background: var(--panel2); border: 2px solid var(--line); box-shadow: inset 0 0 0 2px var(--wall), inset 0 0 0 3px color-mix(in srgb, var(--c) 40%, transparent); padding: 10px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
+.more-room-card:hover { border-color: var(--yellow); box-shadow: inset 0 0 0 2px var(--wall), inset 0 0 0 3px var(--c); }
+.more-room-card .card-head { display: flex; align-items: center; gap: 8px; }
+.more-room-card .card-head b { font: 9px var(--f-pixel); color: var(--c); }
+.more-room-card .card-meta { font-size: 11px; color: var(--muted); }
 .consoles { display: flex; gap: 5px; flex-wrap: wrap; padding-top: 8px; }
 .consoles .sprite { max-height: 20px; width: auto; }
 .shelves { margin-top: 6px; height: 46px; background: repeating-linear-gradient(0deg, #4a3320 0 4px, transparent 4px 18px), repeating-linear-gradient(90deg, #6b4b8a 0 5px, #3d7a8a 5px 9px, #8a6b3d 9px 13px, transparent 13px 18px); box-shadow: 0 0 0 1px #000; }
@@ -356,6 +368,10 @@ dialog::backdrop { background: var(--dialog-backdrop); }
 
 /* ---------- adaptaciones y mejoras del tema crema / hueso ---------- */
 [data-theme="blanco"] .hall, [data-theme="crema"] .hall { background: repeating-linear-gradient(90deg, #e4d8c5 0 28px, #d7c9b3 28px 56px); box-shadow: inset 0 0 0 2px #948067; }
+[data-theme="blanco"] .hall-runner, [data-theme="crema"] .hall-runner { background: repeating-linear-gradient(90deg, #c7b8a3 0 20px, #baa993 20px 40px); box-shadow: 0 0 0 1px #9c8a74; }
+[data-theme="blanco"] .hall-more-btn, [data-theme="crema"] .hall-more-btn { background: #fdf8ee; border-color: #8a5300; color: #8a5300; }
+[data-theme="blanco"] .hall-more-btn:hover, [data-theme="crema"] .hall-more-btn:hover { background: #8a5300; color: #fff; }
+[data-theme="blanco"] .more-room-card, [data-theme="crema"] .more-room-card { background: #fbf6ec; border-color: #d8ccb8; }
 [data-theme="blanco"] .msg.usuario, [data-theme="crema"] .msg.usuario { background: #fdf8ee; }
 [data-theme="blanco"] .msg.agente, [data-theme="crema"] .msg.agente { background: #f0f7fb; }
 [data-theme="blanco"] .msg pre, [data-theme="crema"] .msg pre { background: #1c1611; color: #7cfc00; }
@@ -388,6 +404,7 @@ dialog::backdrop { background: var(--dialog-backdrop); }
   .desk .lbl { max-width: 50px; font-size: 10px; -webkit-line-clamp: 1; margin-top: 1px; }
   .room2 .deco { opacity: .6; transform: scale(.65); transform-origin: bottom right; right: 4px; bottom: 4px; }
   .hall { height: 46px; margin: 4px 0; }
+  .hall-more-btn { font-size: 8px; padding: 2px 6px; right: 4px; }
   .round-table { width: 60px; height: 32px; margin: 10px auto 0; }
   .bar { bottom: 6px; height: 10px; }
   .cantina2 .stools { padding-bottom: 8px; }
