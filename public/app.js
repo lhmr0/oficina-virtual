@@ -73,6 +73,7 @@ function shell() {
   </nav>
   <div class="menu" id="meMenu" role="menu" hidden>
     <div class="menu-head">${h(me.name)}<br><small>${h(S.boot.users.find(u => u.id === me.id)?.rank || '')} · ${h(me.role)}</small></div>
+    <a role="menuitem" href="#/config/perfil">Mi perfil</a>
     ${MENU.filter(([k]) => k !== 'config' || isAdmin()).map(([k, l]) => `<a role="menuitem" href="#/${k}">${l}</a>`).join('')}
     ${canEdit() ? '<button role="menuitem" id="mMission">Nueva misión</button>' : ''}
     <button role="menuitem" id="soundBtn">Sonido: ${S.sound ? 'sí' : 'no'}</button>
@@ -205,8 +206,9 @@ function connectSSE() {
   const on = (t, fn) => es.addEventListener(t, e => fn(JSON.parse(e.data)));
   let inboxT;
   const pass = (t, d) => { if (['task.updated', 'conv.updated'].includes(t)) { clearTimeout(inboxT); inboxT = setTimeout(inboxCount, 800); } if (VIEWS.estacion.refreshOn.includes(t)) mapSoon(); if (current?.name === 'estacion') return; const r = current?.view.event?.(t, d, current); if (r === 'handled') return; if (r === 'refresh' || (current?.view.refreshOn || []).includes(t)) refreshSoon(); };
-  for (const t of ['task.updated', 'task.created', 'conv.updated', 'run.started', 'handoff', 'activity', 'status.scan', 'council.updated']) on(t, d => pass(t, d));
+  for (const t of ['task.updated', 'task.created', 'conv.updated', 'run.started', 'handoff', 'activity', 'status.scan', 'council.updated', 'marcacion.status']) on(t, d => pass(t, d));
   on('run.log', d => pass('run.log', d));
+  on('marcacion.log', d => pass('marcacion.log', d));
   on('agent.status', d => { reboot(); pass('agent.status', d); });
   on('project.updated', () => reboot());
   on('machine.status', d => { reboot(); pass('machine.status', d); });

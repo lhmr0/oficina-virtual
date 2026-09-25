@@ -439,6 +439,42 @@ function gitRepo(name) {
     } finally { g.kill(); }
   });
 
+  await t('marcación SICAPE: detección de script, ejecución y stream de consola en Mi Perfil', async () => {
+    const prevEnv = process.env.OFICINA_MARCACION_PATH;
+    const mDir = path.join(TMP, 'marcacion-sicape');
+    fs.mkdirSync(mDir, { recursive: true });
+    const isWin = process.platform === 'win32';
+    const batPath = path.join(mDir, 'marcar-ahora.bat');
+    if (isWin) {
+      fs.writeFileSync(batPath, '@echo off\r\necho ============================================================\r\necho  Marcacion SICAPE - Marcar ahora\r\necho ============================================================\r\necho   DNI:   70000000\r\necho  Listo: marcacion enviada con la hora del servidor SICAPE.\r\npause\r\n');
+    } else {
+      fs.writeFileSync(batPath, '#!/bin/sh\necho "Marcacion SICAPE - Marcar ahora"\necho "  DNI:   70000000"\necho "Listo: marcacion enviada con la hora del servidor SICAPE."\n');
+      fs.chmodSync(batPath, 0o755);
+    }
+    process.env.OFICINA_MARCACION_PATH = batPath;
+    try {
+      const info = await api('GET', '/api/me/marcacion');
+      assert.equal(info.found, true, 'debe encontrar el script');
+      assert.equal(info.running, false);
+
+      const r = await api('POST', '/api/me/marcar');
+      assert.equal(r.ok, true);
+
+      await until(async () => {
+        const st = await api('GET', '/api/me/marcacion');
+        return !st.running && st.last_result?.code === 0;
+      }, 10000, 'fin de la marcación');
+
+      const finalSt = await api('GET', '/api/me/marcacion');
+      assert.equal(finalSt.last_result.code, 0);
+      assert.ok(finalSt.last_log.some(l => l.includes('Marcacion SICAPE')), 'debe contener log de marcacion');
+      assert.ok(finalSt.last_log.some(l => l.includes('DNI:   70000000')), 'debe contener DNI en log');
+    } finally {
+      if (prevEnv !== undefined) process.env.OFICINA_MARCACION_PATH = prevEnv;
+      else delete process.env.OFICINA_MARCACION_PATH;
+    }
+  });
+
   server.close();
   for (const a of R.active.values()) if (a.runId) require('./host').runOp(a.runId, 'killRun');
   console.log(failed ? `\n${failed} FALLARON` : '\nTODO OK');

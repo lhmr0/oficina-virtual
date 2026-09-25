@@ -356,7 +356,7 @@ const kanban = {
 };
 
 // ===================== TAREA =====================
-const logClass = l => l.startsWith('⚠') ? 'w' : /^[▶■]/.test(l) ? 's' : l.startsWith('💬') ? 'e' : '';
+const logClass = l => l.startsWith('⚠') || /\[(?:AVISO|ERROR)\]/i.test(l) ? 'w' : /^[▶■]|^Listo:/i.test(l) ? 's' : l.startsWith('💬') ? 'e' : '';
 const logHTML = txt => txt.split('\n').map(l => `<div class="${logClass(l)}">${h(l)}</div>`).join('');
 function messagesHTML(msgs) {
   return msgs.map(m => `<div class="msg ${m.role} ${m.kind === 'consulta' ? 'consulta' : ''}"><div class="who">${m.role === 'agente' ? agentChip(m.agent_id, 1) : m.role === 'usuario' ? userChip(m.user_id) : 'SISTEMA'} · ${fmtDate(m.at)}${m.kind !== 'mensaje' ? ' · ' + h(m.kind) : ''}</div>${md(m.text)}</div>`).join('') || '<div class="empty">Sin mensajes</div>';
@@ -827,6 +827,34 @@ const puente = {
 // ===================== CONFIGURACIÓN =====================
 const NOTIF_KINDS = [['consulta', 'Consultas de agentes'], ['permiso', 'Permisos (modo supervisado)'], ['revision', 'Tareas listas para revisión'], ['cuota', 'Agente sin cuota'], ['fallo', 'Fallos'], ['relevo', 'Relevos'], ['consejo', 'Consejo terminado'], ['limite', 'Límite al 80%'], ['agente', 'Agente disponible'], ['sistema', 'Sistema']];
 const config = {
+  event(type, d) {
+    if (type === 'marcacion.log') {
+      const c = $('#marcarConsole');
+      if (c) {
+        c.style.display = 'block';
+        const stick = c.scrollHeight - c.scrollTop - c.clientHeight < 40;
+        c.insertAdjacentHTML('beforeend', `<div class="${logClass(d.line)}">${h(d.line)}</div>`);
+        if (stick) c.scrollTop = c.scrollHeight;
+      }
+      return 'handled';
+    }
+    if (type === 'marcacion.status') {
+      const b = $('#btnMarcar');
+      const st = $('#marcarState');
+      if (d.running) {
+        if (b) b.disabled = true;
+        if (st) { st.hidden = false; st.textContent = 'ejecutando...'; st.className = 'chip'; }
+      } else {
+        if (b) b.disabled = false;
+        if (st) {
+          st.hidden = false;
+          st.textContent = d.error ? 'error' : (d.code === 0 ? 'completado' : 'código ' + d.code);
+          st.className = 'chip ' + (d.code === 0 && !d.error ? 'g' : 'r');
+        }
+      }
+      return 'handled';
+    }
+  },
   async render(el, r) {
     const admin = isAdmin();
     const tabs = [...(admin ? [['maquinas', 'Máquinas'], ['agentes', 'Agentes'], ['areas', 'Áreas'], ['usuarios', 'Usuarios'], ['limites', 'Límites'], ['auto', 'Automatización']] : []), ['plantillas', 'Plantillas'], ['perfil', 'Mi perfil']];
@@ -898,9 +926,41 @@ const config = {
         <label class="l">Nombre</label><input name="name" value="${h(me.name)}"><label class="l">Nueva contraseña (vacío = no cambiar)</label><input name="password" type="password" minlength="6" autocomplete="new-password">
         <h3>Notificaciones de escritorio</h3>${NOTIF_KINDS.map(([k, l]) => `<label class="row"><input type="checkbox" name="n_${k}" ${prefs[k] !== false ? 'checked' : ''}> ${l}</label>`).join('')}
         <p class="muted">Permiso del navegador: ${'Notification' in window ? Notification.permission : 'no soportado'}. Si no hay pestañas abiertas, la oficina usa notificaciones de Windows.</p>
-        <div class="row"><button class="btn y">Guardar</button>${'Notification' in window && Notification.permission !== 'granted' ? '<button class="btn" type="button" id="askN">Permitir notificaciones</button>' : ''}</div></form>`;
+        <div class="row"><button class="btn y">Guardar</button>${'Notification' in window && Notification.permission !== 'granted' ? '<button class="btn" type="button" id="askN">Permitir notificaciones</button>' : ''}</div></form>
+        <div class="panel" id="marcacionCard" style="margin-top:14px">
+          <h3>Marcación (SICAPE)</h3>
+          <p class="muted" id="marcarInfo">Ejecuta marcar_ahora.bat localmente en la PC del agente.</p>
+          <div class="row" style="align-items:center;gap:10px">
+            <button class="btn y" type="button" id="btnMarcar">Marcar</button>
+            <span id="marcarState" class="chip" hidden></span>
+          </div>
+          <div class="console" id="marcarConsole" style="margin-top:10px;height:240px;display:none"></div>
+        </div>`;
     }
     el.innerHTML = `<h1>Configuración</h1><div class="tabs">${tabs.map(([k, l]) => `<button data-ct="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>${body}`;
+    if (tab === 'perfil') {
+      get('/api/me/marcacion').then(m => {
+        const cons = $('#marcarConsole', el);
+        const b = $('#btnMarcar', el);
+        const st = $('#marcarState', el);
+        const info = $('#marcarInfo', el);
+        if (info && m.path) info.textContent = `Script: ${m.path}`;
+        if (cons && m.last_log?.length) {
+          cons.style.display = 'block';
+          cons.innerHTML = m.last_log.map(l => `<div class="${logClass(l)}">${h(l)}</div>`).join('');
+          cons.scrollTop = cons.scrollHeight;
+        }
+        if (m.running) {
+          if (b) b.disabled = true;
+          if (st) { st.hidden = false; st.textContent = 'ejecutando...'; st.className = 'chip'; }
+          if (cons) cons.style.display = 'block';
+        } else if (m.last_result && st) {
+          st.hidden = false;
+          st.textContent = m.last_result.code === 0 ? 'completado' : 'código ' + m.last_result.code;
+          st.className = 'chip ' + (m.last_result.code === 0 ? 'g' : 'r');
+        }
+      }).catch(() => {});
+    }
     $$('[data-ct]', el).forEach(b => b.onclick = () => go('#/config/' + b.dataset.ct));
     const list = s => s.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
     el.onsubmit = async e => {
@@ -939,6 +999,21 @@ const config = {
     };
     el.onclick = async e => {
       const b = e.target.closest('button'); if (!b) return;
+      if (b.id === 'btnMarcar') {
+        b.disabled = true;
+        const cons = $('#marcarConsole', el);
+        if (cons) { cons.style.display = 'block'; cons.innerHTML = '<div class="w">Iniciando marcación...</div>'; }
+        const st = $('#marcarState', el);
+        if (st) { st.hidden = false; st.textContent = 'ejecutando...'; st.className = 'chip'; }
+        try {
+          await post('/api/me/marcar');
+        } catch (err) {
+          b.disabled = false;
+          if (st) { st.hidden = false; st.textContent = 'error'; st.className = 'chip r'; }
+          if (cons) cons.insertAdjacentHTML('beforeend', `<div class="e">${h(err.message)}</div>`);
+          fail(err);
+        }
+      }
       if (b.dataset.detect) { b.disabled = true; try { const r2 = await post(`/api/agents/${b.dataset.detect}/detect-models`); if (r2.models.length) { b.previousElementSibling.value = r2.models.join(', '); holo(`${r2.models.length} modelos detectados`, 'Pulsa Guardar para conservarlos'); } else holo('No se detectaron modelos', '', { err: true }); } catch (err) { fail(err); } b.disabled = false; }
       if (b.dataset.test) { b.disabled = true; b.textContent = 'Probando…'; try { const r2 = await post(`/api/agents/${b.dataset.test}/test`); holo(r2.ok ? 'Prueba OK' : 'Prueba falló', r2.ok ? `"${r2.reply}" en ${dur(r2.latency_ms / 1000)} · sesión ${r2.session_id || '-'}` : (r2.error || r2.end_reason), { err: !r2.ok, ms: 12000 }); } catch (err) { fail(err); } route(true); }
       if (b.dataset.delarea && await confirmBox('¿Eliminar el área?', 'Eliminar', true)) { await act(() => del('/api/areas/' + b.dataset.delarea)); await loadBoot(); route(true); }

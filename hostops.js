@@ -164,6 +164,40 @@ $d = New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Console]::In.ReadT
       else p.kill('SIGKILL');
       return true;
     },
+    findMarcacion: () => {
+      if (process.env.OFICINA_MARCACION_PATH && fs.existsSync(process.env.OFICINA_MARCACION_PATH))
+        return { path: canon(process.env.OFICINA_MARCACION_PATH), dir: path.dirname(canon(process.env.OFICINA_MARCACION_PATH)) };
+      const home = os.homedir();
+      const candDirs = [
+        path.join(home, 'hmr0', 'marcacion-sicape'),
+        path.join(home, 'marcacion-sicape'),
+        path.resolve('marcacion-sicape'),
+        path.resolve('..', 'marcacion-sicape'),
+        path.resolve('..', '..', 'marcacion-sicape'),
+        ...roots.map(r => path.join(r, 'marcacion-sicape')),
+        ...roots.map(r => path.join(r, 'hmr0', 'marcacion-sicape')),
+      ];
+      for (const d of candDirs) {
+        for (const name of ['marcar-ahora.bat', 'marcar_ahora.bat', 'marcar-ahora.sh', 'marcar_ahora.sh']) {
+          const full = path.join(d, name);
+          if (fs.existsSync(full)) return { path: canon(full), dir: canon(d) };
+        }
+      }
+      for (const base of new Set([home, ...roots])) {
+        try {
+          for (const e of fs.readdirSync(base, { withFileTypes: true })) {
+            if (e.isDirectory() && !e.name.startsWith('.')) {
+              const sub = path.join(base, e.name, 'marcacion-sicape');
+              for (const name of ['marcar-ahora.bat', 'marcar_ahora.bat']) {
+                const full = path.join(sub, name);
+                if (fs.existsSync(full)) return { path: canon(full), dir: canon(sub) };
+              }
+            }
+          }
+        } catch {}
+      }
+      return { path: null };
+    },
   };
 
   // Escribe adjuntos en <cwd>/.oficina/adjuntos. get(file) → Buffer (lo da el servidor o el worker vía HTTP)
@@ -186,8 +220,15 @@ $d = New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Console]::In.ReadT
     if (strict) {
       const base = path.basename(e).toLowerCase().replace(/\.(exe|cmd)$/, '');
       const ccEntry = e === process.execPath && /command-code[\\/]dist[\\/]index\.mjs$/i.test(a[0] || '');
-      if (!(['claude', 'codex', 'agy'].includes(base) || ccEntry || process.env.OFICINA_WORKER_ALLOW_ANY)) throw new Error(`Ejecutable no permitido en el agente de campo: ${exe}`);
-      checkPath(cwd);
+      const isMarcacion = (base === 'cmd' || /marcar[-_]ahora/i.test(base)) && (a.some(x => /marcar[-_]ahora/i.test(x)) || /marcar[-_]ahora/i.test(e));
+      if (!(['claude', 'codex', 'agy'].includes(base) || ccEntry || isMarcacion || process.env.OFICINA_WORKER_ALLOW_ANY)) throw new Error(`Ejecutable no permitido en el agente de campo: ${exe}`);
+      if (isMarcacion) {
+        try { checkPath(cwd); } catch (err) {
+          if (!fs.existsSync(cwd) || (!fs.existsSync(path.join(cwd, 'marcar_ahora.bat')) && !fs.existsSync(path.join(cwd, 'marcar-ahora.bat')))) throw err;
+        }
+      } else {
+        checkPath(cwd);
+      }
     }
     const p = spawn(e, a, { cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...env } });
     runs.set(runId, p);
