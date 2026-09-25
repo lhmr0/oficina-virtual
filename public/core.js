@@ -1,7 +1,20 @@
 // Núcleo del cliente: estado, API, helpers, widgets, modal, hologramas y sonido
 import { sprite } from './sprites.js';
 
-export const S = { boot: null, project: +localStorage.getItem('ov_project') || null, unseen: 0, sound: localStorage.getItem('ov_sound') !== '0' };
+export const S = { boot: null, project: +localStorage.getItem('ov_project') || null, unseen: 0, sound: localStorage.getItem('ov_sound') !== '0', theme: localStorage.getItem('ov_theme') || 'oscuro' };
+
+export function applyTheme(theme) {
+  S.theme = theme === 'blanco' ? 'blanco' : 'oscuro';
+  localStorage.setItem('ov_theme', S.theme);
+  if (S.theme === 'blanco') {
+    document.documentElement.setAttribute('data-theme', 'blanco');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+  const meta = document.getElementById('metaTheme');
+  if (meta) meta.content = S.theme === 'blanco' ? '#edf1f7' : '#070913';
+}
+applyTheme(S.theme);
 
 export async function api(method, url, body) {
   const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });

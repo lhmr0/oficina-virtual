@@ -1,7 +1,7 @@
 // Vistas de la oficina
 import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS, PSTATUS, chip, agent, area, user, project, isAdmin, canEdit,
   agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
-  machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML } from './core.js';
+  machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML, applyTheme } from './core.js';
 import { sprite, icon, ICON_NAMES } from './sprites.js';
 import { route, refreshSoon, loadBoot, setProject } from './app.js';
 
@@ -642,6 +642,20 @@ const consejo = {
       <h2>Propuestas</h2><div class="grid2">${props.map(pc).join('')}</div>` : v.status !== 'en_curso' ? '<div class="empty">Sin propuestas</div>' : ''}
       <h3>Conversaciones del consejo</h3>${x.conversations.map(c => `<div><a href="#/cantina/${c.id}">${h(c.title)}</a></div>`).join('')}`;
     el.onclick = async e => {
+      const tc = e.target.closest('.theme-card');
+      if (tc) {
+        const t = tc.dataset.t;
+        applyTheme(t);
+        $('.theme-card', el).forEach(c => {
+          const match = c.dataset.t === t;
+          c.classList.toggle('on', match);
+          const r = $('input[name=theme]', c);
+          if (r) r.checked = match;
+        });
+        const tb = $('#themeBtn');
+        if (tb) tb.textContent = 'Tema: ' + (t === 'blanco' ? 'blanco (Hoth)' : 'oscuro (espacio)');
+        if (S.sound) beep('ok');
+      }
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.acc) {
         const p = props.find(y => y.id === +b.dataset.acc);
@@ -829,7 +843,7 @@ const NOTIF_KINDS = [['consulta', 'Consultas de agentes'], ['permiso', 'Permisos
 const config = {
   async render(el, r) {
     const admin = isAdmin();
-    const tabs = [...(admin ? [['maquinas', 'Máquinas'], ['agentes', 'Agentes'], ['areas', 'Áreas'], ['usuarios', 'Usuarios'], ['limites', 'Límites'], ['auto', 'Automatización']] : []), ['plantillas', 'Plantillas'], ['perfil', 'Mi perfil']];
+    const tabs = [...(admin ? [['maquinas', 'Máquinas'], ['agentes', 'Agentes'], ['areas', 'Áreas'], ['usuarios', 'Usuarios'], ['limites', 'Límites'], ['auto', 'Automatización']] : []), ['plantillas', 'Plantillas'], ['apariencia', 'Apariencia'], ['perfil', 'Mi perfil']];
     const tab = tabs.find(t => t[0] === r.args[0]) ? r.args[0] : tabs[0][0];
     let body = '';
     if (tab === 'maquinas') {
@@ -892,10 +906,47 @@ const config = {
       body = S.boot.templates.map(t => `<form class="panel" data-tpl="${t.id}" style="margin-bottom:10px"><div class="field-row"><div><label class="l">Área</label><select name="area_id">${opts(S.boot.areas.map(a => [a.id, a.name]), t.area_id, '—')}</select></div><div><label class="l">Título</label><input name="title" value="${h(t.title)}"></div></div>
         <label class="l">Instrucciones</label><textarea name="prompt">${h(t.prompt)}</textarea><div class="row"><button class="btn y">Guardar</button><button class="btn r" type="button" data-deltpl="${t.id}">Eliminar</button></div></form>`).join('') +
         `<form class="panel" id="newTpl"><h3>Nueva plantilla</h3><div class="field-row"><div><label class="l">Área</label><select name="area_id">${opts(S.boot.areas.map(a => [a.id, a.name]), '', '—')}</select></div><div><label class="l">Título</label><input name="title" required></div></div><label class="l">Instrucciones</label><textarea name="prompt" required></textarea><button class="btn y" style="margin-top:10px">Crear</button></form>`;
+    } else if (tab === 'apariencia') {
+      const cur = S.theme || 'oscuro';
+      body = `<form class="panel" id="themeF">
+        <h3>Tema y apariencia visual</h3>
+        <p class="muted">Personaliza la estética galáctica de la Oficina Virtual. Los cambios se aplican al instante y se guardan en tu perfil.</p>
+        <div class="theme-picks">
+          <label class="theme-card ${cur === 'oscuro' ? 'on' : ''}" data-t="oscuro">
+            <span class="theme-swatch dark-swatch"></span>
+            <input type="radio" name="theme" value="oscuro" ${cur === 'oscuro' ? 'checked' : ''} style="display:none">
+            <b>Oscuro (Espacio profundo)</b>
+            <small class="muted">Fondo estelar negro, paneles azul noche y acentos clásicos Star Wars en amarillo y cian holográfico.</small>
+          </label>
+          <label class="theme-card ${cur === 'blanco' ? 'on' : ''}" data-t="blanco">
+            <span class="theme-swatch light-swatch"></span>
+            <input type="radio" name="theme" value="blanco" ${cur === 'blanco' ? 'checked' : ''} style="display:none">
+            <b>Blanco (Base Hoth)</b>
+            <small class="muted">Fondo níveo de alto contraste inspirado en la Base Eco y Bespin, paneles slate claros y acentos ámbar/tácticos.</small>
+          </label>
+        </div>
+        <div class="row"><button class="btn y">Guardar tema</button></div>
+      </form>`;
     } else {
       const me = S.boot.me, prefs = me.notif_prefs || {};
+      const cur = S.theme || 'oscuro';
       body = `<form class="panel" id="meF"><div class="row">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 5)}<div><h2 style="margin:0">${h(me.name)}</h2><small>${h(me.username)} · ${h(me.role)} · ${h(S.boot.users.find(u => u.id === me.id)?.rank || '')}</small></div></div>
         <label class="l">Nombre</label><input name="name" value="${h(me.name)}"><label class="l">Nueva contraseña (vacío = no cambiar)</label><input name="password" type="password" minlength="6" autocomplete="new-password">
+        <h3>Tema de la interfaz</h3>
+        <div class="theme-picks">
+          <label class="theme-card ${cur === 'oscuro' ? 'on' : ''}" data-t="oscuro">
+            <span class="theme-swatch dark-swatch"></span>
+            <input type="radio" name="theme" value="oscuro" ${cur === 'oscuro' ? 'checked' : ''} style="display:none">
+            <b>Oscuro (Espacio)</b>
+            <small class="muted">Fondo estelar negro</small>
+          </label>
+          <label class="theme-card ${cur === 'blanco' ? 'on' : ''}" data-t="blanco">
+            <span class="theme-swatch light-swatch"></span>
+            <input type="radio" name="theme" value="blanco" ${cur === 'blanco' ? 'checked' : ''} style="display:none">
+            <b>Blanco (Base Hoth)</b>
+            <small class="muted">Fondo blanco de alto contraste</small>
+          </label>
+        </div>
         <h3>Notificaciones de escritorio</h3>${NOTIF_KINDS.map(([k, l]) => `<label class="row"><input type="checkbox" name="n_${k}" ${prefs[k] !== false ? 'checked' : ''}> ${l}</label>`).join('')}
         <p class="muted">Permiso del navegador: ${'Notification' in window ? Notification.permission : 'no soportado'}. Si no hay pestañas abiertas, la oficina usa notificaciones de Windows.</p>
         <div class="row"><button class="btn y">Guardar</button>${'Notification' in window && Notification.permission !== 'granted' ? '<button class="btn" type="button" id="askN">Permitir notificaciones</button>' : ''}</div></form>`;
@@ -930,14 +981,39 @@ const config = {
           holo('Ajustes guardados'); await loadBoot();
         } else if (fm.dataset.tpl) { await put('/api/templates/' + fm.dataset.tpl, { ...f, area_id: +f.area_id || null }); holo('Plantilla guardada'); await loadBoot(); }
         else if (fm.id === 'newTpl') { await post('/api/templates', { ...f, area_id: +f.area_id || null }); await loadBoot(); route(true); }
-        else if (fm.id === 'meF') {
+        else if (fm.id === 'themeF') {
+          const chosenTheme = f.theme || S.theme || 'oscuro';
+          applyTheme(chosenTheme);
+          const prefs = S.boot?.me?.notif_prefs || {};
+          prefs.theme = chosenTheme;
+          await put('/api/me', { notif_prefs: prefs });
+          holo('Tema guardado', chosenTheme === 'blanco' ? 'Tema blanco (Base Hoth) activado' : 'Tema oscuro (Espacio profundo) activado');
+          await loadBoot();
+        } else if (fm.id === 'meF') {
           const notif_prefs = Object.fromEntries(NOTIF_KINDS.map(([k]) => [k, f['n_' + k]]));
+          const chosenTheme = f.theme || S.theme || 'oscuro';
+          notif_prefs.theme = chosenTheme;
+          applyTheme(chosenTheme);
           await put('/api/me', { name: f.name, password: f.password || undefined, notif_prefs }); holo('Perfil guardado'); await loadBoot();
         }
         beep('ok');
       } catch (err) { fail(err); }
     };
     el.onclick = async e => {
+      const tc = e.target.closest('.theme-card');
+      if (tc) {
+        const t = tc.dataset.t;
+        applyTheme(t);
+        $$('.theme-card', el).forEach(c => {
+          const match = c.dataset.t === t;
+          c.classList.toggle('on', match);
+          const r = $('input[name=theme]', c);
+          if (r) r.checked = match;
+        });
+        const tb = $('#themeBtn');
+        if (tb) tb.textContent = 'Tema: ' + (t === 'blanco' ? 'blanco (Hoth)' : 'oscuro (espacio)');
+        if (S.sound) beep('ok');
+      }
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.detect) { b.disabled = true; try { const r2 = await post(`/api/agents/${b.dataset.detect}/detect-models`); if (r2.models.length) { b.previousElementSibling.value = r2.models.join(', '); holo(`${r2.models.length} modelos detectados`, 'Pulsa Guardar para conservarlos'); } else holo('No se detectaron modelos', '', { err: true }); } catch (err) { fail(err); } b.disabled = false; }
       if (b.dataset.test) { b.disabled = true; b.textContent = 'Probando…'; try { const r2 = await post(`/api/agents/${b.dataset.test}/test`); holo(r2.ok ? 'Prueba OK' : 'Prueba falló', r2.ok ? `"${r2.reply}" en ${dur(r2.latency_ms / 1000)} · sesión ${r2.session_id || '-'}` : (r2.error || r2.end_reason), { err: !r2.ok, ms: 12000 }); } catch (err) { fail(err); } route(true); }

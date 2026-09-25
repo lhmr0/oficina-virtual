@@ -88,6 +88,8 @@ function gitRepo(name) {
     await rejects(api('POST', '/api/projects', { name: 'x' }), /permiso/);
     cookie = ''; await api('POST', '/api/login', { username: 'leia', password: 'secreto1' });
     assert.equal((await api('GET', '/api/me')).username, 'leia');
+    await api('PUT', '/api/me', { notif_prefs: { theme: 'blanco' } });
+    assert.equal((await api('GET', '/api/me')).notif_prefs?.theme, 'blanco');
   });
 
   // agentes falsos
