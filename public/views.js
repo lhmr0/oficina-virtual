@@ -2,7 +2,7 @@
 import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS, PSTATUS, chip, agent, area, user, project, isAdmin, canEdit,
   agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
   machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML } from './core.js';
-import { sprite, icon, ICON_NAMES } from './sprites.js';
+import { sprite, agentSprite, icon, ICON_NAMES } from './sprites.js';
 import { route, refreshSoon, loadBoot, setProject, applyTheme } from './app.js';
 
 const go = hash => { location.hash = hash; };
@@ -124,7 +124,64 @@ export async function missionForm() {
   };
 }
 
-// ===================== ESTACIÓN (mapa) =====================
+// ===================== ESTACIÓN (mapa) y KANBAN =====================
+const COLS = [['pendiente', 'Pendiente'], ['en_cola', 'En cola'], ['en_curso', 'En curso'], ['esperando', 'Esperando'], ['revision', 'Revisión'], ['completada', 'Completada'], ['atascadas', 'Atascadas']];
+const STUCK = ['bloqueada', 'pausada_cuota', 'fallida'];
+
+const kanbanCard = (t, showProject = true) => {
+  const a = agent(t.agent_id), ar = area(t.area_id);
+  const tp = showProject ? project(t.project_id) : null;
+  return `<div class="kcard" draggable="${canEdit()}" data-id="${t.id}" style="--c:${ar?.color || '#46529a'}" tabindex="0" title="#${t.id} ${h(t.title)}">
+    <div class="row" style="gap:4px;font-size:10px;line-height:1"><small>#${t.id}</small>${tp ? `<span class="chip" style="border-color:${h(tp.color)}">${h(tp.name)}</span>` : ''}${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
+    <div class="t">${h(t.title)}</div>
+    <div class="meta">${t.executor === 'humano' ? `${sprite('rebel', '#ff8c42', 1)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${agentSprite(a, 1)}${h(a?.name || '—')} <span>${h(t.model || '')}</span>`}
+    ${t.status === 'en_curso' ? `<span class="chip st-en_curso">⏱ ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}${t.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : ''}
+    ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div></div>`;
+};
+
+function bindKanbanDrag(root, getTasks) {
+  let dragId = null;
+  root.addEventListener('dragstart', e => {
+    const c = e.target.closest('.kcard');
+    if (!c) return;
+    dragId = +c.dataset.id;
+    c.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  root.addEventListener('dragend', e => {
+    e.target.closest?.('.kcard')?.classList.remove('dragging');
+    $$('.kcol', root).forEach(x => x.classList.remove('over'));
+  });
+  $$('.kcol', root).forEach(col => {
+    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
+    col.addEventListener('dragleave', () => col.classList.remove('over'));
+    col.addEventListener('drop', async e => {
+      e.preventDefault();
+      col.classList.remove('over');
+      if (!dragId) return;
+      const k = col.dataset.col;
+      const all = typeof getTasks === 'function' ? getTasks() : getTasks;
+      const cards = $$('.kcard', col).filter(c => +c.dataset.id !== dragId);
+      const after = cards.find(c => e.clientY < c.getBoundingClientRect().top + c.offsetHeight / 2);
+      const ord = id => all.find(t => t.id === +id)?.kanban_order ?? 0;
+      const i = after ? cards.indexOf(after) : cards.length;
+      const prev = i > 0 ? ord(cards[i - 1].dataset.id) : (cards[0] ? ord(cards[0].dataset.id) - 1000 : Date.now());
+      const next = after ? ord(after.dataset.id) : prev + 2000;
+      const t = all.find(x => x.id === dragId);
+      if (!t) return;
+      const status = k === 'atascadas' ? t.status : k;
+      if (status === 'en_curso' && t.executor === 'agente' && t.status !== 'en_curso' && !await confirmBox(`¿Ejecutar #${t.id} con ${agent(t.agent_id)?.name || 'el agente'}?`, 'Ejecutar')) return;
+      try {
+        await post(`/api/tasks/${dragId}/move`, { status: status === t.status ? undefined : status, kanban_order: (prev + next) / 2 });
+        refreshSoon(0);
+      } catch (err) {
+        fail(err);
+        refreshSoon(0);
+      }
+    });
+  });
+}
+
 // Se dibuja en la capa #map, siempre visible detrás del panel lateral.
 const AT_DESK = ['en_curso', 'en_cola', 'esperando', 'revision'];
 const LIVE = ['en_curso', 'en_cola', 'esperando'];
@@ -133,54 +190,262 @@ const BUB = { esperando: '<span class="bubble">?</span>', en_cola: '<span class=
 const estacion = {
   refreshOn: ['task.updated', 'task.created', 'conv.updated', 'run.started', 'agent.status'],
   async render(el) {
-    const [tasks, chats] = await Promise.all([get('/api/tasks'), get('/api/conversations')]);
+    const [tasks, chats, execs] = await Promise.all([
+      get('/api/tasks'),
+      get('/api/conversations'),
+      get('/api/history/ejecuciones?page=1').catch(() => ({ rows: [] }))
+    ]);
     const vis = tasks.filter(t => !S.project || t.project_id === S.project);
     const busy = new Set([...tasks.filter(t => ACTIVE.includes(t.status)).map(t => t.agent_id), ...chats.filter(c => LIVE.includes(c.status)).map(c => c.agent_id)]);
     const desk = t => {
       const a = agent(t.agent_id);
-      const who = t.executor === 'humano' ? sprite('rebel', '#ff8c42', 3) : sprite('droid', a?.color, 3);
+      const who = t.executor === 'humano' ? sprite('rebel', '#ff8c42', 3.8) : agentSprite(a, 3.8);
       return `<button class="desk ${t.status}" data-task="${t.id}" title="#${t.id} ${h(t.title)} · ${STATUS[t.status]}${a ? ' · ' + h(a.name) : ''}">
-        <span class="who">${who}${BUB[t.status] || ''}</span>${sprite('desk', MON[t.status], 3)}<span class="lbl">${h(t.title)}</span></button>`;
+        <span class="who">${who}${BUB[t.status] || ''}</span>${sprite('desk', MON[t.status], 3.2)}<span class="lbl">${h(t.title)}</span></button>`;
     };
-    const free = `<span class="desk free" aria-hidden="true"><span class="who"></span>${sprite('desk', '#1d2447', 3)}<span class="lbl"></span></span>`;
+    const free = `<span class="desk free" aria-hidden="true"><span class="who"></span>${sprite('desk', '#1d2447', 3.2)}<span class="lbl"></span></span>`;
     const room = a => {
+      const isDoc = a.name.toLowerCase().includes('doc');
       const at = vis.filter(t => t.area_id === a.id && AT_DESK.includes(t.status));
       const shown = at.slice(0, 6), pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
+
+      const decos = isDoc ? `
+        <span class="deco-item" style="top:26px;right:10px" title="Estantería de holocrones y códices">${sprite('bookshelf', '', 3.2)}</span>
+        <span class="deco-item" style="bottom:8px;right:10px" title="Pizarra de documentación">${sprite('whiteboard', '', 2.8)}</span>
+        <span class="deco-item" style="top:26px;right:70px" title="Servidor de archivo">${sprite('server', '', 3)}</span>
+        <span class="deco-item" style="bottom:8px;right:75px" title="Planta sagrada del archivo">${sprite('bigplant', '', 2.8)}</span>
+        <div class="room-rug rug-doc"></div>
+      ` : `
+        <span class="deco-item" style="top:26px;right:10px" title="Pizarra de arquitectura y sprints">${sprite('whiteboard', '', 2.8)}</span>
+        <span class="deco-item" style="bottom:8px;right:10px" title="Caja de herramientas y repuestos">${sprite('crate', '', 3.2)}</span>
+        <span class="deco-item" style="top:26px;right:75px" title="Cluster de servidores de compilación">${sprite('server', '', 3)}</span>
+        <span class="deco-item" style="bottom:8px;right:70px" title="Planta de hangar">${sprite('plant', '', 3.4)}</span>
+        <div class="room-rug rug-dev"></div>
+      `;
+
       return `<section class="room2" data-area="${a.id}" style="--c:${a.color}" tabindex="0" role="button" aria-label="${h(a.alias)}: ${at.length} en actividad, ${pend} pendientes">
-        <div class="plaque">${icon(a.icon, 2)}<b>${h(a.alias)}</b><small>${h(a.name)}</small>${pend ? `<small class="right" title="Tareas pendientes">${pend} pendiente${pend > 1 ? 's' : ''}</small>` : ''}</div>
+        <div class="plaque">${icon(a.icon, 2.5)}<b>${h(a.alias)}</b><small>${h(a.name)}</small>${pend ? `<small class="right" title="Tareas pendientes">${pend} pend.</small>` : ''}</div>
         <div class="desks2">${shown.map(desk).join('')}${Array(Math.max(0, 3 - shown.length)).fill(free).join('')}${at.length > 6 ? `<span class="more">+${at.length - 6}</span>` : ''}</div>
-        ${sprite('plant', '', 3, 'deco')}</section>`;
+        ${decos}
+      </section>`;
     };
     const live = chats.filter(c => LIVE.includes(c.status));
     const cantina = `<section class="room2 cantina2" data-go="#/cantina" style="--c:#ffe81f" tabindex="0" role="button" aria-label="Cantina: ${live.length} consultas activas">
-      <div class="plaque">${icon('cantina', 2)}<b>Cantina</b><small>Consultas rápidas</small></div>
-      <div class="stools">${live.map(c => `<button class="desk ${c.status}" data-chat="${c.id}" title="${h(c.title)}"><span class="who">${sprite('droid', agent(c.agent_id)?.color, 3)}${c.status === 'esperando' ? BUB.esperando : ''}</span><span class="lbl">${h(c.title)}</span></button>`).join('') || '<span class="hint">Nadie en la barra</span>'}</div>
-      <div class="bar"></div></section>`;
-    const consejo = `<section class="room2" data-go="#/consejo" style="--c:#b98cff" tabindex="0" role="button" aria-label="Sala del Consejo">
-      <div class="plaque">${icon('holocron', 2)}<b>Consejo Jedi</b><small>Propuestas de mejora</small></div><div class="round-table"></div></section>`;
-    const lamp = a => a.status === 'sin_cuota' ? '#ff3b3b' : !a.enabled ? '#444a6e' : busy.has(a.id) ? '#3ddc84' : '#4fc3f7';
-    const puente = `<section class="room2" data-go="#/puente" style="--c:#4fc3f7" tabindex="0" role="button" aria-label="Puente de Mando">
-      <div class="plaque">${icon('radar', 2)}<b>Puente de Mando</b><small>Estado y límites</small></div>
-      <div class="consoles">${S.boot.agents.map(a => `<span title="${h(a.name)}: ${busy.has(a.id) ? 'trabajando' : a.status === 'sin_cuota' ? 'sin cuota' : a.enabled ? 'disponible' : 'apagado'}">${sprite('console', lamp(a), 3)}</span>`).join('')}</div></section>`;
-    const archivo = `<section class="room2" data-go="#/archivos" style="--c:#8c97c9" tabindex="0" role="button" aria-label="Archivos Jedi">
-      <div class="plaque">${icon('holocron', 2)}<b>Archivos Jedi</b><small>Historial</small></div><div class="shelves"></div></section>`;
+      <div class="plaque">${icon('cantina', 2.5)}<b>Cantina</b><small>Consultas rápidas</small></div>
+      <div class="stools">${live.map(c => `<button class="desk ${c.status}" data-chat="${c.id}" title="${h(c.title)}"><span class="who">${agentSprite(agent(c.agent_id), 3.8)}${c.status === 'esperando' ? BUB.esperando : ''}</span><span class="lbl">${h(c.title)}</span></button>`).join('') || '<span class="hint">Nadie en la barra</span>'}</div>
+      <div class="bar"></div>
+      <span class="deco-item cooler-deco" title="Dispensador de agua Gather">${sprite('cooler', '', 2.8)}</span>
+      <span class="deco-item" style="top:26px;right:12px" title="Estación de café y bebidas">${sprite('coffee', '', 3)}</span>
+      <span class="deco-item" style="bottom:8px;right:10px" title="Caja de provisiones">${sprite('crate', '', 3)}</span>
+      <span class="deco-item" style="bottom:8px;left:42px" title="Planta exótica de Tatooine">${sprite('plant', '', 2.8)}</span>
+      <div class="room-rug rug-cantina"></div>
+    </section>`;
+    const consejo = `<section class="room2 consejo2" data-go="#/consejo" style="--c:#b98cff" tabindex="0" role="button" aria-label="Sala del Consejo">
+      <div class="plaque">${icon('holocron', 2.5)}<b>Consejo Jedi</b><small>Propuestas de mejora</small></div>
+      <div class="council-dais">
+        <div class="round-table">
+          <span class="council-yoda" title="Gran Maestro Yoda">${sprite('yoda', '', 3.5)}</span>
+        </div>
+      </div>
+      <span class="deco-item" style="top:26px;left:14px" title="Pedestal del Holocrón del Conocimiento">${sprite('pedestal', '', 3)}</span>
+      <span class="deco-item" style="top:26px;right:14px" title="Pedestal del Holocrón de la Sabiduría">${sprite('pedestal', '', 3)}</span>
+      <span class="deco-item" style="bottom:8px;left:14px" title="Planta sagrada del Templo">${sprite('bigplant', '', 2.8)}</span>
+      <span class="deco-item" style="bottom:8px;right:14px" title="Planta sagrada del Templo">${sprite('bigplant', '', 2.8)}</span>
+      <div class="room-rug rug-council"></div>
+    </section>`;
     const me = S.boot.me;
     const idle = S.boot.agents.filter(a => !busy.has(a.id));
-    const hall = `<div class="hall" aria-label="Pasillo">
-      <span class="avatar" style="left:4%" title="Tú">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3)}<span class="tag">${h(me.name.split(' ')[0])}</span></span>
+
+    // Mostrar 4 oficinas fijas: Documentación y Desarrollo arriba; Cantina y Consejo Jedi abajo
+    const docArea = S.boot.areas.find(a => a.name.toLowerCase().includes('doc')) || S.boot.areas[0];
+    const devArea = S.boot.areas.find(a => a.name.toLowerCase().includes('desarr')) || S.boot.areas[1];
+    const fixedAreas = [docArea, devArea].filter(Boolean);
+    const otherAreas = S.boot.areas.filter(a => !fixedAreas.includes(a));
+    const moreCount = otherAreas.length + 2; // + puente + archivos
+
+    const hall = `<div class="hall" aria-label="Pasillo principal">
+      <div class="hall-runner"></div>
+      <span class="avatar" style="left:3%" title="Tú">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3.8)}<span class="tag">${h(me.name.split(' ')[0])}</span></span>
       ${idle.map((a, i) => a.status === 'sin_cuota' || !a.enabled
-        ? `<span class="avatar sleeping" style="left:${22 + i * 16}%" title="${h(a.name)} ${a.enabled ? 'sin cuota hasta ' + fmtDate(a.quota_reset_at) : 'apagado'}">${sprite('droid', a.color, 3)}${a.enabled ? '<span class="bubble z">Zz</span>' : ''}<span class="tag">${h(a.name)}</span></span>`
-        : `<span class="avatar walker" style="--d:${12 + i * 3}s;animation-delay:-${i * 2}s" title="${h(a.name)} disponible">${sprite('droid', a.color, 3)}<span class="tag">${h(a.name)}</span></span>`).join('')}</div>`;
-    el.innerHTML = `<div class="floor"><div class="wing">${S.boot.areas.map(room).join('')}</div>${hall}<div class="wing">${cantina}${consejo}${puente}${archivo}</div></div>`;
+        ? `<span class="avatar sleeping" style="left:${20 + i * 14}%" title="${h(a.name)} ${a.enabled ? 'sin cuota hasta ' + fmtDate(a.quota_reset_at) : 'apagado'}">${agentSprite(a, 3.8)}${a.enabled ? '<span class="bubble z">Zz</span>' : ''}<span class="tag">${h(a.name)}</span></span>`
+        : `<span class="avatar walker" style="--d:${12 + i * 3}s;animation-delay:-${i * 2}s" title="${h(a.name)} disponible">${agentSprite(a, 3.8)}<span class="tag">${h(a.name)}</span></span>`).join('')}
+      <button type="button" class="hall-more-btn" id="btnMoreRooms" title="Ver Análisis, Puente de Mando y Archivos">
+        🏛 <b>+ Más salas</b> <span class="chip" style="font-size:9px;padding:1px 5px;margin-left:2px">${moreCount}</span> ▾
+      </button>
+    </div>`;
+
+    const runsList = (execs?.rows || []).slice(0, 8);
+    const runItemHTML = r => {
+      const a = agent(r.agent_id);
+      const t = tasks.find(x => x.id === r.task_id);
+      const targetTitle = t ? `#${t.id} ${t.title}` : (r.task_id ? `Tarea #${r.task_id}` : `Chat #${r.conversation_id}`);
+      const link = r.task_id ? `#/tarea/${r.task_id}` : `#/cantina/${r.conversation_id}`;
+      const isRunning = !r.ended_at;
+      const isOk = r.exit_code === 0 || r.end_reason === 'listo' || r.end_reason === 'completado';
+      const statusDot = isRunning ? '<span class="dot ok blink"></span>' : isOk ? '<span class="dot ok"></span>' : '<span class="dot bad"></span>';
+      const statusText = isRunning ? 'en curso' : r.ended_at ? dur((Date.parse(r.ended_at) - Date.parse(r.started_at)) / 1000) : 'falló';
+      const tok = (r.tokens_in || 0) + (r.tokens_out || 0);
+      return `<a class="run-item" href="${link}">
+        <div class="row" style="justify-content:space-between;gap:4px">
+          <span class="row" style="gap:5px;font-size:12px;font-weight:600">${agentSprite(a, 1.5)} ${h(a?.name || 'Agente')}</span>
+          <span class="run-status">${statusDot} ${statusText}</span>
+        </div>
+        <div class="run-desc ellipsis" title="${h(targetTitle)}">${h(targetTitle)}</div>
+        <div class="run-meta row" style="justify-content:space-between">
+          <span>${h(r.model || '')}</span>
+          <span>${tok ? num(tok) + ' tok · ' : ''}${ago(r.started_at)}</span>
+        </div>
+      </a>`;
+    };
+
+    const sideHidden = localStorage.getItem('ov_station_aside') === '0';
+    el.innerHTML = `<div class="station-layout">
+      <div class="station-top-row">
+        <div class="station-main">
+          <div class="floor">
+            <div class="wing wing-top">${fixedAreas.map(room).join('')}</div>
+            ${hall}
+            <div class="wing wing-bottom">${cantina}${consejo}</div>
+          </div>
+        </div>
+        <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Últimas ejecuciones">
+          <div class="station-aside-head">
+            <div class="row" style="gap:6px">
+              <span class="dot ok"></span>
+              <b class="pixel" style="font-size:9px;color:var(--yellow)">EJECUCIONES</b>
+            </div>
+            <div class="row" style="gap:4px">
+              <a href="#/archivos/ejecuciones" class="btn sm ghost" title="Ver historial">Historial</a>
+              <button type="button" class="btn sm ghost" id="hideSideBtn" title="Ocultar pestaña" aria-label="Ocultar">✕</button>
+            </div>
+          </div>
+          <div class="station-aside-body">
+            ${runsList.map(runItemHTML).join('') || '<div class="empty" style="padding:14px">Sin ejecuciones recientes</div>'}
+          </div>
+        </aside>
+        <button type="button" class="station-tab-btn" id="openSideBtn" ${sideHidden ? '' : 'hidden'} title="Ver últimas ejecuciones">
+          📡 <span>Ejecuciones</span>
+        </button>
+      </div>
+
+      <section class="station-kanban-box" id="stationKanban" aria-label="Tablero Kanban de tareas">
+        <div class="station-kanban-head">
+          <div class="row" style="gap:10px">
+            <span class="pixel" style="font-size:10px;color:var(--yellow)">■ TABLERO KANBAN</span>
+            <span class="chip">${vis.length} tareas</span>
+            ${S.project ? `<span class="chip" style="border-color:${h(project(S.project)?.color)}">${h(project(S.project)?.name)}</span>` : '<span class="chip">Todos los proyectos</span>'}
+          </div>
+          <div class="row" style="gap:8px">
+            ${canEdit() ? '<button type="button" class="btn sm y" id="skNewTask">+ Nueva tarea</button>' : ''}
+            <a class="btn sm ghost" href="#/kanban/${S.project || 'todos'}">Ver kanban con filtros ↗</a>
+          </div>
+        </div>
+        <div class="kanban" id="skGrid">
+          ${COLS.map(([k, l]) => {
+            const list = vis.filter(t => k === 'atascadas' ? STUCK.includes(t.status) : t.status === k).sort((a, b) => a.kanban_order - b.kanban_order);
+            return `<div class="kcol" data-col="${k}">
+              <div class="kcol-head"><span>${l}</span><span>${list.length}</span></div>
+              <div class="kcol-body">${list.map(t => kanbanCard(t, !S.project)).join('') || '<div class="empty" style="padding:16px 8px;font-size:11px">Sin tareas</div>'}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </section>
+    </div>`;
+
+    bindKanbanDrag(el, vis);
+
     el.onclick = e => {
+      const hideBtn = e.target.closest('#hideSideBtn');
+      if (hideBtn) {
+        e.preventDefault();
+        localStorage.setItem('ov_station_aside', '0');
+        const aside = $('#stationAside', el);
+        const openBtn = $('#openSideBtn', el);
+        if (aside) aside.hidden = true;
+        if (openBtn) openBtn.hidden = false;
+        return;
+      }
+      const openBtn = e.target.closest('#openSideBtn');
+      if (openBtn) {
+        e.preventDefault();
+        localStorage.setItem('ov_station_aside', '1');
+        const aside = $('#stationAside', el);
+        if (aside) aside.hidden = false;
+        openBtn.hidden = true;
+        return;
+      }
+      const nt = e.target.closest('#skNewTask');
+      if (nt) {
+        e.preventDefault();
+        return taskForm({}, { project_id: S.project });
+      }
+      const moreBtn = e.target.closest('#btnMoreRooms');
+      if (moreBtn) {
+        e.preventDefault();
+        return otherRoomsModal(vis, busy, chats);
+      }
+      const kc = e.target.closest('.kcard');
+      if (kc) return go('#/tarea/' + kc.dataset.id);
       const d = e.target.closest('[data-task]'); if (d) return go('#/tarea/' + d.dataset.task);
       const c = e.target.closest('[data-chat]'); if (c) return go('#/cantina/' + c.dataset.chat);
       const g = e.target.closest('[data-go]'); if (g) return go(g.dataset.go);
       const r = e.target.closest('[data-area]'); if (r) roomModal(+r.dataset.area, vis);
     };
-    el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('[data-area],[data-go]')) e.target.click(); };
+    el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('[data-area],[data-go],.kcard,#btnMoreRooms')) e.target.click(); };
   },
 };
+
+function otherRoomsModal(vis, busy, chats) {
+  const docArea = S.boot.areas.find(a => a.name.toLowerCase().includes('doc')) || S.boot.areas[0];
+  const devArea = S.boot.areas.find(a => a.name.toLowerCase().includes('desarr')) || S.boot.areas[1];
+  const fixedAreas = [docArea, devArea].filter(Boolean);
+  const otherAreas = S.boot.areas.filter(a => !fixedAreas.includes(a));
+  const lamp = a => a.status === 'sin_cuota' ? '#ff3b3b' : !a.enabled ? '#444a6e' : busy.has(a.id) ? '#3ddc84' : '#4fc3f7';
+
+  const d = modal(`<h2>🏛 Más salas de la estación</h2>
+    <p class="muted">Acceso a las áreas operativas adicionales, puente de mando e historial.</p>
+    <div class="more-rooms-grid">
+      ${otherAreas.map(a => {
+        const at = vis.filter(t => t.area_id === a.id && AT_DESK.includes(t.status));
+        const pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
+        return `<div class="more-room-card" data-area-modal="${a.id}" style="--c:${a.color}" tabindex="0" role="button">
+          <div class="card-head">${icon(a.icon, 3)}<div><b>${h(a.alias)}</b><br><small class="muted">${h(a.name)}</small></div></div>
+          <div class="card-meta">
+            <span><b>${at.length}</b> en actividad</span> · <span><b>${pend}</b> pendientes</span>
+          </div>
+          <p class="muted" style="margin:4px 0 0;font-size:11px">Haz clic para ver tareas abiertas o crear una nueva en esta área.</p>
+        </div>`;
+      }).join('')}
+      <div class="more-room-card" data-go-modal="#/puente" style="--c:#4fc3f7" tabindex="0" role="button">
+        <div class="card-head">${icon('radar', 3)}<div><b>Puente de Mando</b><br><small class="muted">Estado y límites de agentes</small></div></div>
+        <div class="consoles" style="margin:6px 0">${S.boot.agents.map(a => `<span title="${h(a.name)}">${sprite('console', lamp(a), 2.5)}</span>`).join('')}</div>
+        <p class="muted" style="margin:4px 0 0;font-size:11px">Monitorea en tiempo real los modelos, cuotas y límites de cómputo.</p>
+      </div>
+      <div class="more-room-card" data-go-modal="#/archivos" style="--c:#8c97c9" tabindex="0" role="button">
+        <div class="card-head">${icon('holocron', 3)}<div><b>Archivos Jedi</b><br><small class="muted">Historial y ejecuciones</small></div></div>
+        <div class="card-meta"><span>Registros de auditoría, logs y ejecuciones históricas.</span></div>
+        <p class="muted" style="margin:4px 0 0;font-size:11px">Explora el registro permanente de todas las misiones y comandos ejecutados.</p>
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button class="btn ghost" value="c">Cerrar</button>
+    </div>`);
+
+  $$('[data-area-modal]', d).forEach(b => {
+    b.onclick = () => {
+      const aid = +b.dataset.areaModal;
+      closeModal();
+      roomModal(aid, vis);
+    };
+  });
+  $$('[data-go-modal]', d).forEach(b => {
+    b.onclick = () => {
+      const target = b.dataset.goModal;
+      closeModal();
+      go(target);
+    };
+  });
+}
 function roomModal(areaId, tasks) {
   const a = area(areaId);
   const list = tasks.filter(t => t.area_id === areaId && t.status !== 'completada');
@@ -207,7 +472,7 @@ const proyectos = {
         <td>${p.folders.map(x => `<span class="chip" title="${h(x.path)}">${h(x.label)}${x.is_git ? ' (git)' : ''}</span>`).join(' ') || '<small class="muted">—</small>'}</td>
         <td>${saber(p.progress, p.color)}<small>${p.progress}% (${p.counts.completada || 0}/${p.total})</small></td>
         <td>${['en_curso', 'esperando', 'revision', 'fallida'].filter(s => p.counts[s]).map(s => chip(s, `${STATUS[s]} ${p.counts[s]}`)).join(' ') || '<small class="muted">—</small>'}</td>
-        <td>${p.agents.map(id => sprite('droid', agent(id)?.color, 2)).join('')}</td><td><small>${ago(p.last_activity || p.updated_at)}</small></td>
+        <td>${p.agents.map(id => agentSprite(agent(id), 2)).join('')}</td><td><small>${ago(p.last_activity || p.updated_at)}</small></td>
         <td class="row" style="flex-wrap:nowrap">${canEdit() ? `<button class="btn sm ghost" data-edit="${p.id}">Editar</button>` : ''}<button class="btn sm" data-ficha="${p.id}">Ficha</button></td></tr>`).join('') || '<tr><td colspan="10" class="empty">No hay proyectos. Crea el primero.</td></tr>'}
       </table></div>`;
     $('#np', el)?.addEventListener('click', () => projectForm());
@@ -287,8 +552,6 @@ async function projectCard(pid) {
 }
 
 // ===================== KANBAN =====================
-const COLS = [['pendiente', 'Pendiente'], ['en_cola', 'En cola'], ['en_curso', 'En curso'], ['esperando', 'Esperando'], ['revision', 'Revisión'], ['completada', 'Completada'], ['atascadas', 'Atascadas']];
-const STUCK = ['bloqueada', 'pausada_cuota', 'fallida'];
 const kanban = {
   refreshOn: ['task.updated', 'task.created', 'agent.status'],
   async render(el, r) {
@@ -300,16 +563,6 @@ const kanban = {
     const f = S.kf ||= { area: '', agent: '', pri: '', who: '' };
     const all = await get('/api/tasks' + (pid ? '?project_id=' + pid : ''));
     const tasks = all.filter(t => (!f.area || t.area_id === +f.area) && (!f.agent || t.agent_id === +f.agent) && (!f.pri || t.priority === f.pri) && (!f.who || t.assignee_user_id === +f.who));
-    const card = t => {
-      const a = agent(t.agent_id), ar = area(t.area_id);
-      const tp = pid ? null : project(t.project_id);
-      return `<div class="kcard" draggable="${canEdit()}" data-id="${t.id}" style="--c:${ar?.color || '#46529a'}" tabindex="0">
-        <div class="row" style="gap:6px"><small>#${t.id}</small>${tp ? `<span class="chip" style="border-color:${h(tp.color)}">${h(tp.name)}</span>` : ''}${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
-        <div class="t">${h(t.title)}</div>
-        <div class="meta">${t.executor === 'humano' ? `${sprite('rebel', '#ff8c42', 2)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${sprite('droid', a?.color, 2)}${h(a?.name || '—')} <span>${h(t.model || '')}${t.effort ? '·' + h(t.effort) : ''}</span>`}
-        ${t.status === 'en_curso' ? `<span class="chip st-en_curso">⏱ ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}${t.status === 'esperando' ? '<span class="chip st-esperando">? responde</span>' : ''}
-        ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div></div>`;
-    };
     el.innerHTML = `<div class="row"><h1 style="margin:0">Kanban</h1>
       <select id="kfProj" style="width:auto;max-width:260px" aria-label="Proyecto">${opts(S.boot.projects.map(x => [x.id, x.name]), pid || '', 'Todos los proyectos')}</select>${p ? chip('pendiente', PSTATUS[p.status]) : ''}
       <span class="right">${canEdit() ? '<button class="btn y" id="kt">+ Tarea</button><button class="btn" id="km">+ Misión</button>' : ''}<a class="btn o" href="#/consejo${pid ? '?project=' + pid : ''}">Consejo</a>${p ? '<button class="btn ghost" id="kf">Ficha</button>' : ''}</span></div>
@@ -321,7 +574,7 @@ const kanban = {
         <small class="muted">Arrastra a "En curso" para ejecutar con el agente asignado.</small></div>
       <div class="kanban">${COLS.map(([k, l]) => {
         const list = tasks.filter(t => k === 'atascadas' ? STUCK.includes(t.status) : t.status === k).sort((a, b) => a.kanban_order - b.kanban_order);
-        return `<div class="kcol" data-col="${k}"><div class="kcol-head"><span>${l}</span><span>${list.length}</span></div><div class="kcol-body">${list.map(card).join('')}</div></div>`;
+        return `<div class="kcol" data-col="${k}"><div class="kcol-head"><span>${l}</span><span>${list.length}</span></div><div class="kcol-body">${list.map(t => kanbanCard(t, !pid)).join('') || '<div class="empty" style="padding:16px 8px;font-size:11px">Sin tareas</div>'}</div></div>`;
       }).join('')}</div>`;
     $('#kt', el)?.addEventListener('click', () => taskForm({}, { project_id: pid }));
     $('#km', el)?.addEventListener('click', missionForm);
@@ -330,28 +583,7 @@ const kanban = {
     for (const [id, k] of [['#kfA', 'area'], ['#kfG', 'agent'], ['#kfP', 'pri'], ['#kfW', 'who']]) $(id, el).onchange = e => { f[k] = e.target.value; route(true); };
     el.onclick = e => { const c = e.target.closest('.kcard'); if (c) go('#/tarea/' + c.dataset.id); };
     el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('.kcard')) go('#/tarea/' + e.target.dataset.id); };
-    let dragId = null;
-    el.addEventListener('dragstart', e => { const c = e.target.closest('.kcard'); if (!c) return; dragId = +c.dataset.id; c.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
-    el.addEventListener('dragend', e => { e.target.closest?.('.kcard')?.classList.remove('dragging'); $$('.kcol', el).forEach(x => x.classList.remove('over')); });
-    $$('.kcol', el).forEach(col => {
-      col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
-      col.addEventListener('dragleave', () => col.classList.remove('over'));
-      col.addEventListener('drop', async e => {
-        e.preventDefault(); col.classList.remove('over');
-        if (!dragId) return;
-        const k = col.dataset.col;
-        const cards = $$('.kcard', col).filter(c => +c.dataset.id !== dragId);
-        const after = cards.find(c => e.clientY < c.getBoundingClientRect().top + c.offsetHeight / 2);
-        const ord = id => all.find(t => t.id === +id)?.kanban_order ?? 0;
-        const i = after ? cards.indexOf(after) : cards.length;
-        const prev = i > 0 ? ord(cards[i - 1].dataset.id) : (cards[0] ? ord(cards[0].dataset.id) - 1000 : Date.now());
-        const next = after ? ord(after.dataset.id) : prev + 2000;
-        const t = all.find(x => x.id === dragId);
-        const status = k === 'atascadas' ? t.status : k;
-        if (status === 'en_curso' && t.executor === 'agente' && t.status !== 'en_curso' && !await confirmBox(`¿Ejecutar #${t.id} con ${agent(t.agent_id)?.name || 'el agente'}?`, 'Ejecutar')) return;
-        try { await post(`/api/tasks/${dragId}/move`, { status: status === t.status ? undefined : status, kanban_order: (prev + next) / 2 }); refreshSoon(0); } catch (err) { fail(err); refreshSoon(0); }
-      });
-    });
+    bindKanbanDrag(el, all);
   },
 };
 
@@ -532,7 +764,7 @@ const cantina = {
     const list = await get(`/api/conversations?q=${encodeURIComponent(q.q)}${q.archived ? '&archived=1' : ''}`);
     const left = `<div class="col-flex"><button class="btn y" id="newChat">+ Nueva consulta</button><input id="chatQ" placeholder="Buscar chats" value="${h(q.q)}">
       <label class="row" style="font-size:13px"><input type="checkbox" id="chatArch" ${q.archived ? 'checked' : ''}> ver archivados</label>
-      <div class="chat-list" data-scroll="clist">${list.map(c => `<div class="chat-item ${c.id === cid ? 'on' : ''}" data-c="${c.id}"><div class="row" style="gap:6px">${sprite('droid', agent(c.agent_id)?.color, 2)}<b class="ellipsis grow">${c.pinned ? '📌 ' : ''}${h(c.title)}</b>${c.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : c.status === 'en_curso' ? '<span class="chip st-en_curso">…</span>' : ''}</div><small>${h(agent(c.agent_id)?.name)} · ${c.n_runs} turnos · ${ago(c.updated_at)}</small></div>`).join('') || '<div class="empty">Sin consultas todavía</div>'}</div></div>`;
+      <div class="chat-list" data-scroll="clist">${list.map(c => `<div class="chat-item ${c.id === cid ? 'on' : ''}" data-c="${c.id}"><div class="row" style="gap:6px">${agentSprite(agent(c.agent_id), 2)}<b class="ellipsis grow">${c.pinned ? '📌 ' : ''}${h(c.title)}</b>${c.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : c.status === 'en_curso' ? '<span class="chip st-en_curso">…</span>' : ''}</div><small>${h(agent(c.agent_id)?.name)} · ${c.n_runs} turnos · ${ago(c.updated_at)}</small></div>`).join('') || '<div class="empty">Sin consultas todavía</div>'}</div></div>`;
     let right;
     if (!cid) {
       right = `<div class="panel y"><h2 style="margin-top:0">Nueva consulta rápida</h2><p class="muted">Pregunta lo que sea a un agente sin crear tarea. Queda en el historial y puedes convertirla en tarea o proyecto.</p>
@@ -620,7 +852,7 @@ const consejo = {
         <p class="muted">Envía un informe de lo último que se hizo a uno o varios agentes y recibe propuestas de mejora priorizadas que puedes convertir en tareas.</p>
         <div class="panel table-wrap"><table class="grid"><tr><th>#</th><th>Fecha</th><th>Proyectos</th><th>Lentes</th><th>Agentes</th><th>Estado</th><th>Propuestas</th></tr>
         ${list.map(v => `<tr class="click" data-r="${v.id}"><td>${v.id}</td><td>${fmtDate(v.at)}<br><small>${userChip(v.created_by)}</small></td><td>${JSON.parse(v.project_ids || '[]').map(p => h(project(p)?.name || '#' + p)).join(', ')}</td>
-          <td>${JSON.parse(v.lenses || '[]').map(l => `<span class="chip">${h(S.boot.lenses[l]?.[0] || l)}</span>`).join(' ')}</td><td>${JSON.parse(v.agents || '[]').map(a => sprite('droid', agent(a.agent_id)?.color, 2)).join('')}</td>
+          <td>${JSON.parse(v.lenses || '[]').map(l => `<span class="chip">${h(S.boot.lenses[l]?.[0] || l)}</span>`).join(' ')}</td><td>${JSON.parse(v.agents || '[]').map(a => agentSprite(agent(a.agent_id), 2)).join('')}</td>
           <td>${chip(v.status === 'lista' ? 'completada' : v.status === 'error' ? 'fallida' : 'en_curso', v.status)}</td><td>${v.aceptadas}/${v.propuestas} aceptadas</td></tr>`).join('') || '<tr><td colspan="7" class="empty">Aún no se ha reunido el consejo</td></tr>'}</table></div>`;
       $('#conv', el)?.addEventListener('click', () => conveneDialog(+r.query.project || S.project));
       $$('[data-r]', el).forEach(t => t.onclick = () => go('#/consejo/' + t.dataset.r));
@@ -642,6 +874,20 @@ const consejo = {
       <h2>Propuestas</h2><div class="grid2">${props.map(pc).join('')}</div>` : v.status !== 'en_curso' ? '<div class="empty">Sin propuestas</div>' : ''}
       <h3>Conversaciones del consejo</h3>${x.conversations.map(c => `<div><a href="#/cantina/${c.id}">${h(c.title)}</a></div>`).join('')}`;
     el.onclick = async e => {
+      const tc = e.target.closest('.theme-card');
+      if (tc) {
+        const t = tc.dataset.t;
+        applyTheme(t);
+        $('.theme-card', el).forEach(c => {
+          const match = c.dataset.t === t;
+          c.classList.toggle('on', match);
+          const r = $('input[name=theme]', c);
+          if (r) r.checked = match;
+        });
+        const tb = $('#themeBtn');
+        if (tb) tb.textContent = 'Tema: ' + (t === 'blanco' ? 'blanco (Hoth)' : 'oscuro (espacio)');
+        if (S.sound) beep('ok');
+      }
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.acc) {
         const p = props.find(y => y.id === +b.dataset.acc);
@@ -675,7 +921,7 @@ async function conveneDialog(pid) {
     <div class="grid3">${Object.entries(L).map(([k, [n, desc]]) => `<label class="row" style="font-size:13px;align-items:flex-start" title="${h(desc)}"><input type="checkbox" name="lens" value="${k}" ${['siguiente'].includes(k) ? 'checked' : ''}><span><b>${h(n)}</b><br><small>${h(desc).slice(0, 70)}</small></span></label>`).join('')}</div>
     <label class="l">Pedido libre (lente «Libre»)</label><input name="custom" placeholder="p. ej. ¿cómo reducimos los tiempos de respuesta?">
     <h3>3 · ¿Quién opina?</h3>
-    ${agentsOn().map((a, i) => `<div class="row" style="margin:4px 0"><label class="row" style="min-width:170px"><input type="checkbox" name="ag" value="${a.id}" ${i === 0 ? 'checked' : ''}>${sprite('droid', a.color, 2)} ${h(a.name)}</label>
+    ${agentsOn().map((a, i) => `<div class="row" style="margin:4px 0"><label class="row" style="min-width:170px"><input type="checkbox" name="ag" value="${a.id}" ${i === 0 ? 'checked' : ''}>${agentSprite(a, 2)} ${h(a.name)}</label>
       <select style="max-width:220px" data-m="${a.id}">${modelOpts(a)}</select>
       <select style="max-width:120px" data-e="${a.id}">${opts(a.efforts.map(e => [e, e]), a.default_effort)}</select></div>`).join('')}
     <label class="l">Moderador (consolida si opinan varios)</label><select name="moderator">${opts(agentsOn().map(a => [a.id, a.name]), '', 'Sin moderador (consolidación automática)')}</select>
@@ -777,7 +1023,7 @@ const puente = {
       const [d, l] = STATE[a.state] || ['warn', a.state];
       const snaps = hist.filter(x => x.agent_id === a.id).slice(-48);
       const max = Math.max(1, ...snaps.map(x => x.detail.usage5h?.tokens || 0));
-      return `<div class="panel agent-card" style="--c:${a.color}"><div class="row">${sprite('droid', a.color, 4)}<div class="grow"><h2 style="margin:0;color:${a.color}">${h(a.name)}</h2><span class="dot ${d}"></span> <b>${l}</b>${a.state === 'sin_cuota' && a.quota_reset_at ? ` · vuelve ${ago(a.quota_reset_at)}` : ''}</div>
+      return `<div class="panel agent-card" style="--c:${a.color}"><div class="row">${agentSprite(a, 4)}<div class="grow"><h2 style="margin:0;color:${a.color}">${h(a.name)}</h2><span class="dot ${d}"></span> <b>${l}</b>${a.state === 'sin_cuota' && a.quota_reset_at ? ` · vuelve ${ago(a.quota_reset_at)}` : ''}</div>
         <div class="col-flex" style="gap:0">${canEdit() ? `<button class="btn sm" data-test="${a.id}">Probar</button>` : ''}${a.state === 'sin_cuota' && canEdit() ? `<button class="btn sm y" data-react="${a.id}">Reactivar</button>` : ''}</div></div>
         <div class="kv" style="margin-top:8px"><b>Versión</b><span>${h(a.version || (a.found === false ? 'no encontrado' : '—'))}</span><b>Ejecutable</b><span class="ellipsis" title="${h(a.exe)}">${h(a.exe)}</span>
           <b>Trabajo</b><span>${a.busy}/${a.max_concurrent} activos · ${a.queued} en cola</span><b>Por defecto</b><span>${h(a.default_model)} · ${h(a.default_effort)}</span>
@@ -857,7 +1103,7 @@ const config = {
   },
   async render(el, r) {
     const admin = isAdmin();
-    const tabs = [...(admin ? [['maquinas', 'Máquinas'], ['agentes', 'Agentes'], ['areas', 'Áreas'], ['usuarios', 'Usuarios'], ['limites', 'Límites'], ['auto', 'Automatización']] : []), ['plantillas', 'Plantillas'], ['perfil', 'Mi perfil']];
+    const tabs = [...(admin ? [['maquinas', 'Máquinas'], ['agentes', 'Agentes'], ['areas', 'Áreas'], ['usuarios', 'Usuarios'], ['limites', 'Límites'], ['auto', 'Automatización']] : []), ['plantillas', 'Plantillas'], ['apariencia', 'Apariencia'], ['perfil', 'Mi perfil']];
     const tab = tabs.find(t => t[0] === r.args[0]) ? r.args[0] : tabs[0][0];
     let body = '';
     if (tab === 'maquinas') {
@@ -871,7 +1117,7 @@ const config = {
     } else if (tab === 'agentes') {
       const list = await get('/api/agents');
       body = list.map(a => `<form class="panel agent-card" data-agent="${a.id}" style="--c:${a.color};margin-bottom:14px">
-        <div class="row">${sprite('droid', a.color, 4)}<h2 style="margin:0;color:${a.color}">${h(a.name)}</h2><span class="chip">${h(a.key)} · adaptador ${h(a.adapter)}</span><label class="row right"><input type="checkbox" name="enabled" ${a.enabled ? 'checked' : ''}> habilitado</label></div>
+        <div class="row">${agentSprite(a, 4)}<h2 style="margin:0;color:${a.color}">${h(a.name)}</h2><span class="chip">${h(a.key)} · adaptador ${h(a.adapter)}</span><label class="row right"><input type="checkbox" name="enabled" ${a.enabled ? 'checked' : ''}> habilitado</label></div>
         <div class="field-row"><div><label class="l">Nombre</label><input name="name" value="${h(a.name)}"></div><div><label class="l">Color</label><input type="color" name="color" value="${h(a.color || '#4fc3f7')}" style="height:40px"></div>
           <div><label class="l">Concurrencia máx.</label><input type="number" name="max_concurrent" min="1" value="${a.max_concurrent}"></div><div><label class="l">Timeout (min)</label><input type="number" name="timeout_min" min="1" value="${a.timeout_min}"></div></div>
         <label class="l">Ejecutable</label><input name="exe" value="${h(a.exe)}">
@@ -920,11 +1166,47 @@ const config = {
       body = S.boot.templates.map(t => `<form class="panel" data-tpl="${t.id}" style="margin-bottom:10px"><div class="field-row"><div><label class="l">Área</label><select name="area_id">${opts(S.boot.areas.map(a => [a.id, a.name]), t.area_id, '—')}</select></div><div><label class="l">Título</label><input name="title" value="${h(t.title)}"></div></div>
         <label class="l">Instrucciones</label><textarea name="prompt">${h(t.prompt)}</textarea><div class="row"><button class="btn y">Guardar</button><button class="btn r" type="button" data-deltpl="${t.id}">Eliminar</button></div></form>`).join('') +
         `<form class="panel" id="newTpl"><h3>Nueva plantilla</h3><div class="field-row"><div><label class="l">Área</label><select name="area_id">${opts(S.boot.areas.map(a => [a.id, a.name]), '', '—')}</select></div><div><label class="l">Título</label><input name="title" required></div></div><label class="l">Instrucciones</label><textarea name="prompt" required></textarea><button class="btn y" style="margin-top:10px">Crear</button></form>`;
+    } else if (tab === 'apariencia') {
+      const cur = S.theme || 'oscuro';
+      body = `<form class="panel" id="themeF">
+        <h3>Tema y apariencia visual</h3>
+        <p class="muted">Personaliza la estética galáctica de la Oficina Virtual. Los cambios se aplican al instante y se guardan en tu perfil.</p>
+        <div class="theme-picks">
+          <label class="theme-card ${cur === 'oscuro' ? 'on' : ''}" data-t="oscuro">
+            <span class="theme-swatch dark-swatch"></span>
+            <input type="radio" name="theme" value="oscuro" ${cur === 'oscuro' ? 'checked' : ''} style="display:none">
+            <b>Oscuro (Espacio profundo)</b>
+            <small class="muted">Fondo estelar negro, paneles azul noche y acentos clásicos Star Wars en amarillo y cian holográfico.</small>
+          </label>
+          <label class="theme-card ${cur === 'blanco' ? 'on' : ''}" data-t="blanco">
+            <span class="theme-swatch light-swatch"></span>
+            <input type="radio" name="theme" value="blanco" ${cur === 'blanco' ? 'checked' : ''} style="display:none">
+            <b>Crema / Hueso (Tatooine)</b>
+            <small class="muted">Fondo cálido tono hueso y arena, paneles marfil y alto contraste descansado para la vista.</small>
+          </label>
+        </div>
+        <div class="row"><button class="btn y">Guardar tema</button></div>
+      </form>`;
     } else {
       const me = S.boot.me, prefs = me.notif_prefs || {};
+      const cur = S.theme || 'oscuro';
       body = `<form class="panel" id="meF"><div class="row">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 5)}<div><h2 style="margin:0">${h(me.name)}</h2><small>${h(me.username)} · ${h(me.role)} · ${h(S.boot.users.find(u => u.id === me.id)?.rank || '')}</small></div></div>
         <label class="l">Nombre</label><input name="name" value="${h(me.name)}"><label class="l">Nueva contraseña (vacío = no cambiar)</label><input name="password" type="password" minlength="6" autocomplete="new-password">
-        <label class="l">Tema</label><select name="theme" id="meTheme">${opts([['oscuro', 'Oscuro (espacio)'], ['crema', 'Crema (claro)']], prefs.theme || 'oscuro')}</select>
+        <h3>Tema de la interfaz</h3>
+        <div class="theme-picks">
+          <label class="theme-card ${cur === 'oscuro' ? 'on' : ''}" data-t="oscuro">
+            <span class="theme-swatch dark-swatch"></span>
+            <input type="radio" name="theme" value="oscuro" ${cur === 'oscuro' ? 'checked' : ''} style="display:none">
+            <b>Oscuro (Espacio)</b>
+            <small class="muted">Fondo estelar negro</small>
+          </label>
+          <label class="theme-card ${cur === 'blanco' ? 'on' : ''}" data-t="blanco">
+            <span class="theme-swatch light-swatch"></span>
+            <input type="radio" name="theme" value="blanco" ${cur === 'blanco' ? 'checked' : ''} style="display:none">
+            <b>Crema / Hueso (Tatooine)</b>
+            <small class="muted">Fondo cálido de tono hueso</small>
+          </label>
+        </div>
         <h3>Notificaciones de escritorio</h3>${NOTIF_KINDS.map(([k, l]) => `<label class="row"><input type="checkbox" name="n_${k}" ${prefs[k] !== false ? 'checked' : ''}> ${l}</label>`).join('')}
         <p class="muted">Permiso del navegador: ${'Notification' in window ? Notification.permission : 'no soportado'}. Si no hay pestañas abiertas, la oficina usa notificaciones de Windows.</p>
         <div class="row"><button class="btn y">Guardar</button>${'Notification' in window && Notification.permission !== 'granted' ? '<button class="btn" type="button" id="askN">Permitir notificaciones</button>' : ''}</div></form>
@@ -992,14 +1274,39 @@ const config = {
           holo('Ajustes guardados'); await loadBoot();
         } else if (fm.dataset.tpl) { await put('/api/templates/' + fm.dataset.tpl, { ...f, area_id: +f.area_id || null }); holo('Plantilla guardada'); await loadBoot(); }
         else if (fm.id === 'newTpl') { await post('/api/templates', { ...f, area_id: +f.area_id || null }); await loadBoot(); route(true); }
-        else if (fm.id === 'meF') {
-          const notif_prefs = { ...Object.fromEntries(NOTIF_KINDS.map(([k]) => [k, f['n_' + k]])), theme: f.theme };
+        else if (fm.id === 'themeF') {
+          const chosenTheme = f.theme || S.theme || 'oscuro';
+          applyTheme(chosenTheme);
+          const prefs = S.boot?.me?.notif_prefs || {};
+          prefs.theme = chosenTheme;
+          await put('/api/me', { notif_prefs: prefs });
+          holo('Tema guardado', chosenTheme === 'blanco' || chosenTheme === 'crema' ? 'Tema crema (Tatooine) activado' : 'Tema oscuro (Espacio profundo) activado');
+          await loadBoot();
+        } else if (fm.id === 'meF') {
+          const notif_prefs = Object.fromEntries(NOTIF_KINDS.map(([k]) => [k, f['n_' + k]]));
+          const chosenTheme = f.theme || S.theme || 'oscuro';
+          notif_prefs.theme = chosenTheme;
+          applyTheme(chosenTheme);
           await put('/api/me', { name: f.name, password: f.password || undefined, notif_prefs }); holo('Perfil guardado'); await loadBoot();
         }
         beep('ok');
       } catch (err) { fail(err); }
     };
     el.onclick = async e => {
+      const tc = e.target.closest('.theme-card');
+      if (tc) {
+        const t = tc.dataset.t;
+        applyTheme(t);
+        $$('.theme-card', el).forEach(c => {
+          const match = c.dataset.t === t;
+          c.classList.toggle('on', match);
+          const r = $('input[name=theme]', c);
+          if (r) r.checked = match;
+        });
+        const tb = $('#themeBtn');
+        if (tb) tb.textContent = 'Tema: ' + (t === 'blanco' ? 'crema (Tatooine)' : 'oscuro (espacio)');
+        if (S.sound) beep('ok');
+      }
       const b = e.target.closest('button'); if (!b) return;
       if (b.id === 'btnMarcar') {
         b.disabled = true;

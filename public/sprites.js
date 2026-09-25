@@ -71,6 +71,81 @@ const SHAPES = {
     '..KNNK..',
     '...KK...',
   ],
+  // R2-D2 (astromech azul y blanco)
+  r2d2: [
+    '....WWWW....',
+    '..WWBBBBWW..',
+    '.WBBHGGWBBW.',
+    '.WBBWWWWBBW.',
+    '.WWWWWWWWWW.',
+    '.WBBWWWWBBW.',
+    'GWWBBWBBWWG.',
+    'GWWWWWWWWWG.',
+    'GWWWWWWWWWG.',
+    'GWWWWWWWWWG.',
+    'GWW.WWWW.WWG',
+    'KKK......KKK',
+  ],
+  // C-3PO (droide de protocolo dorado con pierna plateada)
+  c3po: [
+    '...YYYYYY...',
+    '..YYYYYYYY..',
+    '..YYWYYWYY..',
+    '..YYYYYYYY..',
+    '...YYYYYY...',
+    '..YYYYYYYY..',
+    '.YYYYRRKYYY.',
+    '.YYYYKKKYYY.',
+    '..YYYYYYYY..',
+    '...YYYYYY...',
+    '..YYY..YYY..',
+    '..YYY..GGG..',
+  ],
+  // BB-8 (droide esférico naranja y blanco)
+  bb8: [
+    '....WWWW....',
+    '...WOOOWO...',
+    '...WWHWKW...',
+    '....WWWW....',
+    '..WWWOOOWW..',
+    '.WWOOOOOOWW.',
+    '.WOOOWWOOOW.',
+    '.WOOOWWOOOW.',
+    '.WWOOOOOOWW.',
+    '..WWWOOOWW..',
+    '...WWWWWW...',
+    '....KKKK....',
+  ],
+  // dispensador de agua Gather (water cooler)
+  cooler: [
+    '....HHHH....',
+    '...HHHHHH...',
+    '...HHHHHH...',
+    '....HHHH....',
+    '....WWWW....',
+    '....WKRW....',
+    '....WWWW....',
+    '....WWWW....',
+    '....WWWW....',
+    '....WWWW....',
+    '...KKKKKK...',
+    '..KK....KK..',
+  ],
+  // Maestro Yoda
+  yoda: [
+    'L..........L',
+    '.LL......LL.',
+    '..LLLLLLLL..',
+    '..LLWLLWLL..',
+    '...LLLLLL...',
+    '..NNNNNNNN..',
+    '.NNWWWWWWNN.',
+    '.NNWWWWWWNN.',
+    '..NNNNNNNN..',
+    '..NNN..NNN..',
+    '..LLL..LLL..',
+    '..KK....KK..',
+  ],
   // consola del puente (B = luz de estado)
   console: [
     'KKKKKKKKKK',
@@ -80,6 +155,97 @@ const SHAPES = {
     'KKKKKKKKKK',
     '.KGGGGGGK.',
     '.KKKKKKKK.',
+  ],
+  // estantería de holocrones / biblioteca (Archivo Jedi)
+  bookshelf: [
+    'KNNNNNNNNNNK',
+    'KN.Y.H.R.WNK',
+    'KNNNNNNNNNNK',
+    'KN.W.L.Y.HNK',
+    'KNNNNNNNNNNK',
+    'KN.H.R.W.LNK',
+    'KNNNNNNNNNNK',
+    'KN........NK',
+    'KK........KK',
+  ],
+  // rack de servidores con luces LED
+  server: [
+    'KKKKKKKKKK',
+    'KDDDDDDDDK',
+    'KDGRLGDRDK',
+    'KDDDDDDDDK',
+    'KDGHLGDLDK',
+    'KDDDDDDDDK',
+    'KDGYLGDRDK',
+    'KDDDDDDDDK',
+    'KKKKKKKKKK',
+    'KK......KK',
+  ],
+  // pizarra de arquitectura / sprint Gather
+  whiteboard: [
+    'KKKKKKKKKKKKKKKK',
+    'KWWWWWWWWWWWWWWK',
+    'KWHHH..YY..RRR.K',
+    'KWHHH..YY..RRR.K',
+    'KW.............K',
+    'KW.LLLL..OOOO..K',
+    'KW.LLLL..OOOO..K',
+    'KKKKKKKKKKKKKKKK',
+    '..KD........DK..',
+    '..KD........DK..',
+    '.KKD........DKK.',
+  ],
+  // caja de carga Star Wars / Hangar
+  crate: [
+    'KKKKKKKKKKKK',
+    'KGGGGGGGGGGK',
+    'KGOOOOOOOOGK',
+    'KGOKKKKKKOGK',
+    'KGOKW..WKOGK',
+    'KGOKKKKKKOGK',
+    'KGOOOOOOOOGK',
+    'KGGGGGGGGGGK',
+    'KKKKKKKKKKKK',
+  ],
+  // cafetera de la cantina
+  coffee: [
+    '..KKKKKK....',
+    '.KDDDDDDK...',
+    'KDWWWWWWDHK.',
+    'KDWKDDDKDHK.',
+    'KDWKDDDKDK..',
+    'KDDDDDDDDK..',
+    'KDDKRRKDDK..',
+    'KDDDDDDDDK..',
+    'KKKKKKKKKK..',
+  ],
+  // pedestal de holocron Jedi
+  pedestal: [
+    '....HH....',
+    '...HHHH...',
+    '....HH....',
+    '..........',
+    '..KKKKKK..',
+    '..KDDDDDK.',
+    '...KDDDK..',
+    '...KDDDK..',
+    '..KKDDDKK.',
+    '.KKDDDDDKK',
+    'KKKKKKKKKK',
+  ],
+  // planta frondosa / ficus
+  bigplant: [
+    '....LLL.....',
+    '..LLLLLLL...',
+    '.LLLLLLLLLL.',
+    'LLLLLYLLLLLL',
+    '.LLLLLLLLLL.',
+    '..LLLLLLLL..',
+    '...LLLLLL...',
+    '....KNNK....',
+    '...KNNNNK...',
+    '...KNNNNK...',
+    '....KKKK....',
   ],
 };
 
@@ -92,6 +258,14 @@ export function sprite(kind = 'droid', color = '#4fc3f7', px = 4, extra = '') {
     r += `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="${c === 'B' ? color : PAL[c]}"/>`;
   }));
   return `<svg class="sprite ${extra}" viewBox="0 0 ${w} ${h}" width="${w * px}" height="${h * px}" shape-rendering="crispEdges" aria-hidden="true">${r}</svg>`;
+}
+
+export function agentSprite(a, px = 4, extra = '') {
+  const k = (typeof a === 'string' ? a : (a?.key || a?.name || '')).toLowerCase();
+  if (k.includes('antigrav') || k === 'r2d2') return sprite('r2d2', a?.color || '#4fc3f7', px, extra);
+  if (k.includes('claude') || k === 'c3po') return sprite('c3po', a?.color || '#ffe81f', px, extra);
+  if (k.includes('codex') || k === 'bb8') return sprite('bb8', a?.color || '#3ddc84', px, extra);
+  return sprite('droid', a?.color || '#4fc3f7', px, extra);
 }
 
 // icono pixel del área

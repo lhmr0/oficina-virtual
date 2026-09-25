@@ -1,5 +1,5 @@
 // Arranque, login, shell, router, tiempo real (SSE) y bandeja de pendientes
-import { S, get, post, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels } from './core.js';
+import { S, get, post, put, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme } from './core.js';
 import { sprite } from './sprites.js';
 import { VIEWS, taskForm, missionForm } from './views.js';
 
@@ -41,15 +41,9 @@ async function loginView() {
 export async function loadBoot() {
   S.boot = await get('/api/bootstrap');
   if (S.project && !project(S.project)) S.project = null;
-  applyTheme(S.boot.me.notif_prefs?.theme);
+  applyTheme(S.boot.me?.notif_prefs?.theme);
 }
-// tema por usuario (se guarda en su perfil); localStorage solo evita el parpadeo al cargar
-export function applyTheme(t) {
-  t = t === 'crema' ? 'crema' : 'oscuro';
-  document.documentElement.dataset.theme = t;
-  try { localStorage.setItem('ov_theme', t); } catch {}
-}
-try { document.documentElement.dataset.theme = localStorage.getItem('ov_theme') || 'oscuro'; } catch {}
+export { applyTheme };
 // proyecto actual (null = todos): filtra el mapa y es el predeterminado del kanban y los formularios
 export function setProject(id) {
   S.project = id || null;
@@ -84,6 +78,7 @@ function shell() {
     <a role="menuitem" href="#/config/perfil">Mi perfil</a>
     ${MENU.filter(([k]) => k !== 'config' || isAdmin()).map(([k, l]) => `<a role="menuitem" href="#/${k}">${l}</a>`).join('')}
     ${canEdit() ? '<button role="menuitem" id="mMission">Nueva misión</button>' : ''}
+    <button role="menuitem" id="themeBtn">Tema: ${S.theme === 'blanco' ? 'crema (Tatooine)' : 'oscuro (espacio)'}</button>
     <button role="menuitem" id="soundBtn">Sonido: ${S.sound ? 'sí' : 'no'}</button>
     <button role="menuitem" id="logoutBtn">Salir</button>
   </div>
@@ -97,6 +92,18 @@ function shell() {
   document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('#meMenu')) toggleMenu(false); });
   menu.addEventListener('click', e => { if (e.target.closest('a')) toggleMenu(false); });
   $('#logoutBtn').onclick = async () => { await post('/api/logout'); location.hash = '#/login'; location.reload(); };
+  $('#themeBtn').onclick = async e => {
+    const next = S.theme === 'blanco' ? 'oscuro' : 'blanco';
+    applyTheme(next);
+    e.target.textContent = 'Tema: ' + (next === 'blanco' ? 'crema (Tatooine)' : 'oscuro (espacio)');
+    if (S.sound) beep('ok');
+    try {
+      const prefs = S.boot?.me?.notif_prefs || {};
+      prefs.theme = next;
+      await put('/api/me', { notif_prefs: prefs });
+    } catch {}
+    if (current?.name === 'config') refreshSoon();
+  };
   $('#soundBtn').onclick = e => { S.sound = !S.sound; localStorage.setItem('ov_sound', S.sound ? '1' : '0'); e.target.textContent = 'Sonido: ' + (S.sound ? 'sí' : 'no'); if (S.sound) beep('ok'); };
   $('#mMission')?.addEventListener('click', () => { toggleMenu(false); missionForm(); });
   $('#dNew')?.addEventListener('click', () => taskForm());
@@ -125,7 +132,7 @@ async function openPalette() {
   const base = [
     ...(canEdit() ? [['Nueva tarea', 'acción', () => taskForm()], ['Nueva misión', 'acción', () => missionForm()], ['Nueva consulta rápida', 'acción', () => go('#/cantina')]] : []),
     ['Estación', 'ir a', () => go('#/estacion')],
-    ...MENU.filter(([k]) => k !== 'config' || isAdmin()).map(([k, l]) => [l, 'ir a', () => go('#/' + k)]),
+    ...MENU.map(([k, l]) => [l, 'ir a', () => go('#/' + k)]),
     ['Kanban de todos los proyectos', 'ir a', () => go('#/kanban/todos')],
     ...S.boot.projects.map(p => [p.name, 'proyecto', () => go('#/kanban/' + p.id)]),
   ];
