@@ -171,22 +171,22 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
 .err { color: var(--red); min-height: 22px; margin-top: 8px; }
 
 /* ---------- mapa de la estación ---------- */
-.map { min-height: 100vh; padding: 44px 14px 48px; overflow: auto; box-sizing: border-box; }
-.station-layout { max-width: 1720px; margin: 0 auto; display: flex; flex-direction: column; gap: 6px; position: relative; }
-.station-top-row { display: flex; gap: 8px; align-items: stretch; width: 100%; }
+.map { min-height: 100vh; padding: 44px 14px 54px; overflow: auto; box-sizing: border-box; }
+.station-layout { max-width: 1760px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; position: relative; }
+.station-top-row { display: flex; gap: 8px; align-items: stretch; width: 100%; flex: none; }
 .station-main { flex: 1 1 0; min-width: 0; }
 .floor { max-width: 1680px; margin: 0 auto; padding: 6px 8px; background: var(--floor-base); box-shadow: 0 0 0 3px #000, 0 0 0 6px var(--wall); display: flex; flex-direction: column; gap: 0; }
 .station-layout .floor { max-width: 100%; margin: 0; }
 .station-aside {
   width: 280px; flex: none; background: var(--panel); border: 2px solid var(--line);
   box-shadow: 0 0 0 2px #000, 0 0 0 4px var(--line); padding: 0; display: flex; flex-direction: column;
-  max-height: 245px;
+  min-height: 0;
 }
 .station-aside-head {
   padding: 4px 8px; background: var(--panel2); border-bottom: 2px solid var(--line);
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; flex: none;
 }
-.station-aside-body { overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.station-aside-body { overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-height: 0; }
 .run-item {
   background: var(--panel2); border: 1px solid var(--line); padding: 5px 6px; text-decoration: none;
   color: inherit; display: flex; flex-direction: column; gap: 2px; transition: border-color .12s, background .12s;
@@ -203,11 +203,11 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
 .station-tab-btn:hover { background: var(--panel3); border-color: var(--yellow); }
 .station-kanban-box {
   background: var(--panel); border: 2px solid var(--line); box-shadow: 0 0 0 2px #000, 0 0 0 4px var(--line);
-  padding: 5px 8px 6px;
+  padding: 6px 10px 8px; display: flex; flex-direction: column;
 }
 .station-kanban-head {
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;
-  margin-bottom: 4px; padding-bottom: 3px; border-bottom: 1px solid var(--line);
+  margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px solid var(--line); flex: none;
 }
 .wing { display: flex; flex-wrap: wrap; gap: 6px; }
 .room2 { flex: 1 1 240px; min-height: 94px; position: relative; cursor: pointer; padding: 20px 6px 4px;
@@ -263,13 +263,11 @@ table.grid tr.click:hover td { background: var(--panel3); cursor: pointer; }
 .kanban { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); gap: 6px; overflow-x: auto; padding-bottom: 2px; }
 .kcol { background: var(--kcol-bg); border: 1px solid var(--line); min-height: 120px; display: flex; flex-direction: column; }
 .kcol.over { border-color: var(--yellow); background: var(--kcol-over-bg); }
-.kcol-head { font-size: 11px; font-weight: 600; color: var(--muted); padding: 3px 6px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
-.kcol-body { padding: 3px; display: flex; flex-direction: column; gap: 3px; flex: 1; max-height: calc(100vh - 435px); min-height: 90px; overflow-y: auto; }
-.station-kanban-box .kcol { min-height: 120px; max-height: calc(100vh - 400px); }
-.station-kanban-box .kcol-body { max-height: calc(100vh - 435px); min-height: 90px; }
+.kcol-head { font-size: 11px; font-weight: 600; color: var(--muted); padding: 3px 6px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; flex: none; }
+.kcol-body { padding: 4px; display: flex; flex-direction: column; gap: 3px; flex: 1 1 0; min-height: 0; overflow-y: auto; }
 .kcard {
   background: var(--panel2); border: 1px solid var(--line2); border-left: 3px solid var(--c, var(--line2));
-  padding: 3px 5px; cursor: grab; display: flex; flex-direction: column; gap: 1px;
+  padding: 3px 5px; cursor: grab; display: flex; flex-direction: column; gap: 1px; flex: none;
 }
 .kcard:hover { border-color: var(--yellow); border-left-color: var(--c, var(--yellow)); }
 .kcard.dragging { opacity: .4; }
@@ -277,6 +275,9 @@ table.grid tr.click:hover td { background: var(--panel3); cursor: pointer; }
 .kcard .meta { display: flex; gap: 4px; flex-wrap: nowrap; align-items: center; font-size: 10px; color: var(--muted); line-height: 1.1; overflow: hidden; white-space: nowrap; }
 .kcard .meta .sprite { max-height: 12px; max-width: 12px; flex-shrink: 0; }
 .kcard .chip { font-size: 9px; padding: 0 3px; height: 13px; line-height: 11px; border-width: 1px; }
+.drawer .kanban { min-height: 460px; }
+.drawer .kcol { min-height: 380px; }
+.drawer .kcol-body { max-height: calc(100vh - 240px); }
 
 /* ---------- consola / chat ---------- */
 .console { background: #000; color: #7CFC00; font: 17px/1.15 var(--f-mono); padding: 10px; height: 380px; overflow: auto; white-space: pre-wrap; word-break: break-word; border: 2px solid #1a3; }
@@ -416,14 +417,110 @@ dialog::backdrop { background: var(--dialog-backdrop); }
 @media (min-width: 821px) {
   .map {
     height: 100vh;
-    padding: 44px 14px 48px;
+    padding: 44px 14px 54px;
     box-sizing: border-box;
-    overflow-x: hidden;
-    overflow-y: hidden;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .station-layout {
+    flex: 1 1 0;
+    min-height: 0;
+    width: 100%;
+    max-width: 1760px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .station-top-row {
+    flex: none;
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    width: 100%;
+  }
+  .station-main {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .station-aside {
+    width: 280px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .station-aside-body {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .station-kanban-box {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 6px 10px 8px;
+  }
+  .station-kanban-head {
+    flex: none;
+  }
+  .station-kanban-box .kanban {
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(180px, 1fr);
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .station-kanban-box .kcol {
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    display: flex;
+    flex-direction: column;
+  }
+  .station-kanban-box .kcol-head {
+    flex: none;
+  }
+  .station-kanban-box .kcol-body {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
   }
 }
-@media (min-width: 821px) and (max-height: 520px) {
+
+@media (min-width: 821px) and (max-height: 500px) {
   .map {
+    height: auto;
+    min-height: 100vh;
     overflow-y: auto;
+    display: block;
+  }
+  .station-layout {
+    height: auto;
+    flex: none;
+  }
+  .station-kanban-box {
+    height: auto;
+    flex: none;
+  }
+  .station-kanban-box .kanban {
+    height: auto;
+  }
+  .station-kanban-box .kcol {
+    min-height: 180px;
+  }
+  .station-kanban-box .kcol-body {
+    max-height: 220px;
   }
 }
