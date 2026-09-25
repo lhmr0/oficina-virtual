@@ -138,7 +138,8 @@ const ADAPTERS = {
       }
       if (s?.step_type === 'tool' && s.state === 'DONE') {
         const info = s.tool_info || {};
-        const name = s.tool_name || info.name || 'herramienta';
+        const name = [info.name, s.tool_name].find(n => n && !['tool', 'system_message', 'checkpoint', 'user_input'].includes(String(n).toLowerCase()));
+        if (!name) return;
         const compact = value => typeof value === 'string' ? value : JSON.stringify(value);
         const params = info.parameters;
         const detail = params && Object.keys(params).length
