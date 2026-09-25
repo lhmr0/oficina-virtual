@@ -79,7 +79,7 @@ function shell() {
     <div class="menu-head">${h(me.name)}<br><small>${h(S.boot.users.find(u => u.id === me.id)?.rank || '')} · ${h(me.role)}</small></div>
     ${MENU.map(([k, l]) => `<a role="menuitem" href="#/${k}">${l}</a>`).join('')}
     ${canEdit() ? '<button role="menuitem" id="mMission">Nueva misión</button>' : ''}
-    <button role="menuitem" id="themeBtn">Tema: ${S.theme === 'blanco' ? 'blanco (Hoth)' : 'oscuro (espacio)'}</button>
+    <button role="menuitem" id="themeBtn">Tema: ${S.theme === 'blanco' ? 'crema (Tatooine)' : 'oscuro (espacio)'}</button>
     <button role="menuitem" id="soundBtn">Sonido: ${S.sound ? 'sí' : 'no'}</button>
     <button role="menuitem" id="logoutBtn">Salir</button>
   </div>
@@ -96,7 +96,7 @@ function shell() {
   $('#themeBtn').onclick = async e => {
     const next = S.theme === 'blanco' ? 'oscuro' : 'blanco';
     applyTheme(next);
-    e.target.textContent = 'Tema: ' + (next === 'blanco' ? 'blanco (Hoth)' : 'oscuro (espacio)');
+    e.target.textContent = 'Tema: ' + (next === 'blanco' ? 'crema (Tatooine)' : 'oscuro (espacio)');
     if (S.sound) beep('ok');
     try {
       const prefs = S.boot?.me?.notif_prefs || {};

@@ -4,7 +4,7 @@ import { sprite } from './sprites.js';
 export const S = { boot: null, project: +localStorage.getItem('ov_project') || null, unseen: 0, sound: localStorage.getItem('ov_sound') !== '0', theme: localStorage.getItem('ov_theme') || 'oscuro' };
 
 export function applyTheme(theme) {
-  S.theme = theme === 'blanco' ? 'blanco' : 'oscuro';
+  S.theme = (theme === 'blanco' || theme === 'crema') ? 'blanco' : 'oscuro';
   localStorage.setItem('ov_theme', S.theme);
   if (S.theme === 'blanco') {
     document.documentElement.setAttribute('data-theme', 'blanco');
@@ -12,7 +12,7 @@ export function applyTheme(theme) {
     document.documentElement.removeAttribute('data-theme');
   }
   const meta = document.getElementById('metaTheme');
-  if (meta) meta.content = S.theme === 'blanco' ? '#edf1f7' : '#070913';
+  if (meta) meta.content = S.theme === 'blanco' ? '#f4ede2' : '#070913';
 }
 applyTheme(S.theme);
 

@@ -133,7 +133,11 @@ const BUB = { esperando: '<span class="bubble">?</span>', en_cola: '<span class=
 const estacion = {
   refreshOn: ['task.updated', 'task.created', 'conv.updated', 'run.started', 'agent.status'],
   async render(el) {
-    const [tasks, chats] = await Promise.all([get('/api/tasks'), get('/api/conversations')]);
+    const [tasks, chats, execs] = await Promise.all([
+      get('/api/tasks'),
+      get('/api/conversations'),
+      get('/api/history/ejecuciones?page=1').catch(() => ({ rows: [] }))
+    ]);
     const vis = tasks.filter(t => !S.project || t.project_id === S.project);
     const busy = new Set([...tasks.filter(t => ACTIVE.includes(t.status)).map(t => t.agent_id), ...chats.filter(c => LIVE.includes(c.status)).map(c => c.agent_id)]);
     const desk = t => {
@@ -147,7 +151,7 @@ const estacion = {
       const at = vis.filter(t => t.area_id === a.id && AT_DESK.includes(t.status));
       const shown = at.slice(0, 6), pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
       return `<section class="room2" data-area="${a.id}" style="--c:${a.color}" tabindex="0" role="button" aria-label="${h(a.alias)}: ${at.length} en actividad, ${pend} pendientes">
-        <div class="plaque">${icon(a.icon, 2)}<b>${h(a.alias)}</b><small>${h(a.name)}</small>${pend ? `<small class="right" title="Tareas pendientes">${pend} pendiente${pend > 1 ? 's' : ''}</small>` : ''}</div>
+        <div class="plaque">${icon(a.icon, 2)}<b>${h(a.alias)}</b><small>${h(a.name)}</small>${pend ? `<small class="right" title="Tareas pendientes">${pend} pend.</small>` : ''}</div>
         <div class="desks2">${shown.map(desk).join('')}${Array(Math.max(0, 3 - shown.length)).fill(free).join('')}${at.length > 6 ? `<span class="more">+${at.length - 6}</span>` : ''}</div>
         ${sprite('plant', '', 3, 'deco')}</section>`;
     };
@@ -171,8 +175,80 @@ const estacion = {
       ${idle.map((a, i) => a.status === 'sin_cuota' || !a.enabled
         ? `<span class="avatar sleeping" style="left:${22 + i * 16}%" title="${h(a.name)} ${a.enabled ? 'sin cuota hasta ' + fmtDate(a.quota_reset_at) : 'apagado'}">${sprite('droid', a.color, 3)}${a.enabled ? '<span class="bubble z">Zz</span>' : ''}<span class="tag">${h(a.name)}</span></span>`
         : `<span class="avatar walker" style="--d:${12 + i * 3}s;animation-delay:-${i * 2}s" title="${h(a.name)} disponible">${sprite('droid', a.color, 3)}<span class="tag">${h(a.name)}</span></span>`).join('')}</div>`;
-    el.innerHTML = `<div class="floor"><div class="wing">${S.boot.areas.map(room).join('')}</div>${hall}<div class="wing">${cantina}${consejo}${puente}${archivo}</div></div>`;
+
+    const runsList = (execs?.rows || []).slice(0, 8);
+    const runItemHTML = r => {
+      const a = agent(r.agent_id);
+      const t = tasks.find(x => x.id === r.task_id);
+      const targetTitle = t ? `#${t.id} ${t.title}` : (r.task_id ? `Tarea #${r.task_id}` : `Chat #${r.conversation_id}`);
+      const link = r.task_id ? `#/tarea/${r.task_id}` : `#/cantina/${r.conversation_id}`;
+      const isRunning = !r.ended_at;
+      const isOk = r.exit_code === 0 || r.end_reason === 'listo' || r.end_reason === 'completado';
+      const statusDot = isRunning ? '<span class="dot ok blink"></span>' : isOk ? '<span class="dot ok"></span>' : '<span class="dot bad"></span>';
+      const statusText = isRunning ? 'en curso' : r.ended_at ? dur((Date.parse(r.ended_at) - Date.parse(r.started_at)) / 1000) : 'falló';
+      const tok = (r.tokens_in || 0) + (r.tokens_out || 0);
+      return `<a class="run-item" href="${link}">
+        <div class="row" style="justify-content:space-between;gap:4px">
+          <span class="row" style="gap:5px;font-size:12px;font-weight:600">${sprite('droid', a?.color, 1.5)} ${h(a?.name || 'Agente')}</span>
+          <span class="run-status">${statusDot} ${statusText}</span>
+        </div>
+        <div class="run-desc ellipsis" title="${h(targetTitle)}">${h(targetTitle)}</div>
+        <div class="run-meta row" style="justify-content:space-between">
+          <span>${h(r.model || '')}</span>
+          <span>${tok ? num(tok) + ' tok · ' : ''}${ago(r.started_at)}</span>
+        </div>
+      </a>`;
+    };
+
+    const sideHidden = localStorage.getItem('ov_station_aside') === '0';
+    el.innerHTML = `<div class="station-layout">
+      <div class="station-main">
+        <div class="floor">
+          <div class="wing">${S.boot.areas.map(room).join('')}</div>
+          ${hall}
+          <div class="wing">${cantina}${consejo}${puente}${archivo}</div>
+        </div>
+      </div>
+      <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Últimas ejecuciones">
+        <div class="station-aside-head">
+          <div class="row" style="gap:6px">
+            <span class="dot ok"></span>
+            <b class="pixel" style="font-size:9px;color:var(--yellow)">EJECUCIONES</b>
+          </div>
+          <div class="row" style="gap:4px">
+            <a href="#/archivos/ejecuciones" class="btn sm ghost" title="Ver historial">Historial</a>
+            <button type="button" class="btn sm ghost" id="hideSideBtn" title="Ocultar pestaña" aria-label="Ocultar">✕</button>
+          </div>
+        </div>
+        <div class="station-aside-body">
+          ${runsList.map(runItemHTML).join('') || '<div class="empty" style="padding:14px">Sin ejecuciones recientes</div>'}
+        </div>
+      </aside>
+      <button type="button" class="station-tab-btn" id="openSideBtn" ${sideHidden ? '' : 'hidden'} title="Ver últimas ejecuciones">
+        📡 <span>Ejecuciones</span>
+      </button>
+    </div>`;
+
     el.onclick = e => {
+      const hideBtn = e.target.closest('#hideSideBtn');
+      if (hideBtn) {
+        e.preventDefault();
+        localStorage.setItem('ov_station_aside', '0');
+        const aside = $('#stationAside', el);
+        const openBtn = $('#openSideBtn', el);
+        if (aside) aside.hidden = true;
+        if (openBtn) openBtn.hidden = false;
+        return;
+      }
+      const openBtn = e.target.closest('#openSideBtn');
+      if (openBtn) {
+        e.preventDefault();
+        localStorage.setItem('ov_station_aside', '1');
+        const aside = $('#stationAside', el);
+        if (aside) aside.hidden = false;
+        openBtn.hidden = true;
+        return;
+      }
       const d = e.target.closest('[data-task]'); if (d) return go('#/tarea/' + d.dataset.task);
       const c = e.target.closest('[data-chat]'); if (c) return go('#/cantina/' + c.dataset.chat);
       const g = e.target.closest('[data-go]'); if (g) return go(g.dataset.go);
@@ -921,8 +997,8 @@ const config = {
           <label class="theme-card ${cur === 'blanco' ? 'on' : ''}" data-t="blanco">
             <span class="theme-swatch light-swatch"></span>
             <input type="radio" name="theme" value="blanco" ${cur === 'blanco' ? 'checked' : ''} style="display:none">
-            <b>Blanco (Base Hoth)</b>
-            <small class="muted">Fondo níveo de alto contraste inspirado en la Base Eco y Bespin, paneles slate claros y acentos ámbar/tácticos.</small>
+            <b>Crema / Hueso (Tatooine)</b>
+            <small class="muted">Fondo cálido tono hueso y arena, paneles marfil y alto contraste descansado para la vista.</small>
           </label>
         </div>
         <div class="row"><button class="btn y">Guardar tema</button></div>
@@ -943,8 +1019,8 @@ const config = {
           <label class="theme-card ${cur === 'blanco' ? 'on' : ''}" data-t="blanco">
             <span class="theme-swatch light-swatch"></span>
             <input type="radio" name="theme" value="blanco" ${cur === 'blanco' ? 'checked' : ''} style="display:none">
-            <b>Blanco (Base Hoth)</b>
-            <small class="muted">Fondo blanco de alto contraste</small>
+            <b>Crema / Hueso (Tatooine)</b>
+            <small class="muted">Fondo cálido de tono hueso</small>
           </label>
         </div>
         <h3>Notificaciones de escritorio</h3>${NOTIF_KINDS.map(([k, l]) => `<label class="row"><input type="checkbox" name="n_${k}" ${prefs[k] !== false ? 'checked' : ''}> ${l}</label>`).join('')}
@@ -987,7 +1063,7 @@ const config = {
           const prefs = S.boot?.me?.notif_prefs || {};
           prefs.theme = chosenTheme;
           await put('/api/me', { notif_prefs: prefs });
-          holo('Tema guardado', chosenTheme === 'blanco' ? 'Tema blanco (Base Hoth) activado' : 'Tema oscuro (Espacio profundo) activado');
+          holo('Tema guardado', chosenTheme === 'blanco' ? 'Tema crema (Tatooine) activado' : 'Tema oscuro (Espacio profundo) activado');
           await loadBoot();
         } else if (fm.id === 'meF') {
           const notif_prefs = Object.fromEntries(NOTIF_KINDS.map(([k]) => [k, f['n_' + k]]));
@@ -1011,7 +1087,7 @@ const config = {
           if (r) r.checked = match;
         });
         const tb = $('#themeBtn');
-        if (tb) tb.textContent = 'Tema: ' + (t === 'blanco' ? 'blanco (Hoth)' : 'oscuro (espacio)');
+        if (tb) tb.textContent = 'Tema: ' + (t === 'blanco' ? 'crema (Tatooine)' : 'oscuro (espacio)');
         if (S.sound) beep('ok');
       }
       const b = e.target.closest('button'); if (!b) return;
