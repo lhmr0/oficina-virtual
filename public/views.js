@@ -187,6 +187,48 @@ const AT_DESK = ['en_curso', 'en_cola', 'esperando', 'revision'];
 const LIVE = ['en_curso', 'en_cola', 'esperando'];
 const MON = { en_curso: '#3ddc84', en_cola: '#b98cff', esperando: '#ffe81f', revision: '#ff8c42' };
 const BUB = { esperando: '<span class="bubble">?</span>', en_cola: '<span class="bubble z">…</span>', revision: '<span class="bubble o">!</span>' };
+
+// Diálogos y sonidos temáticos estilo Gather para interactuar con adornos
+const LORE_MESSAGES = {
+  dejarik: { sound: 'dejarik', text: '♟ Dejarik: "Deja ganar al Wookiee..."' },
+  gonk: { sound: 'gonk', text: '⚡ GNK: "¡Gonk... gonk... gonk!"' },
+  arcade: { sound: 'arcade', text: '🕹 TRENCH RUN 84: ¡1UP +1000 PTS!' },
+  coffee: { sound: 'coffee', text: '☕ Caf negro recién servido' },
+  cooler: { sound: 'cooler', text: '💧 *Glug glug* Dispensador Gather recargado' },
+  mouse: { sound: 'mouse', text: '🤖 MSE-6: *¡Bip bip squeak!*' },
+  holotable: { sound: 'holo', text: '📐 Holoproyector: Esquema táctico activo' },
+  vending: { sound: 'vending', text: '🥤 Expendedora: Leche azul bien fría' },
+  yoda: { sound: 'holo', text: '✨ Yoda: "Hacerlo o no hacerlo. No hay intentos."' },
+  bookshelf: { sound: 'holo', text: '📜 Archivo: 100,000 textos Jedi catalogados' },
+  pillar: { sound: 'holo', text: '🔮 Holocrón iluminado con la Fuerza' },
+  whiteboard: { sound: 'notify', text: '📋 Sprint sincronizado en la pizarra' },
+  workbench: { sound: 'notify', text: '🔧 Banco de trabajo listo para compilar' },
+  dock: { sound: 'notify', text: '🔋 Baterías de droide cargando al 100%' },
+  server: { sound: 'notify', text: '💻 Servidores en línea sin anomalías' },
+  pedestal1: { sound: 'holo', text: '💎 Holocrón del Conocimiento sincronizado' },
+  pedestal2: { sound: 'holo', text: '💎 Holocrón de la Sabiduría en resonancia' },
+  trash: { sound: 'notify', text: '🗑 Papelera astromech vaciada' },
+  plant: { sound: 'notify', text: '🌿 Ficus regado y oxigenando la estación' },
+  crate: { sound: 'notify', text: '📦 Contenedor de piezas beskar sellado' },
+  couch: { sound: 'notify', text: '🛋 Tomando un breve descanso en el sofá' },
+};
+
+function handleDecoInteract(target) {
+  const key = target.dataset.interact;
+  const info = LORE_MESSAGES[key] || { sound: 'notify', text: target.title || 'Detalle de la oficina' };
+  beep(info.sound);
+  target.classList.remove('interact-pop');
+  void target.offsetWidth;
+  target.classList.add('interact-pop');
+  const existing = target.querySelector('.deco-bubble');
+  if (existing) existing.remove();
+  const b = document.createElement('span');
+  b.className = 'deco-bubble';
+  b.textContent = info.text;
+  target.appendChild(b);
+  setTimeout(() => b.remove(), 2400);
+}
+
 const estacion = {
   refreshOn: ['task.updated', 'task.created', 'conv.updated', 'run.started', 'agent.status'],
   async render(el) {
@@ -200,8 +242,13 @@ const estacion = {
     const desk = t => {
       const a = agent(t.agent_id);
       const who = t.executor === 'humano' ? sprite('rebel', '#ff8c42', 3.8) : agentSprite(a, 3.8);
+      const isWorking = t.status === 'en_curso';
       return `<button class="desk ${t.status}" data-task="${t.id}" title="#${t.id} ${h(t.title)} · ${STATUS[t.status]}${a ? ' · ' + h(a.name) : ''}">
-        <span class="who">${who}${BUB[t.status] || ''}</span>${sprite('desk', MON[t.status], 3.2)}<span class="lbl">${h(t.title)}</span></button>`;
+        <span class="who">${who}${BUB[t.status] || ''}</span>
+        ${sprite('desk', MON[t.status], 3.2)}
+        ${isWorking ? `<span class="desk-mug" title="Café de trabajo">${sprite('mug', '', 1.4)}</span>` : ''}
+        <span class="lbl">${h(t.title)}</span>
+      </button>`;
     };
     const free = `<span class="desk free" aria-hidden="true"><span class="who"></span>${sprite('desk', '#1d2447', 3.2)}<span class="lbl"></span></span>`;
     const room = a => {
@@ -210,47 +257,62 @@ const estacion = {
       const shown = at.slice(0, 6), pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
 
       const decos = isDoc ? `
-        <span class="deco-item" style="top:26px;right:10px" title="Estantería de holocrones y códices">${sprite('bookshelf', '', 3.2)}</span>
-        <span class="deco-item" style="bottom:8px;right:10px" title="Pizarra de documentación">${sprite('whiteboard', '', 2.8)}</span>
-        <span class="deco-item" style="top:26px;right:70px" title="Servidor de archivo">${sprite('server', '', 3)}</span>
-        <span class="deco-item" style="bottom:8px;right:75px" title="Planta sagrada del archivo">${sprite('bigplant', '', 2.8)}</span>
+        <span class="deco-item deco-window" style="top:4px;right:158px" title="Ventanal astronómico">${sprite('star_window', '', 2)}</span>
+        <span class="deco-item deco-interactive" data-interact="bookshelf" tabindex="0" role="button" style="top:26px;right:10px" title="Estantería de holocrones y códices">${sprite('bookshelf', '', 3.2)}</span>
+        <span class="deco-item deco-interactive" data-interact="pillar" tabindex="0" role="button" style="top:24px;right:64px" title="Pilar de Datacrones y Conocimiento">${sprite('archive_pillar', '', 2.8)}</span>
+        <span class="deco-item deco-interactive" data-interact="server" tabindex="0" role="button" style="top:24px;right:108px" title="Servidor de archivo">${sprite('server', '', 2.8)}</span>
+        <span class="deco-item deco-interactive" data-interact="whiteboard" tabindex="0" role="button" style="bottom:8px;right:10px" title="Pizarra de documentación">${sprite('whiteboard', '', 2.8)}</span>
+        <span class="deco-item deco-interactive" data-interact="plant" tabindex="0" role="button" style="bottom:8px;right:68px" title="Planta sagrada del archivo">${sprite('bigplant', '', 2.8)}</span>
+        <span class="deco-item deco-interactive" data-interact="trash" tabindex="0" role="button" style="bottom:8px;right:116px" title="Cubo de reciclaje astromech">${sprite('trash', '', 2.2)}</span>
         <div class="room-rug rug-doc"></div>
       ` : `
-        <span class="deco-item" style="top:26px;right:10px" title="Pizarra de arquitectura y sprints">${sprite('whiteboard', '', 2.8)}</span>
-        <span class="deco-item" style="bottom:8px;right:10px" title="Caja de herramientas y repuestos">${sprite('crate', '', 3.2)}</span>
-        <span class="deco-item" style="top:26px;right:75px" title="Cluster de servidores de compilación">${sprite('server', '', 3)}</span>
-        <span class="deco-item" style="bottom:8px;right:70px" title="Planta de hangar">${sprite('plant', '', 3.4)}</span>
+        <span class="deco-item deco-window" style="top:4px;right:166px" title="Observatorio del hangar espacial">${sprite('star_window', '', 2)}</span>
+        <span class="deco-item deco-interactive" data-interact="whiteboard" tabindex="0" role="button" style="top:26px;right:10px" title="Pizarra de arquitectura y sprints">${sprite('whiteboard', '', 2.8)}</span>
+        <span class="deco-item deco-interactive deco-holo" data-interact="holotable" tabindex="0" role="button" style="top:24px;right:68px" title="Holoproyector táctico de arquitectura">${sprite('holotable', '', 2.4)}</span>
+        <span class="deco-item deco-interactive" data-interact="server" tabindex="0" role="button" style="top:24px;right:118px" title="Cluster de servidores de compilación">${sprite('server', '', 2.8)}</span>
+        <span class="deco-item deco-interactive" data-interact="workbench" tabindex="0" role="button" style="bottom:8px;right:10px" title="Banco de herramientas y repuestos">${sprite('workbench', '', 2.5)}</span>
+        <span class="deco-item deco-interactive deco-gonk" data-interact="gonk" tabindex="0" role="button" style="bottom:8px;right:72px" title="Droide de energía GNK (Gonk... Gonk...)">${sprite('gonk', '', 2.6)}</span>
+        <span class="deco-item deco-interactive" data-interact="dock" tabindex="0" role="button" style="bottom:8px;right:116px" title="Estación de recarga de droides">${sprite('droid_dock', '', 2.4)}</span>
+        <span class="deco-item deco-interactive" data-interact="crate" tabindex="0" role="button" style="bottom:8px;right:154px" title="Caja de piezas y repuestos">${sprite('crate', '', 2.6)}</span>
         <div class="room-rug rug-dev"></div>
       `;
 
-      return `<section class="room2" data-area="${a.id}" style="--c:${a.color}" tabindex="0" role="button" aria-label="${h(a.alias)}: ${at.length} en actividad, ${pend} pendientes">
-        <div class="plaque">${icon(a.icon, 2.5)}<b>${h(a.alias)}</b><small>${h(a.name)}</small>${pend ? `<small class="right" title="Tareas pendientes">${pend} pend.</small>` : ''}</div>
+      return `<section class="room2 ${isDoc ? 'room-doc' : 'room-dev'}" data-area="${a.id}" style="--c:${a.color}" tabindex="0" role="button" aria-label="${h(a.alias)}: ${at.length} en actividad, ${pend} pendientes">
+        <div class="plaque">${icon(a.icon, 2.5)}<b>${h(a.alias)}</b><small>${h(a.name)}</small><span class="room-code">[${isDoc ? 'DOC-01' : 'DEV-02'}]</span>${pend ? `<small class="right" title="Tareas pendientes">${pend} pend.</small>` : ''}</div>
         <div class="desks2">${shown.map(desk).join('')}${Array(Math.max(0, 3 - shown.length)).fill(free).join('')}${at.length > 6 ? `<span class="more">+${at.length - 6}</span>` : ''}</div>
         ${decos}
       </section>`;
     };
     const live = chats.filter(c => LIVE.includes(c.status));
     const cantina = `<section class="room2 cantina2" data-go="#/cantina" style="--c:#ffe81f" tabindex="0" role="button" aria-label="Cantina: ${live.length} consultas activas">
-      <div class="plaque">${icon('cantina', 2.5)}<b>Cantina</b><small>Consultas rápidas</small></div>
+      <div class="plaque">${icon('cantina', 2.5)}<b>Cantina</b><small>Consultas rápidas</small><span class="room-code">[REC-01]</span></div>
       <div class="stools">${live.map(c => `<button class="desk ${c.status}" data-chat="${c.id}" title="${h(c.title)}"><span class="who">${agentSprite(agent(c.agent_id), 3.8)}${c.status === 'esperando' ? BUB.esperando : ''}</span><span class="lbl">${h(c.title)}</span></button>`).join('') || '<span class="hint">Nadie en la barra</span>'}</div>
       <div class="bar"></div>
-      <span class="deco-item cooler-deco" title="Dispensador de agua Gather">${sprite('cooler', '', 2.8)}</span>
-      <span class="deco-item" style="top:26px;right:12px" title="Estación de café y bebidas">${sprite('coffee', '', 3)}</span>
-      <span class="deco-item" style="bottom:8px;right:10px" title="Caja de provisiones">${sprite('crate', '', 3)}</span>
-      <span class="deco-item" style="bottom:8px;left:42px" title="Planta exótica de Tatooine">${sprite('plant', '', 2.8)}</span>
+      <span class="deco-item cooler-deco deco-interactive" data-interact="cooler" tabindex="0" role="button" title="Dispensador de agua Gather">${sprite('cooler', '', 2.8)}</span>
+      <span class="deco-item deco-interactive deco-coffee" data-interact="coffee" tabindex="0" role="button" style="top:26px;right:12px" title="Estación de café y caf caliente">${sprite('coffee', '', 2.8)}</span>
+      <span class="deco-item deco-interactive deco-vending" data-interact="vending" tabindex="0" role="button" style="top:26px;right:52px" title="Expendedora de leche azul y raciones">${sprite('vending', '', 2.4)}</span>
+      <span class="deco-item deco-interactive deco-arcade" data-interact="arcade" tabindex="0" role="button" style="top:26px;right:94px" title="Máquina recreativa arcade: Trench Run 1980">${sprite('arcade', '', 2.4)}</span>
+      <span class="deco-item deco-interactive deco-dejarik" data-interact="dejarik" tabindex="0" role="button" style="bottom:8px;right:96px" title="Mesa de Dejarik (¡Deja ganar al Wookiee!)">${sprite('dejarik', '', 2.4)}</span>
+      <span class="deco-item deco-interactive" data-interact="couch" tabindex="0" role="button" style="bottom:8px;right:10px" title="Sofá lounge de la Cantina">${sprite('couch', '', 2.2)}</span>
+      <span class="deco-item deco-interactive" data-interact="crate" tabindex="0" role="button" style="bottom:8px;right:58px" title="Caja de provisiones">${sprite('crate', '', 2.4)}</span>
+      <span class="deco-item deco-interactive" data-interact="plant" tabindex="0" role="button" style="bottom:8px;left:42px" title="Planta exótica de Tatooine">${sprite('plant', '', 2.8)}</span>
       <div class="room-rug rug-cantina"></div>
     </section>`;
     const consejo = `<section class="room2 consejo2" data-go="#/consejo" style="--c:#b98cff" tabindex="0" role="button" aria-label="Sala del Consejo">
-      <div class="plaque">${icon('holocron', 2.5)}<b>Consejo Jedi</b><small>Propuestas de mejora</small></div>
+      <div class="plaque">${icon('holocron', 2.5)}<b>Consejo Jedi</b><small>Propuestas de mejora</small><span class="room-code">[CMD-00]</span></div>
       <div class="council-dais">
+        <span class="council-chair left-chair" title="Silla del Consejo">${sprite('chair', '', 2.4)}</span>
         <div class="round-table">
-          <span class="council-yoda" title="Gran Maestro Yoda">${sprite('yoda', '', 3.5)}</span>
+          <span class="council-yoda deco-interactive" data-interact="yoda" tabindex="0" role="button" title="Gran Maestro Yoda">${sprite('yoda', '', 3.5)}</span>
         </div>
+        <span class="council-chair right-chair" title="Silla del Consejo">${sprite('chair', '', 2.4)}</span>
       </div>
-      <span class="deco-item" style="top:26px;left:14px" title="Pedestal del Holocrón del Conocimiento">${sprite('pedestal', '', 3)}</span>
-      <span class="deco-item" style="top:26px;right:14px" title="Pedestal del Holocrón de la Sabiduría">${sprite('pedestal', '', 3)}</span>
-      <span class="deco-item" style="bottom:8px;left:14px" title="Planta sagrada del Templo">${sprite('bigplant', '', 2.8)}</span>
-      <span class="deco-item" style="bottom:8px;right:14px" title="Planta sagrada del Templo">${sprite('bigplant', '', 2.8)}</span>
+      <span class="deco-item deco-window" style="top:4px;left:48px" title="Mirador del Templo Jedi">${sprite('star_window', '', 2)}</span>
+      <span class="deco-item deco-window" style="top:4px;right:48px" title="Mirador del Templo Jedi">${sprite('star_window', '', 2)}</span>
+      <span class="deco-item deco-interactive deco-pedestal" data-interact="pedestal1" tabindex="0" role="button" style="top:26px;left:14px" title="Pedestal del Holocrón del Conocimiento">${sprite('pedestal', '', 3)}</span>
+      <span class="deco-item deco-interactive deco-pedestal" data-interact="pedestal2" tabindex="0" role="button" style="top:26px;right:14px" title="Pedestal del Holocrón de la Sabiduría">${sprite('pedestal', '', 3)}</span>
+      <span class="deco-item deco-interactive" data-interact="plant" tabindex="0" role="button" style="bottom:8px;left:14px" title="Planta sagrada del Templo">${sprite('bigplant', '', 2.8)}</span>
+      <span class="deco-item deco-interactive" data-interact="plant" tabindex="0" role="button" style="bottom:8px;right:14px" title="Planta sagrada del Templo">${sprite('bigplant', '', 2.8)}</span>
       <div class="room-rug rug-council"></div>
     </section>`;
     const me = S.boot.me;
@@ -264,11 +326,15 @@ const estacion = {
     const moreCount = otherAreas.length + 2; // + puente + archivos
 
     const hall = `<div class="hall" aria-label="Pasillo principal">
-      <div class="hall-runner"></div>
+      <div class="hall-runner"><span class="hall-arrows">‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹</span></div>
+      <span class="hall-lamp" style="left:12%" title="Lámpara de mamparo">${sprite('bulkhead_lamp', '', 2)}</span>
+      <span class="hall-lamp" style="left:38%" title="Lámpara de mamparo">${sprite('bulkhead_lamp', '', 2)}</span>
+      <span class="hall-lamp" style="left:64%" title="Lámpara de mamparo">${sprite('bulkhead_lamp', '', 2)}</span>
       <span class="avatar" style="left:3%" title="Tú">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3.8)}<span class="tag">${h(me.name.split(' ')[0])}</span></span>
       ${idle.map((a, i) => a.status === 'sin_cuota' || !a.enabled
         ? `<span class="avatar sleeping" style="left:${20 + i * 14}%" title="${h(a.name)} ${a.enabled ? 'sin cuota hasta ' + fmtDate(a.quota_reset_at) : 'apagado'}">${agentSprite(a, 3.8)}${a.enabled ? '<span class="bubble z">Zz</span>' : ''}<span class="tag">${h(a.name)}</span></span>`
         : `<span class="avatar walker" style="--d:${12 + i * 3}s;animation-delay:-${i * 2}s" title="${h(a.name)} disponible">${agentSprite(a, 3.8)}<span class="tag">${h(a.name)}</span></span>`).join('')}
+      <span class="avatar mouse-droid-walker deco-interactive" data-interact="mouse" tabindex="0" role="button" style="--d:9s" title="Droide ratón MSE-6 (Patrulla y limpieza de pasillos)">${sprite('mousedroid', '', 2.6)}<span class="tag">MSE-6</span></span>
       <button type="button" class="hall-more-btn" id="btnMoreRooms" title="Ver Análisis, Puente de Mando y Archivos">
         🏛 <b>+ Más salas</b> <span class="chip" style="font-size:9px;padding:1px 5px;margin-left:2px">${moreCount}</span> ▾
       </button>
@@ -384,6 +450,12 @@ const estacion = {
         e.preventDefault();
         return otherRoomsModal(vis, busy, chats);
       }
+      const di = e.target.closest('.deco-interactive');
+      if (di) {
+        e.preventDefault();
+        e.stopPropagation();
+        return handleDecoInteract(di);
+      }
       const kc = e.target.closest('.kcard');
       if (kc) return go('#/tarea/' + kc.dataset.id);
       const d = e.target.closest('[data-task]'); if (d) return go('#/tarea/' + d.dataset.task);
@@ -391,7 +463,16 @@ const estacion = {
       const g = e.target.closest('[data-go]'); if (g) return go(g.dataset.go);
       const r = e.target.closest('[data-area]'); if (r) roomModal(+r.dataset.area, vis);
     };
-    el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('[data-area],[data-go],.kcard,#btnMoreRooms')) e.target.click(); };
+    el.onkeydown = e => {
+      if (e.key === 'Enter') {
+        const di = e.target.closest('.deco-interactive');
+        if (di) {
+          e.preventDefault();
+          return handleDecoInteract(di);
+        }
+        if (e.target.matches('[data-area],[data-go],.kcard,#btnMoreRooms')) e.target.click();
+      }
+    };
   },
 };
 
