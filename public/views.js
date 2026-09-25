@@ -131,11 +131,11 @@ const STUCK = ['bloqueada', 'pausada_cuota', 'fallida'];
 const kanbanCard = (t, showProject = true) => {
   const a = agent(t.agent_id), ar = area(t.area_id);
   const tp = showProject ? project(t.project_id) : null;
-  return `<div class="kcard" draggable="${canEdit()}" data-id="${t.id}" style="--c:${ar?.color || '#46529a'}" tabindex="0">
-    <div class="row" style="gap:6px"><small>#${t.id}</small>${tp ? `<span class="chip" style="border-color:${h(tp.color)}">${h(tp.name)}</span>` : ''}${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
+  return `<div class="kcard" draggable="${canEdit()}" data-id="${t.id}" style="--c:${ar?.color || '#46529a'}" tabindex="0" title="#${t.id} ${h(t.title)}">
+    <div class="row" style="gap:4px;font-size:10px;line-height:1"><small>#${t.id}</small>${tp ? `<span class="chip" style="border-color:${h(tp.color)}">${h(tp.name)}</span>` : ''}${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
     <div class="t">${h(t.title)}</div>
-    <div class="meta">${t.executor === 'humano' ? `${sprite('rebel', '#ff8c42', 2)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${sprite('droid', a?.color, 2)}${h(a?.name || '—')} <span>${h(t.model || '')}${t.effort ? '·' + h(t.effort) : ''}</span>`}
-    ${t.status === 'en_curso' ? `<span class="chip st-en_curso">⏱ ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}${t.status === 'esperando' ? '<span class="chip st-esperando">? responde</span>' : ''}
+    <div class="meta">${t.executor === 'humano' ? `${sprite('rebel', '#ff8c42', 1)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${sprite('droid', a?.color, 1)}${h(a?.name || '—')} <span>${h(t.model || '')}</span>`}
+    ${t.status === 'en_curso' ? `<span class="chip st-en_curso">⏱ ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}${t.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : ''}
     ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div></div>`;
 };
 
