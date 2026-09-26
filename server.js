@@ -209,7 +209,13 @@ r('GET', '/api/bootstrap', 'observador', ({ user }) => ({
     return { ...u, approvals: n, rank: rank(n) };
   }),
   areas: all('select * from areas where deleted_at is null order by id').map(a => ({ ...a, fallback_chain: J(a.fallback_chain, []) })),
-  agents: all('select * from agents order by id').map(a => { const d = one(`select count(*) n from tasks where agent_id=? and status='completada'`, a.id).n; return { ...agentPublic(a), done: d, rank: rank(d) }; }),
+  agents: all('select * from agents order by id').map(a => {
+    const d = one(`select count(*) n from tasks where agent_id=? and status='completada'`, a.id).n;
+    const limits = all(`select win, used_value, limit_value, resets_at from agent_limits where agent_id=? and source='cli' order by win`, a.id);
+    const u5h = one(`select coalesce(sum(tokens_in + tokens_out),0) tokens, coalesce(sum(cost_usd),0) usd, count(*) runs from runs where agent_id=? and started_at>=?`, a.id, new Date(Date.now() - 5 * 3600e3).toISOString());
+    const usem = one(`select coalesce(sum(tokens_in + tokens_out),0) tokens, coalesce(sum(cost_usd),0) usd, count(*) runs from runs where agent_id=? and started_at>=?`, a.id, new Date(Date.now() - 7 * 86400e3).toISOString());
+    return { ...agentPublic(a), done: d, rank: rank(d), limits_cli: limits, usage5h: u5h, usage7d: usem };
+  }),
   projects: projectsList(),
   templates: all('select * from templates order by area_id, id'),
   lenses: C.lenses(),

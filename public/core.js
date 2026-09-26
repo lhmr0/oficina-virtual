@@ -71,6 +71,52 @@ export function userChip(id) {
   if (!u) return id ? `#${id}` : '<span class="muted">sistema</span>';
   return `<span class="row" style="gap:4px;display:inline-flex">${sprite(u.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 2)}${h(u.name)}</span>`;
 }
+export const WIN_LABELS = {
+  five_hour: '5 horas',
+  '5h': '5 horas',
+  primary: '5 horas',
+  seven_day: '7 días (semanal)',
+  '7d': '7 días (semanal)',
+  secondary: '7 días (semanal)',
+  weekly: 'Semanal',
+  seven_day_opus: '7 días Opus',
+  seven_day_sonnet: '7 días Sonnet',
+};
+
+export function agentLimits(a) {
+  if (!a) return { fiveHour: null, weekly: null, list: [], usage5h: null, usage7d: null };
+  const list = a.limits_cli || [];
+  const fiveHour = list.find(l => ['five_hour', '5h', 'primary'].includes(l.win));
+  const weekly = list.find(l => ['seven_day', '7d', 'secondary', 'weekly'].includes(l.win));
+  return {
+    fiveHour: fiveHour ? { pct: Math.round(fiveHour.used_value), resets_at: fiveHour.resets_at } : null,
+    weekly: weekly ? { pct: Math.round(weekly.used_value), resets_at: weekly.resets_at } : null,
+    list,
+    usage5h: a.usage5h || null,
+    usage7d: a.usage7d || null,
+  };
+}
+
+export function agentLimitsBadge(a, compact = false) {
+  const lim = agentLimits(a);
+  if (!lim.fiveHour && !lim.weekly) {
+    if (a?.status === 'sin_cuota') return `<span class="lim-badge bad">Sin cuota</span>`;
+    if (lim.usage5h?.tokens) return `<span class="lim-badge ok" title="${num(lim.usage5h.tokens)} tokens en 5h">${bytesTxt(lim.usage5h.tokens)}/5h</span>`;
+    return `<span class="lim-badge off">—</span>`;
+  }
+  const parts = [];
+  const colorOf = pct => pct >= 90 ? 'bad' : pct >= 75 ? 'warn' : 'ok';
+  if (lim.fiveHour) {
+    const tip = `Límite 5h: ${lim.fiveHour.pct}%${lim.fiveHour.resets_at ? ' · reinicia ' + ago(lim.fiveHour.resets_at) : ''}`;
+    parts.push(`<span class="lim-badge ${colorOf(lim.fiveHour.pct)}" title="${h(tip)}">5h:${lim.fiveHour.pct}%</span>`);
+  }
+  if (lim.weekly && !compact) {
+    const tip = `Límite semanal: ${lim.weekly.pct}%${lim.weekly.resets_at ? ' · reinicia ' + ago(lim.weekly.resets_at) : ''}`;
+    parts.push(`<span class="lim-badge ${colorOf(lim.weekly.pct)}" title="${h(tip)}">7d:${lim.weekly.pct}%</span>`);
+  }
+  return parts.join(' ');
+}
+
 export const saber = (pct, color) => `<div class="saber" title="${Math.round(pct)}%"><div class="hilt"></div><div class="track"><div class="blade" style="width:${Math.max(0, Math.min(100, pct))}%;--c:${color || 'var(--holo)'}"></div></div></div>`;
 export const opts = (list, sel, blank) => (blank != null ? `<option value="">${h(blank)}</option>` : '') + list.map(([v, l]) => `<option value="${h(v)}" ${String(v) === String(sel ?? '') ? 'selected' : ''}>${h(l)}</option>`).join('');
 
