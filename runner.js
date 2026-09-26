@@ -113,7 +113,7 @@ const ADAPTERS = {
       if (o.type === 'turn.completed') { st.error = null; st.tin = o.usage?.input_tokens || 0; st.tcache = o.usage?.cached_input_tokens || 0; st.tout = o.usage?.output_tokens || 0; }
       if (o.type === 'turn.failed') st.error = o.error?.message || 'turn.failed';
       if (o.type === 'error') st.error = o.message || o.error?.message || String(o.error || 'error');
-      const rl = o.rate_limits || o.msg?.rate_limits || o.info?.rate_limits;
+      const rl = o.rate_limits || o.msg?.rate_limits || o.info?.rate_limits || o.payload?.rate_limits || o.usage?.rate_limits;
       if (rl) for (const [w, v] of Object.entries(rl)) if (v && v.used_percent != null)
         st.limits.push({ win: w, pct: v.used_percent, resets: v.resets_at || (v.resets_in_seconds ? Date.now() / 1000 + v.resets_in_seconds : null) });
     },
@@ -455,10 +455,23 @@ function markQuota(ag, text, epoch) {
   log(null, 'agente', ag.id, 'sin_cuota', { hasta: at });
   emit('agent.status', { id: ag.id });
 }
+function toIsoReset(r) {
+  if (!r) return null;
+  if (typeof r === 'string') {
+    if (isNaN(Number(r))) { const d = new Date(r); return isNaN(d.getTime()) ? null : d.toISOString(); }
+    r = Number(r);
+  }
+  if (typeof r === 'number' && !isNaN(r) && r > 0) {
+    const ms = r < 1e11 ? r * 1000 : r;
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  return null;
+}
 function saveLimits(agentId, limits) {
   for (const l of limits) run(`insert into agent_limits(agent_id,source,win,metric,limit_value,used_value,resets_at,updated_at) values(?,?,?,?,?,?,?,?)
     on conflict(agent_id,source,win,metric) do update set used_value=excluded.used_value, resets_at=excluded.resets_at, updated_at=excluded.updated_at`,
-  agentId, 'cli', l.win, 'pct', 100, Math.round(l.pct * 10) / 10, l.resets ? new Date(l.resets * 1000).toISOString() : null, now());
+  agentId, 'cli', l.win, 'pct', 100, Math.round(l.pct * 10) / 10, toIsoReset(l.resets), now());
   if (limits.length) emit('agent.status', { id: agentId });
 }
 function refreshAgentStatus(agentId) {

@@ -247,15 +247,22 @@ function gitRepo(name) {
     assert.equal(one('select deleted_at from conversations where id=?', cid).deleted_at, null);
   });
 
-  await t('parser de límites Claude/Codex → agent_limits', async () => {
+  await t('parser de límites Claude/Codex → agent_limits y bootstrap', async () => {
     const st = { limits: [] };
     R.ADAPTERS.claude.parse({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', unifiedWindows: { five_hour: { utilization: 0.31, resetsAt: 1790281800 }, seven_day: { utilization: 0.85, resetsAt: 1790460000 } } } }, st, () => {});
-    R.ADAPTERS.codex.parse({ type: 'token_count', rate_limits: { primary: { used_percent: 42, resets_in_seconds: 600 } } }, st, () => {});
+    R.ADAPTERS.codex.parse({ type: 'token_count', rate_limits: { primary: { used_percent: 42, resets_in_seconds: 600 }, secondary: { used_percent: 78, resets_at: '2026-09-30T12:00:00.000Z' } } }, st, () => {});
     R.saveLimits(fake, st.limits);
     const l = all(`select * from agent_limits where agent_id=? and source='cli'`, fake);
     assert.equal(l.find(x => x.win === 'seven_day').used_value, 85);
     assert.equal(l.find(x => x.win === 'primary').used_value, 42);
+    assert.equal(l.find(x => x.win === 'secondary').used_value, 78);
     assert.match(R.parseReset("Claude AI usage limit reached|1790281800"), /^2026-/);
+
+    const boot = await api('GET', '/api/bootstrap');
+    const fa = boot.agents.find(a => a.id === fake);
+    assert.ok(Array.isArray(fa.limits_cli), 'bootstrap incluye limits_cli');
+    assert.equal(fa.limits_cli.find(x => x.win === 'primary')?.used_value, 42);
+    assert.ok(fa.usage5h !== undefined, 'bootstrap incluye usage5h');
   });
 
   await t('Codex usa un modelo disponible al faltar el seleccionado', async () => {

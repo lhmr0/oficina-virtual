@@ -446,6 +446,21 @@ const SHAPES = {
     'KDDDDKK',
     'KKKKK..',
   ],
+  // Chopper C1-10P (astromech naranja de CommandCode)
+  chopper: [
+    '.....KK.....',
+    '....KGGK....',
+    '..KKYYYYKK..',
+    '.KOOOOOOOOK.',
+    '.KOWWKWWOOK.',
+    '.KKKKKKKKKK.',
+    '..KGGGGGGK..',
+    'KGKGGGGGGKGK',
+    'KGKGOOOGGKGK',
+    'KGKGGGGGGKGK',
+    'KGKKGGGGKKGK',
+    'KKK......KKK',
+  ],
 };
 
 export function sprite(kind = 'droid', color = '#4fc3f7', px = 4, extra = '') {
@@ -464,6 +479,7 @@ export function agentSprite(a, px = 4, extra = '') {
   if (k.includes('antigrav') || k === 'r2d2') return sprite('r2d2', a?.color || '#4fc3f7', px, extra);
   if (k.includes('claude') || k === 'c3po') return sprite('c3po', a?.color || '#ffe81f', px, extra);
   if (k.includes('codex') || k === 'bb8') return sprite('bb8', a?.color || '#3ddc84', px, extra);
+  if (k.includes('command') || k.includes('chopper') || k === 'c1-10p') return sprite('chopper', a?.color || '#ff4d4d', px, extra);
   return sprite('droid', a?.color || '#4fc3f7', px, extra);
 }
 
