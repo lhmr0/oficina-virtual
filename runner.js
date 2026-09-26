@@ -52,6 +52,7 @@ const cap = (s, n = 24000) => s.length > n ? s.slice(0, n / 2) + '\n…[recortad
 function codexFallback(model, defaultModel, available) {
   const alternatives = (Array.isArray(available) ? available : []).filter(m => m && m !== model);
   return alternatives.includes(defaultModel) ? defaultModel
+    : alternatives.includes('gpt-6-luna') ? 'gpt-6-luna'
     : alternatives.includes('gpt-5.6-terra') ? 'gpt-5.6-terra'
     : alternatives[0] || null;
 }

@@ -14,7 +14,25 @@ let lastScan = null;
 async function probe(ag) {
   const mid = host.defaultMachine();
   if (!host.online(mid)) return versions[ag.id] || { found: null, version: null };
-  try { versions[ag.id] = { ...(await host.call(mid, 'probe', { exe: ag.exe, pre_args: J(ag.pre_args, []) })), at: now() }; }
+  try {
+    const v = await host.call(mid, 'probe', { exe: ag.exe, pre_args: J(ag.pre_args, []) });
+    versions[ag.id] = { ...v, at: now() };
+    if (v.found) {
+      try {
+        const detected = await host.call(mid, 'detectModels', { adapter: ag.adapter, exe: ag.exe, pre_args: J(ag.pre_args, []) });
+        if (Array.isArray(detected) && detected.length) {
+          const cur = J(ag.models, []);
+          const missing = detected.filter(m => !cur.includes(m));
+          if (missing.length) {
+            const next = [...new Set([...detected, ...cur])];
+            update('agents', ag.id, { models: JSON.stringify(next) });
+            ag.models = JSON.stringify(next);
+            emit('agent.status', { id: ag.id });
+          }
+        }
+      } catch {}
+    }
+  }
   catch (e) { versions[ag.id] = { found: null, version: null, error: e.message, at: now() }; }
   return versions[ag.id];
 }

@@ -264,6 +264,7 @@ function gitRepo(name) {
     assert.equal(R.codexFallback('gpt-6-luna', 'gpt-5.6-terra', ['gpt-6-luna']), null);
     assert.equal(R.codexFallback('gpt-6-luna', 'gpt-6-luna', ['gpt-6-luna']), null);
     assert.equal(R.codexFallback('gpt-6-luna', 'gpt-5.6-terra', []), null);
+    assert.equal(R.codexFallback('otro', 'no-existe', ['gpt-5.6-terra', 'gpt-6-luna']), 'gpt-6-luna');
   });
 
   await t('Codex reintenta una sola vez cuando la cuenta rechaza el modelo', async () => {
@@ -318,6 +319,22 @@ function gitRepo(name) {
     assert.ok(events.some(e => e.type === 'notify' && e.data.kind === 'limite'), 'alerta 80%');
     assert.ok(s.folders.length >= 2);
     update('agents', bad, { enabled: 0 });
+  });
+
+  await t('sincronización automática de modelos en probe de agentes', async () => {
+    const H = require('./host');
+    const origCall = H.call;
+    const testAg = insert('agents', { key: 'sync-test', name: 'SyncTest', adapter: 'codex', exe: process.execPath, models: '["gpt-5.5"]', default_model: 'gpt-5.5', enabled: 1 });
+    H.call = (mid, op, args) => {
+      if (op === 'probe') return Promise.resolve({ found: true, version: '1.0.0' });
+      if (op === 'detectModels') return Promise.resolve(['gpt-6-luna', 'gpt-6-sol', 'gpt-5.5']);
+      return origCall(mid, op, args);
+    };
+    try {
+      await api('POST', '/api/status/scan');
+      const updated = JSON.parse(one('select models from agents where id=?', testAg).models);
+      assert.deepEqual(updated, ['gpt-6-luna', 'gpt-6-sol', 'gpt-5.5'], 'modelos nuevos incorporados automáticamente');
+    } finally { H.call = origCall; update('agents', testAg, { enabled: 0 }); }
   });
 
   await t('Consejo: digest, JSON inválido, consolidación con votos, aceptar crea tarea, descartar', async () => {
