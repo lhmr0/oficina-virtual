@@ -87,6 +87,11 @@ function gitRepo(name) {
     for (const f of fs.readdirSync(path.join(__dirname, 'public')).filter(f => f.endsWith('.js')))
       execFileSync(process.execPath, ['--check', '--input-type=module'], { input: fs.readFileSync(path.join(__dirname, 'public', f)), stdio: ['pipe', 'ignore', 'pipe'] });
   });
+  await t('PWA: manifest servido sin sesión y con iconos que existen', async () => {
+    const r = await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`);
+    assert.equal(r.headers.get('content-type'), 'application/manifest+json');
+    for (const i of (await r.json()).icons) assert.equal((await fetch(`http://127.0.0.1:${PORT}${i.src}`)).headers.get('content-type'), 'image/png', i.src);
+  });
 
   await t('login admin y roles (observador no ejecuta)', async () => {
     cookie = ''; await api('POST', '/api/login', { username: 'r2', password: 'secreto1' });

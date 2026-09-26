@@ -725,7 +725,7 @@ r('POST', '/api/proposals/:id/detail', 'operador', ({ params, user }) => {
 
 // ---------- HTTP ----------
 const RAW = Symbol('raw');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 const PUB = path.join(__dirname, 'public');
 function readBody(req, raw) {
   const max = raw ? 25e6 : 5e6;
