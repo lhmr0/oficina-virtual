@@ -14,6 +14,11 @@ const agentsOn = () => S.boot.agents.filter(a => a.enabled);
 // un <select> y no <input list>: el datalist filtra por el valor actual y solo mostraba el modelo por defecto
 const price = (a, m) => { const p = a?.prices?.[m]; return p ? ` · $${p[0]} / $${p[1]}` : ''; }; // USD por 1M tokens entrada / salida
 const modelOpts = (a, cur) => { const ms = a?.models || [], c = cur || a?.default_model || ''; return opts((c && !ms.includes(c) ? [c, ...ms] : ms).map(m => [m, m + price(a, m)]), c, ms.length || c ? null : '—'); };
+const modelEffortsOf = (a, m) => {
+  const me = a?.model_efforts?.[m];
+  if (Array.isArray(me) && me.length) return me;
+  return a?.efforts || [];
+};
 function agentPicker(p, sel = {}, { modes = true, blank = false } = {}) {
   const a = agent(sel.agent_id) || (blank ? null : agentsOn()[0]);
   const agentLabel = x => {
@@ -21,24 +26,38 @@ function agentPicker(p, sel = {}, { modes = true, blank = false } = {}) {
     const limTxt = (lim.fiveHour ? ` [5h: ${lim.fiveHour.pct}%]` : '') + (lim.weekly ? ` [7d: ${lim.weekly.pct}%]` : '');
     return x.name + (x.status === 'sin_cuota' ? ' (sin cuota)' : '') + limTxt;
   };
+  const curModel = sel.model || a?.default_model || '';
+  const effs = modelEffortsOf(a, curModel);
   return `<div class="field-row">
     <div>
       <div class="row" style="justify-content:space-between"><label class="l" for="${p}agent">Agente</label><span id="${p}agentLimits">${agentLimitsBadge(a)}</span></div>
       <select id="${p}agent" name="agent_id">${opts(agentsOn().map(x => [x.id, agentLabel(x)]), a?.id, blank ? '— por defecto del área —' : null)}</select>
     </div>
     <div><label class="l" for="${p}model">Modelo</label><select id="${p}model" name="model">${modelOpts(a, sel.model)}</select></div>
-    <div><label class="l" for="${p}effort">Esfuerzo</label><select id="${p}effort" name="effort">${opts((a?.efforts || []).map(e => [e, e]), sel.effort || a?.default_effort, '—')}</select></div>
+    <div><label class="l" for="${p}effort">Esfuerzo</label><select id="${p}effort" name="effort">${opts(effs.map(e => [e, e]), sel.effort || a?.default_effort, '—')}</select></div>
     ${modes ? `<div><label class="l" for="${p}mode">Modo</label><select id="${p}mode" name="mode">${opts([['editar', 'Editar (autónomo: aprueba todo, como tu CLI)'], ['plan', 'Plan / solo lectura'], ['supervisado', 'Supervisado (aprobar permisos, Claude)']], sel.mode || 'editar')}</select></div>` : ''}
   </div>`;
 }
 function bindPicker(root, p) {
   const s = $(`#${p}agent`, root); if (!s) return;
+  const updateEffort = (a, m) => {
+    const effEl = $(`#${p}effort`, root);
+    if (!effEl) return;
+    const effs = modelEffortsOf(a, m);
+    effEl.innerHTML = opts(effs.map(e => [e, e]), effs.includes(a?.default_effort) ? a?.default_effort : effs[0], '—');
+  };
   s.addEventListener('change', () => {
     const a = agent(s.value);
     $(`#${p}model`, root).innerHTML = modelOpts(a);
-    $(`#${p}effort`, root).innerHTML = opts((a?.efforts || []).map(e => [e, e]), a?.default_effort, '—');
+    const mEl = $(`#${p}model`, root);
+    updateEffort(a, mEl?.value);
     const limEl = $(`#${p}agentLimits`, root);
     if (limEl) limEl.innerHTML = agentLimitsBadge(a);
+  });
+  const mEl = $(`#${p}model`, root);
+  if (mEl) mEl.addEventListener('change', () => {
+    const a = agent(s.value);
+    updateEffort(a, mEl.value);
   });
 }
 async function browseInto(input, machineId) {

@@ -551,6 +551,53 @@ function gitRepo(name) {
     }
   });
 
+  await t('actualización diaria: detección y sincronización de modelos y esfuerzos de los 4 agentes', async () => {
+    const H = require('./hostops').create({ dataDir: path.join(TMP, 'models-test') });
+    // Probar detectEfforts en hostops
+    const clEfforts = await H.ops.detectEfforts({ adapter: 'claude', exe: 'claude' });
+    assert.ok(clEfforts.includes('low') && clEfforts.includes('high'));
+    const cxEfforts = await H.ops.detectEfforts({ adapter: 'codex', exe: 'codex' });
+    assert.ok(cxEfforts.includes('low') && cxEfforts.includes('max'));
+    const agyEfforts = await H.ops.detectEfforts({ adapter: 'agy', exe: 'agy' });
+    assert.ok(agyEfforts.includes('low') && agyEfforts.includes('high'));
+    const ccEfforts = await H.ops.detectEfforts({ adapter: 'commandcode', exe: 'node' });
+    assert.ok(ccEfforts.includes('low') && ccEfforts.includes('medium'));
+
+    // Probar detectModelEfforts en hostops
+    const clModelEfforts = await H.ops.detectModelEfforts({ adapter: 'claude', exe: 'claude' });
+    assert.ok(clModelEfforts['sonnet']?.includes('high'));
+    const agyModelEfforts = await H.ops.detectModelEfforts({ adapter: 'agy', exe: 'agy' });
+    assert.deepEqual(agyModelEfforts['gemini-3.8-flash-high'], ['high']);
+
+    // Probar actualizar-modelos.js con una base de datos de prueba
+    const { collectAgentData, syncAgentsToDb } = require('./actualizar-modelos');
+    const testDbPath = path.join(TMP, 'sync-test.db');
+    const { DatabaseSync } = require('node:sqlite');
+    const tdb = new DatabaseSync(testDbPath);
+    tdb.exec(`create table agents (id integer primary key, key text unique, name text, models text default '[]', efforts text default '[]', default_model text default '', default_effort text default '');`);
+    tdb.prepare(`insert into agents (key, name, models, efforts) values ('claude', 'Claude', '["sonnet"]', '["medium"]'), ('codex', 'Codex', '["gpt-5.5"]', '["low"]'), ('antigravity', 'Antigravity', '[]', '[]'), ('commandcode', 'CommandCode', '[]', '[]');`).run();
+
+    const mockData = {
+      claude: { name: 'Claude', models: ['sonnet', 'opus'], efforts: ['low', 'medium', 'high'], modelEfforts: { sonnet: ['low', 'medium', 'high'] }, fallbackModel: 'sonnet' },
+      codex: { name: 'Codex', models: ['gpt-6-luna', 'gpt-5.5'], efforts: ['low', 'medium', 'high', 'max'], modelEfforts: { 'gpt-6-luna': ['low', 'medium', 'high', 'max'] }, fallbackModel: 'gpt-6-luna' },
+      antigravity: { name: 'Antigravity', models: ['gemini-3.8-flash-high'], efforts: ['high'], modelEfforts: { 'gemini-3.8-flash-high': ['high'] }, fallbackModel: 'gemini-3.8-flash-high' },
+      commandcode: { name: 'CommandCode', models: ['deepseek/deepseek-v4-flash'], efforts: ['medium'], modelEfforts: {}, fallbackModel: 'deepseek/deepseek-v4-flash' }
+    };
+
+    const syncRes = syncAgentsToDb(testDbPath, mockData);
+    assert.equal(syncRes.ok, true);
+    assert.equal(syncRes.updated.length, 4);
+
+    const updatedClaude = tdb.prepare('select * from agents where key=?').get('claude');
+    assert.deepEqual(JSON.parse(updatedClaude.models), ['sonnet', 'opus']);
+    assert.deepEqual(JSON.parse(updatedClaude.efforts), ['low', 'medium', 'high']);
+    assert.ok(JSON.parse(updatedClaude.model_efforts).sonnet);
+
+    const updatedCodex = tdb.prepare('select * from agents where key=?').get('codex');
+    assert.ok(JSON.parse(updatedCodex.models).includes('gpt-6-luna'));
+    assert.ok(JSON.parse(updatedCodex.efforts).includes('max'));
+  });
+
   server.close();
   for (const a of R.active.values()) if (a.runId) require('./host').runOp(a.runId, 'killRun');
   console.log(failed ? `\n${failed} FALLARON` : '\nTODO OK');

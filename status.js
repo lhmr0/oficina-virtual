@@ -31,6 +31,31 @@ async function probe(ag) {
           }
         }
       } catch {}
+      try {
+        const detectedEfforts = await host.call(mid, 'detectEfforts', { adapter: ag.adapter, exe: ag.exe, pre_args: J(ag.pre_args, []) });
+        if (Array.isArray(detectedEfforts) && detectedEfforts.length) {
+          const curE = J(ag.efforts, []);
+          const missingE = detectedEfforts.filter(e => !curE.includes(e));
+          if (missingE.length) {
+            const nextE = [...new Set([...curE, ...detectedEfforts])];
+            update('agents', ag.id, { efforts: JSON.stringify(nextE) });
+            ag.efforts = JSON.stringify(nextE);
+            emit('agent.status', { id: ag.id });
+          }
+        }
+      } catch {}
+      try {
+        const detectedModelEfforts = await host.call(mid, 'detectModelEfforts', { adapter: ag.adapter, exe: ag.exe, pre_args: J(ag.pre_args, []) });
+        if (detectedModelEfforts && typeof detectedModelEfforts === 'object' && Object.keys(detectedModelEfforts).length) {
+          const curME = J(ag.model_efforts, {});
+          const nextME = { ...curME, ...detectedModelEfforts };
+          if (JSON.stringify(curME) !== JSON.stringify(nextME)) {
+            update('agents', ag.id, { model_efforts: JSON.stringify(nextME) });
+            ag.model_efforts = JSON.stringify(nextME);
+            emit('agent.status', { id: ag.id });
+          }
+        }
+      } catch {}
     }
   }
   catch (e) { versions[ag.id] = { found: null, version: null, error: e.message, at: now() }; }
@@ -66,7 +91,7 @@ function agentCard(ag) {
     queued: R.queue.filter(q => one('select agent_id from conversations where id=?', q.convId)?.agent_id === ag.id).length,
     limits_cli: cli, limits_manual: manual, usage: Object.fromEntries(Object.keys(WIN).map(w => [w, usage(ag.id, w)])),
     quota_cuts_7d: cuts.n, last_quota_cut: cuts.last,
-    models: J(ag.models, []), efforts: J(ag.efforts, []), default_model: ag.default_model, default_effort: ag.default_effort,
+    models: J(ag.models, []), efforts: J(ag.efforts, []), model_efforts: J(ag.model_efforts, {}), default_model: ag.default_model, default_effort: ag.default_effort,
     success_rate: runs.length ? Math.round(ok / runs.length * 100) : null, avg_duration_s: dur.length ? Math.round(dur.reduce((a, b) => a + b, 0) / dur.length / 1000) : null,
     tasks_done: one(`select count(*) n from tasks where agent_id=? and status='completada' and deleted_at is null`, ag.id).n,
   };

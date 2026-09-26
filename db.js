@@ -87,6 +87,7 @@ addCol('project_folders', 'machine_id', 'integer');
 addCol('conversations', 'machine_id', 'integer');
 addCol('users', 'email', 'text');
 addCol('agents', 'prices', "text default '{}'");
+addCol('agents', 'model_efforts', "text default '{}'");
 fs.mkdirSync(path.join(DATA0, 'attachments'), { recursive: true });
 
 const now = () => new Date().toISOString();
@@ -136,13 +137,13 @@ if (!one('select 1 from agents limit 1')) {
   const ccEntry = '%APPDATA%/npm/node_modules/command-code/dist/index.mjs'; // se expande en la máquina que ejecuta
   const ag = [
     { key: 'claude', name: 'Claude', adapter: 'claude', exe: 'claude', color: '#ff8c42',
-      models: ['sonnet', 'opus', 'haiku', 'fable'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'sonnet', default_effort: 'medium' },
+      models: ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'sonnet', default_effort: 'medium' },
     { key: 'codex', name: 'Codex', adapter: 'codex', exe: 'codex', color: '#3ddc84',
       models: ['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'gpt-6-luna', default_effort: 'medium' },
     { key: 'antigravity', name: 'Antigravity', adapter: 'agy', exe: 'agy', color: '#4fa3ff',
-      models: ['gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.1-pro-high', 'claude-sonnet-4-6', 'claude-opus-4-6-thinking'], efforts: ['low', 'medium', 'high'], default_model: 'gemini-3.8-flash-high', default_effort: 'medium' },
+      models: ['gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.8-flash-low', 'gemini-3.7-flash-high', 'gemini-3.7-flash-medium', 'gemini-3.7-flash-low', 'gemini-3.6-flash-high', 'gemini-3.6-flash-medium', 'gemini-3.6-flash-low', 'gemini-3.1-pro-high', 'gemini-3.1-pro-low', 'claude-sonnet-4-6', 'claude-opus-4-6-thinking', 'gpt-oss-120b-medium'], efforts: ['low', 'medium', 'high', 'max'], default_model: 'gemini-3.8-flash-high', default_effort: 'medium' },
     { key: 'commandcode', name: 'CommandCode', adapter: 'commandcode', exe: 'node', pre_args: [ccEntry], color: '#ff4d4d',
-      models: ['deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'moonshotai/kimi-k3', 'zai-org/glm-5.3', 'qwen/qwen3.8-max'], efforts: ['high', 'max'], default_model: 'deepseek/deepseek-v4-flash', default_effort: 'high' },
+      models: ['deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'moonshotai/kimi-k3', 'zai-org/glm-5.3', 'qwen/qwen3.8-max'], efforts: ['low', 'medium', 'high', 'max'], default_model: 'deepseek/deepseek-v4-flash', default_effort: 'medium' },
   ];
   for (const x of ag) insert('agents', { ...x, pre_args: JSON.stringify(x.pre_args || []), models: JSON.stringify(x.models), efforts: JSON.stringify(x.efforts), quota_patterns: JSON.stringify(Q) });
   const areas = all('select id, name from areas');
