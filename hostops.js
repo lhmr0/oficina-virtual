@@ -151,9 +151,103 @@ function create(cfg) {
         } catch { return []; }
       }
       if (adapter === 'agy') return (await run(['models'])).split(/\r?\n/).map(l => l.split('\t')[0].trim()).filter(l => /^[\w.-]+$/.test(l));
-      if (adapter === 'commandcode') return (await run(['--list-models'])).split(/\r?\n/).map(l => l.trim().split(/\s+/)[0]).filter(x => /^[\w.-]+\/[\w.-]+$/.test(x));
+      if (adapter === 'commandcode') {
+        try {
+          const out = await run(['--list-models']);
+          const ignore = new Set(['Available', 'Open', 'Stealth', 'Anthropic', 'OpenAI', 'Google', 'Sakana', 'Meta', 'xAI', 'Pass', 'Docs:', 'Decision']);
+          const list = [];
+          for (const raw of out.split(/\r?\n/)) {
+            const line = raw.trim();
+            if (!line || line.startsWith('Pass') || line.startsWith('Docs:') || line.startsWith('cmdc') || line.startsWith('Available')) continue;
+            const token = line.split(/\s+/)[0];
+            if (ignore.has(token) || token.endsWith(':')) continue;
+            if (/^[\w.-]+(\/[\w.-]+)?$/.test(token) && line.includes('  ')) list.push(token);
+          }
+          if (list.length) return list;
+        } catch {}
+        return (await run(['--list-models'])).split(/\r?\n/).map(l => l.trim().split(/\s+/)[0]).filter(x => /^[\w.-]+\/[\w.-]+$/.test(x));
+      }
       if (adapter === 'claude') return ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'];
       return [];
+    },
+    detectEfforts: async ({ adapter, exe, pre_args = [] }) => {
+      const run = async a => (await sh(resolveExe(exe), [...pre_args.map(expand), ...a], 60000)).out;
+      if (adapter === 'codex') {
+        try {
+          const p = path.join(process.env.CODEX_HOME || os.homedir(), '.codex', 'models_cache.json');
+          const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+          const set = new Set();
+          for (const m of (j.models || j.data || [])) {
+            if (m.visibility === 'hide') continue;
+            for (const r of (m.supported_reasoning_levels || [])) if (r.effort) set.add(r.effort);
+          }
+          if (set.size) return [...set];
+        } catch {}
+        try {
+          const out = await run(['debug', 'models']);
+          const j = JSON.parse(out);
+          const set = new Set();
+          for (const m of (j.models || j.data || [])) {
+            if (m.visibility === 'hide') continue;
+            for (const r of (m.supported_reasoning_levels || [])) if (r.effort) set.add(r.effort);
+          }
+          if (set.size) return [...set];
+        } catch {}
+        return ['low', 'medium', 'high', 'xhigh', 'max'];
+      }
+      if (adapter === 'claude') return ['low', 'medium', 'high', 'xhigh', 'max'];
+      if (adapter === 'agy') return ['low', 'medium', 'high', 'max'];
+      if (adapter === 'commandcode') return ['low', 'medium', 'high', 'max'];
+      return [];
+    },
+    detectModelEfforts: async ({ adapter, exe, pre_args = [] }) => {
+      const run = async a => (await sh(resolveExe(exe), [...pre_args.map(expand), ...a], 60000)).out;
+      const res = {};
+      if (adapter === 'codex') {
+        let list = [];
+        try {
+          const p = path.join(process.env.CODEX_HOME || os.homedir(), '.codex', 'models_cache.json');
+          const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+          list = (j.models || j.data || []).filter(m => m.visibility !== 'hide');
+        } catch {
+          try {
+            const out = await run(['debug', 'models']);
+            const j = JSON.parse(out);
+            list = (j.models || j.data || []).filter(m => m.visibility !== 'hide');
+          } catch {}
+        }
+        for (const m of list) {
+          const id = m.slug || m.id;
+          const effs = (m.supported_reasoning_levels || []).map(r => r.effort).filter(Boolean);
+          if (id) res[id] = effs.length ? effs : ['low', 'medium', 'high', 'xhigh', 'max'];
+        }
+        return res;
+      }
+      if (adapter === 'claude') {
+        const ms = ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'];
+        for (const m of ms) res[m] = ['low', 'medium', 'high', 'xhigh', 'max'];
+        return res;
+      }
+      if (adapter === 'agy') {
+        let ms = [];
+        try {
+          ms = (await run(['models'])).split(/\r?\n/).map(l => l.split('\t')[0].trim()).filter(l => /^[\w.-]+$/.test(l));
+        } catch {}
+        if (!ms.length) ms = ['gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.8-flash-low', 'gemini-3.7-flash-high', 'gemini-3.7-flash-medium', 'gemini-3.7-flash-low', 'gemini-3.6-flash-high', 'gemini-3.6-flash-medium', 'gemini-3.6-flash-low', 'gemini-3.1-pro-high', 'gemini-3.1-pro-low', 'claude-sonnet-4-6', 'claude-opus-4-6-thinking', 'gpt-oss-120b-medium'];
+        for (const m of ms) {
+          if (m.endsWith('-high')) res[m] = ['high'];
+          else if (m.endsWith('-medium')) res[m] = ['medium'];
+          else if (m.endsWith('-low')) res[m] = ['low'];
+          else res[m] = ['low', 'medium', 'high', 'max'];
+        }
+        return res;
+      }
+      if (adapter === 'commandcode') {
+        const ms = await ops.detectModels({ adapter, exe, pre_args });
+        for (const m of ms) res[m] = ['low', 'medium', 'high', 'max'];
+        return res;
+      }
+      return res;
     },
     toast: ({ title, body, url }) => {
       if (process.platform !== 'win32') return false;

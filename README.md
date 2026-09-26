@@ -85,6 +85,24 @@ bash deploy/deploy-vps.sh
 - Probar: `node worker.js` · Dejarlo siempre activo: `powershell -ExecutionPolicy Bypass -File instalar-agente.ps1` (tarea al iniciar sesión, log en `worker.log`).
 - La PC no debe suspenderse si quieres trabajar desde fuera.
 
+### 5. Actualización diaria de CLIs y modelos en la PC
+Para mantener actualizados automáticamente los 4 CLIs (`claude`, `codex`, `agy`, `commandcode`) y sincronizar todos los modelos y esfuerzos de razonamiento en la base de datos de la Oficina Virtual:
+
+- **Ejecutar manualmente ahora**:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\actualizar-diario.ps1
+  ```
+  o doble clic en `actualizar-diario.bat`.
+- **Programar ejecución diaria automática** (tarea programada de Windows a las 03:00 AM):
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\actualizar-diario.ps1 -InstalarTarea -Hora "03:00"
+  ```
+- **Desinstalar la tarea programada**:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\actualizar-diario.ps1 -DesinstalarTarea
+  ```
+- El registro de cada ejecución queda guardado en `actualizar.log`.
+
 ## Datos
 
 Todo vive en `data/` (SQLite `oficina.db`, logs de ejecución, sandbox, respaldos diarios). Variables: `OFICINA_PORT` (4242), `OFICINA_DATA`, `OFICINA_BIND`, `OFICINA_LOCAL_EXEC` (0 = no ejecutar agentes en el servidor), `OFICINA_AUTH` (password|google), `OFICINA_PUBLIC_URL`, `OFICINA_ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OFICINA_NO_TOAST`.
