@@ -138,7 +138,7 @@ if (!one('select 1 from agents limit 1')) {
     { key: 'claude', name: 'Claude', adapter: 'claude', exe: 'claude', color: '#ff8c42',
       models: ['sonnet', 'opus', 'haiku', 'fable'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'sonnet', default_effort: 'medium' },
     { key: 'codex', name: 'Codex', adapter: 'codex', exe: 'codex', color: '#3ddc84',
-      models: ['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'gpt-5.6-terra', default_effort: 'medium' },
+      models: ['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'gpt-6-luna', default_effort: 'medium' },
     { key: 'antigravity', name: 'Antigravity', adapter: 'agy', exe: 'agy', color: '#4fa3ff',
       models: ['gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.1-pro-high', 'claude-sonnet-4-6', 'claude-opus-4-6-thinking'], efforts: ['low', 'medium', 'high'], default_model: 'gemini-3.8-flash-high', default_effort: 'medium' },
     { key: 'commandcode', name: 'CommandCode', adapter: 'commandcode', exe: 'node', pre_args: [ccEntry], color: '#ff4d4d',
@@ -163,12 +163,28 @@ if (!one('select 1 from agents limit 1')) {
 // Con suscripción (Claude Max, ChatGPT, etc.) no pagas esto: sirve como costo equivalente para comparar. Editable en Configuración → Agentes.
 const PRICES = {
   claude: { sonnet: [2, 10, 0.2], opus: [4, 20, 0.2], haiku: [1, 5, 0.1], fable: [10, 50, 0.25] },
-  codex: { 'gpt-5.6-terra': [2, 12, 0.2], 'gpt-5.6-sol': [4, 20, 0.4], 'gpt-5.6-luna': [0.2, 1.2, 0.02], 'gpt-5.5': [5, 30, 0.5], 'gpt-6-luna': [0.1, 0.5, 0.01], 'gpt-6-sol': [2, 10, 0.2] },
+  codex: { 'gpt-5.6-terra': [2, 12, 0.2], 'gpt-5.6-sol': [4, 20, 0.4], 'gpt-5.6-luna': [0.2, 1.2, 0.02], 'gpt-5.5': [5, 30, 0.5], 'gpt-6-luna': [0.1, 0.5, 0.01], 'gpt-6-sol': [2, 10, 0.2], 'gpt-6-astra': [5, 25, 0.5] },
   antigravity: { 'gemini-3.8-flash-high': [0.75, 3.75], 'gemini-3.8-flash-medium': [0.75, 3.75], 'gemini-3.8-flash-low': [0.75, 3.75], 'gemini-3.1-pro-high': [2, 12], 'gemini-3.1-pro-low': [2, 12],
     'claude-sonnet-4-6': [3, 15, 0.3], 'claude-opus-4-6-thinking': [5, 25, 0.5] },
   commandcode: { 'deepseek/deepseek-v4-flash': [0.3, 1.2, 0.006], 'deepseek/deepseek-v4-pro': [1.32, 3.96, 0.044], 'moonshotai/kimi-k3': [3, 15, 0.3], 'zai-org/glm-5.3': [1.4, 4.4, 0.26], 'qwen/qwen3.8-max': [2, 6] },
 };
 for (const a of all("select id, key from agents where prices is null or prices in ('', '{}')")) if (PRICES[a.key]) update('agents', a.id, { prices: JSON.stringify(PRICES[a.key]) });
+
+// sincronizar modelos y precios nuevos de Codex en bases existentes
+const cxInit = one("select id, models, default_model, prices from agents where key='codex'");
+if (cxInit) {
+  const cur = J(cxInit.models, []);
+  const fresh = ['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra'];
+  const missing = fresh.filter(m => !cur.includes(m));
+  const def = (!cxInit.default_model || cxInit.default_model === 'gpt-5.6-terra') ? 'gpt-6-luna' : cxInit.default_model;
+  if (missing.length || def !== cxInit.default_model) {
+    update('agents', cxInit.id, { models: JSON.stringify([...new Set([...fresh, ...cur])]), default_model: def });
+  }
+  const curP = J(cxInit.prices, {});
+  let pUp = false;
+  for (const [m, pr] of Object.entries(PRICES.codex)) { if (!curP[m]) { curP[m] = pr; pUp = true; } }
+  if (pUp) update('agents', cxInit.id, { prices: JSON.stringify(curP) });
+}
 
 
 module.exports = { db, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting };

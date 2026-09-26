@@ -137,7 +137,19 @@ function create(cfg) {
     },
     detectModels: async ({ adapter, exe, pre_args = [] }) => {
       const run = async a => (await sh(resolveExe(exe), [...pre_args.map(expand), ...a], 60000)).out;
-      if (adapter === 'codex') { try { const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.codex', 'models_cache.json'), 'utf8')); return (j.models || j.data || []).filter(m => m.visibility !== 'hide').map(m => m.slug || m.id); } catch { return []; } }
+      if (adapter === 'codex') {
+        try {
+          const p = path.join(process.env.CODEX_HOME || os.homedir(), '.codex', 'models_cache.json');
+          const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+          const list = (j.models || j.data || []).filter(m => m.visibility !== 'hide').map(m => m.slug || m.id);
+          if (list.length) return list;
+        } catch {}
+        try {
+          const out = await run(['debug', 'models']);
+          const j = JSON.parse(out);
+          return (j.models || j.data || []).filter(m => m.visibility !== 'hide').map(m => m.slug || m.id);
+        } catch { return []; }
+      }
       if (adapter === 'agy') return (await run(['models'])).split(/\r?\n/).map(l => l.split('\t')[0].trim()).filter(l => /^[\w.-]+$/.test(l));
       if (adapter === 'commandcode') return (await run(['--list-models'])).split(/\r?\n/).map(l => l.trim().split(/\s+/)[0]).filter(x => /^[\w.-]+\/[\w.-]+$/.test(x));
       if (adapter === 'claude') return ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'];
