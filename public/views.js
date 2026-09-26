@@ -338,7 +338,6 @@ const estacion = {
       <div class="room-rug rug-council"></div>
     </section>`;
     const me = S.boot.me;
-    const busy = new Set([...tasks.filter(t => ACTIVE.includes(t.status)).map(t => t.agent_id), ...chats.filter(c => LIVE.includes(c.status)).map(c => c.agent_id)]);
 
     // Mostrar salas operativas principales: Documentación, Desarrollo y Análisis arriba; Cantina y Consejo Jedi abajo
     const docArea = S.boot.areas.find(a => a.name.toLowerCase().includes('doc')) || S.boot.areas[0];
@@ -497,7 +496,7 @@ const estacion = {
       const moreBtn = e.target.closest('#btnMoreRooms');
       if (moreBtn) {
         e.preventDefault();
-        return otherRoomsModal(vis, busy, chats);
+        return otherRoomsModal(vis, busy, otherAreas);
       }
       const di = e.target.closest('.deco-interactive');
       if (di) {
@@ -525,11 +524,7 @@ const estacion = {
   },
 };
 
-function otherRoomsModal(vis, busy, chats) {
-  const docArea = S.boot.areas.find(a => a.name.toLowerCase().includes('doc')) || S.boot.areas[0];
-  const devArea = S.boot.areas.find(a => a.name.toLowerCase().includes('desarr')) || S.boot.areas[1];
-  const fixedAreas = [docArea, devArea].filter(Boolean);
-  const otherAreas = S.boot.areas.filter(a => !fixedAreas.includes(a));
+function otherRoomsModal(vis, busy, otherAreas) {
   const lamp = a => a.status === 'sin_cuota' ? '#ff3b3b' : !a.enabled ? '#444a6e' : busy.has(a.id) ? '#3ddc84' : '#4fc3f7';
 
   const d = modal(`<h2>🏛 Más salas de la estación</h2>

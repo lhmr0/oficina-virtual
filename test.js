@@ -82,6 +82,12 @@ function gitRepo(name) {
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log('✔', name); } catch (e) { failed++; console.error('✘', name, '\n  ', e.stack || e); } };
 
+  // un error de sintaxis en un módulo del frontend deja la app en negro sin que ninguna API falle
+  await t('frontend: los módulos de public/ compilan', async () => {
+    for (const f of fs.readdirSync(path.join(__dirname, 'public')).filter(f => f.endsWith('.js')))
+      execFileSync(process.execPath, ['--check', '--input-type=module'], { input: fs.readFileSync(path.join(__dirname, 'public', f)), stdio: ['pipe', 'ignore', 'pipe'] });
+  });
+
   await t('login admin y roles (observador no ejecuta)', async () => {
     cookie = ''; await api('POST', '/api/login', { username: 'r2', password: 'secreto1' });
     assert.equal((await api('GET', '/api/me')).role, 'observador');
