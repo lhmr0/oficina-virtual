@@ -1,5 +1,5 @@
 // Sprites pixel-art generados como SVG desde matrices de caracteres
-const PAL = { K: '#0b0d1a', W: '#e8ecff', G: '#8b93b8', R: '#ff3b3b', Y: '#ffe81f', S: '#f2c29b', O: '#ff8c42', D: '#3a4270', H: '#4fc3f7', N: '#5a3a1a', L: '#3ddc84', M: '#a355dd', P: '#e06666', C: '#382212', T: '#1f6f8b', F: '#ffeaa7' };
+const PAL = { K: '#0b0d1a', W: '#e8ecff', G: '#8b93b8', R: '#ff3b3b', Y: '#ffe81f', S: '#f2c29b', O: '#ff8c42', D: '#3a4270', H: '#4fc3f7', N: '#5a3a1a', L: '#3ddc84', M: '#a355dd', P: '#e06666', C: '#382212', T: '#1f6f8b', F: '#ffeaa7', A: '#5f6680' };
 
 const SHAPES = {
   // astromech (agentes). B = color del agente
@@ -71,50 +71,50 @@ const SHAPES = {
     '..KNNK..',
     '...KK...',
   ],
-  // R2-D2 (astromech azul y blanco)
-  r2d2: [
-    '....WWWW....',
-    '..WWBBBBWW..',
-    '.WBBHGGWBBW.',
-    '.WBBWWWWBBW.',
-    '.WWWWWWWWWW.',
-    '.WBBWWWWBBW.',
-    'GWWBBWBBWWG.',
-    'GWWWWWWWWWG.',
-    'GWWWWWWWWWG.',
-    'GWWWWWWWWWG.',
-    'GWW.WWWW.WWG',
-    'KKK......KKK',
+  // mono (Claude)
+  mono: [
+    '...NNNNNN...',
+    '..NNNNNNNN..',
+    'SNNNSSSSNNNS',
+    'SSNSKSSKSNSS',
+    'SSNSSSSSSNSS',
+    '.NNSSSSSSNN.',
+    '..NSSKKSSN..',
+    '..NSKKKKSN..',
+    '...NSSSSN...',
+    '..NNNNNNNNN.',
+    '.NN.NNNN.NNN',
+    '..KK....KK..',
   ],
-  // C-3PO (droide de protocolo dorado con pierna plateada)
-  c3po: [
-    '...YYYYYY...',
-    '..YYYYYYYY..',
-    '..YYWYYWYY..',
-    '..YYYYYYYY..',
-    '...YYYYYY...',
-    '..YYYYYYYY..',
-    '.YYYYRRKYYY.',
-    '.YYYYKKKYYY.',
-    '..YYYYYYYY..',
-    '...YYYYYY...',
-    '..YYY..YYY..',
-    '..YYY..GGG..',
+  // elefante (Codex)
+  elefante: [
+    '.AAA....AAA.',
+    'AAAAGGGGAAAA',
+    'AAAGGGGGGAAA',
+    'AAAGKGGKGAAA',
+    'AAAGGGGGGAAA',
+    '.AAGGGGGGAA.',
+    '..WGGGGGGW..',
+    '..W.GGGG.W..',
+    '....GGGG....',
+    '....GGG.....',
+    '.....GG.....',
+    '......GG....',
   ],
-  // BB-8 (droide esférico naranja y blanco)
-  bb8: [
-    '....WWWW....',
-    '...WOOOWO...',
-    '...WWHWKW...',
-    '....WWWW....',
-    '..WWWOOOWW..',
-    '.WWOOOOOOWW.',
-    '.WOOOWWOOOW.',
-    '.WOOOWWOOOW.',
-    '.WWOOOOOOWW.',
-    '..WWWOOOWW..',
-    '...WWWWWW...',
-    '....KKKK....',
+  // CR7 (Antigravity): camiseta roja con el 7
+  cr7: [
+    '....CCCC....',
+    '...CSSSSC...',
+    '...SKSSKS...',
+    '...SSSSSS...',
+    '....SSSS....',
+    '.RRRRRRRRRR.',
+    'RRRWWWWWWRRR',
+    'SRRRRRRRWRRS',
+    'SRRRRRRWRRRS',
+    '.RRRRRWRRRR.',
+    '..LLLLLLLL..',
+    '..SS....SS..',
   ],
   // dispensador de agua Gather (water cooler)
   // Maestro Yoda
@@ -395,9 +395,9 @@ export function sprite(kind = 'droid', color = '#4fc3f7', px = 4, extra = '') {
 
 export function agentSprite(a, px = 4, extra = '') {
   const k = (typeof a === 'string' ? a : (a?.key || a?.name || '')).toLowerCase();
-  if (k.includes('antigrav') || k === 'r2d2') return sprite('r2d2', a?.color || '#4fc3f7', px, extra);
-  if (k.includes('claude') || k === 'c3po') return sprite('c3po', a?.color || '#ffe81f', px, extra);
-  if (k.includes('codex') || k === 'bb8') return sprite('bb8', a?.color || '#3ddc84', px, extra);
+  if (k.includes('antigrav') || k === 'r2d2') return sprite('cr7', a?.color || '#4fc3f7', px, extra);
+  if (k.includes('claude') || k === 'c3po') return sprite('mono', a?.color || '#ffe81f', px, extra);
+  if (k.includes('codex') || k === 'bb8') return sprite('elefante', a?.color || '#3ddc84', px, extra);
   if (k.includes('command') || k.includes('chopper') || k === 'c1-10p') return sprite('chopper', a?.color || '#ff4d4d', px, extra);
   return sprite('droid', a?.color || '#4fc3f7', px, extra);
 }
