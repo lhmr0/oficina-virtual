@@ -328,9 +328,9 @@ label.l { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4
 .bubble.z { background: #c7d2ff; font-size: 8px; animation: none; }
 .bubble.o { background: var(--orange); }
 @keyframes bob { 50% { transform: translateY(-2px); } }
-.hall { --hall-action-space: 130px; border-radius: 10px; position: relative; height: 120px; margin: 6px 0; background: repeating-linear-gradient(90deg, var(--floor-base) 0 20px, var(--floor) 20px 40px); box-shadow: inset 0 0 0 2px var(--wall), inset 0 0 0 4px color-mix(in srgb, var(--holo) 30%, transparent); overflow: hidden; }
-.hall::after { content: ''; position: absolute; top: 76px; bottom: 3px; left: 4px; right: 4px; z-index: 1; pointer-events: none; background: color-mix(in srgb, var(--holo) 7%, transparent); border-top: 1px dashed color-mix(in srgb, var(--holo) 42%, var(--wall)); }
-.hall-crew { position: absolute; left: 8px; right: 8px; top: 6px; height: 68px; z-index: 2; display: flex; align-items: flex-end; gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.hall { --hall-action-space: 130px; border-radius: 10px; position: relative; height: 132px; margin: 6px 0; background: repeating-linear-gradient(90deg, var(--floor-base) 0 20px, var(--floor) 20px 40px); box-shadow: inset 0 0 0 2px var(--wall), inset 0 0 0 4px color-mix(in srgb, var(--holo) 30%, transparent); overflow: hidden; }
+.hall::after { content: ''; position: absolute; top: 88px; bottom: 3px; left: 4px; right: 4px; z-index: 1; pointer-events: none; background: color-mix(in srgb, var(--holo) 7%, transparent); border-top: 1px dashed color-mix(in srgb, var(--holo) 42%, var(--wall)); }
+.hall-crew { position: absolute; left: 8px; right: 8px; top: 6px; height: 80px; z-index: 2; display: flex; align-items: flex-end; gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .hall-crew::-webkit-scrollbar { display: none; }
 .hall-crew .avatar { position: relative; bottom: auto; flex: 1 0 72px; min-width: 72px; max-width: 110px; background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
 .hall-crew button.avatar:hover .tag { background: var(--yellow); color: #111; }
@@ -624,9 +624,9 @@ dialog::backdrop { background: var(--dialog-backdrop); backdrop-filter: blur(3px
   .desk .who .sprite { max-height: 32px; }
   .desk > .sprite { max-height: 25px; }
   .desk .lbl { max-width: 64px; font-size: 10px; -webkit-line-clamp: 1; margin-top: 1px; }
-  .hall { --hall-action-space: 164px; height: 114px; margin: 4px 0; }
-  .hall::after { top: 68px; }
-  .hall-crew { left: 5px; right: 5px; top: 3px; height: 62px; gap: 4px; }
+  .hall { --hall-action-space: 164px; height: 132px; margin: 4px 0; }
+  .hall::after { top: 86px; }
+  .hall-crew { left: 5px; right: 5px; top: 6px; height: 78px; gap: 4px; }
   .hall-crew .avatar { flex-basis: 56px; min-width: 56px; max-width: 68px; }
   .hall-crew .avatar .sprite { max-height: 26px; }
   .hall .mouse-droid-walker .sprite { max-height: 26px; }
