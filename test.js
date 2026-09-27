@@ -20,7 +20,7 @@ const C = require('./council');
 const FAKE = `let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const fs=require('fs');
 if(s.includes('Consejo Jedi')||s.includes('moderador'))return console.log('Aquí va:\\n\`\`\`json\\n'+JSON.stringify({propuestas:[{title:'Agregar pruebas',description:'Cubrir salida.txt',impact:'alto',effort:'bajo',area:'Desarrollo',agent:'fake'},{title:'Documentar API',description:'README',impact:'medio',effort:'bajo',area:'Documentación'}]})+'\\n\`\`\`');
 if(s.includes('JSONMALO'))return console.log('no hay json aquí');
-if(s.includes('ADJUNTO')&&!s.includes('# RELEVO')){const t=fs.readFileSync('.oficina/adjuntos/nota.txt','utf8');fs.writeFileSync('salida.txt',t);return console.log('Leí: '+t+'\\n[[LISTO]] Leí: '+t);}
+if(s.includes('ADJUNTO')&&!s.includes('# RELEVO')){const rel=(s.match(/- (\\.oficina\\/adjuntos\\/[^\\s]+)/)||[])[1];if(!rel)throw Error('No encontré la ruta anunciada del adjunto');const t=fs.readFileSync(rel,'utf8');fs.writeFileSync('salida.txt',t);return console.log('Leí: '+t+'\\n[[LISTO]] Leí: '+t);}
 if(s.includes('Descompón'))return console.log(JSON.stringify({subtareas:[{title:'Sub A',prompt:'a',area:'Análisis'},{title:'Sub B',prompt:'b',area:'Desarrollo',depends_on:[0]}]}));
 if(s.includes('sesión anterior se perdió')){fs.writeFileSync('ctx-prompt.txt',s);return console.log('[[LISTO]] retomé');}
 if(s.includes('# RELEVO')){fs.writeFileSync('relevo-prompt.txt',s);return console.log('Continué.\\n[[LISTO]] Relevo completado');}
@@ -59,34 +59,36 @@ function gitRepo(name) {
 }
 
 (async () => {
-  const server = await startServer(PORT);
-  let step = '';
-  const ok = s => { step = s; console.log('✔', s); };
-  try {
-    // --- auth ---
-    assert.equal((await api('GET', '/api/setup')).needed, true);
-    await api('POST', '/api/setup', { username: 'vader', password: 'secreto1', name: 'Darth' });
-    await rejects(api('POST', '/api/setup', { username: 'x', password: 'secreto1' }), /Ya existe/);
-    cookie = '';
-    await rejects(api('GET', '/api/me'), /Inicia sesión/);
-    await rejects(api('POST', '/api/login', { username: 'vader', password: 'mal' }), /incorrectos/);
-    for (let i = 0; i < 4; i++) await rejects(api('POST', '/api/login', { username: 'vader', password: 'mal' }));
-    await rejects(api('POST', '/api/login', { username: 'vader', password: 'secreto1' }), /Demasiados intentos/);
-    ok('auth: setup único, login incorrecto, bloqueo tras 5 intentos');
-  } catch (e) { console.error('✘', step, e); }
-
-  // vader quedó bloqueado 5 min: seguimos con otro admin creado directo en BD
-  const { hashPw } = require('./server');
-  insert('users', { username: 'leia', name: 'Leia', pass_hash: hashPw('secreto1'), role: 'admin', created_at: new Date().toISOString() });
-  insert('users', { username: 'r2', name: 'R2', pass_hash: hashPw('secreto1'), role: 'observador', created_at: new Date().toISOString() });
+  let server = null;
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log('✔', name); } catch (e) { failed++; console.error('✘', name, '\n  ', e.stack || e); } };
+  try {
+    server = await startServer(PORT);
+    await t('auth: setup único, login incorrecto, bloqueo tras 5 intentos', async () => {
+      assert.equal((await api('GET', '/api/setup')).needed, true);
+      await api('POST', '/api/setup', { username: 'vader', password: 'secreto1', name: 'Darth' });
+      await rejects(api('POST', '/api/setup', { username: 'x', password: 'secreto1' }), /Ya existe/);
+      cookie = '';
+      await rejects(api('GET', '/api/me'), /Inicia sesión/);
+      await rejects(api('POST', '/api/login', { username: 'vader', password: 'mal' }), /incorrectos/);
+      for (let i = 0; i < 4; i++) await rejects(api('POST', '/api/login', { username: 'vader', password: 'mal' }));
+      await rejects(api('POST', '/api/login', { username: 'vader', password: 'secreto1' }), /Demasiados intentos/);
+    });
+
+    // vader queda bloqueado 5 min; la suite usa otro admin creado directo en BD.
+    const { hashPw } = require('./server');
+    insert('users', { username: 'leia', name: 'Leia', pass_hash: hashPw('secreto1'), role: 'admin', created_at: new Date().toISOString() });
+    insert('users', { username: 'r2', name: 'R2', pass_hash: hashPw('secreto1'), role: 'observador', created_at: new Date().toISOString() });
 
   // un error de sintaxis en un módulo del frontend deja la app en negro sin que ninguna API falle
   await t('frontend: los módulos de public/ compilan', async () => {
     for (const f of fs.readdirSync(path.join(__dirname, 'public')).filter(f => f.endsWith('.js')))
       execFileSync(process.execPath, ['--check', '--input-type=module'], { input: fs.readFileSync(path.join(__dirname, 'public', f)), stdio: ['pipe', 'ignore', 'pipe'] });
   });
+  for (const script of ['test-hostops.js', 'test-frontend.js', 'test-remote.js']) {
+    const file = path.join(__dirname, script);
+    if (fs.existsSync(file)) await t(`regresión: ${script}`, async () => execFileSync(process.execPath, ['--no-warnings', file], { stdio: 'inherit' }));
+  }
   await t('codex: límites 5h/semanal leídos del rollout de la sesión', async () => {
     const home = path.join(TMP, 'codex-home'), day = path.join(home, 'sessions', '2026', '09', '26');
     fs.mkdirSync(day, { recursive: true });
@@ -640,8 +642,13 @@ function gitRepo(name) {
     assert.ok(JSON.parse(updatedCodex.efforts).includes('max'));
   });
 
-  server.close();
-  for (const a of R.active.values()) if (a.runId) require('./host').runOp(a.runId, 'killRun');
-  console.log(failed ? `\n${failed} FALLARON` : '\nTODO OK');
-  process.exit(failed ? 1 : 0);
+  } catch (e) {
+    failed++;
+    console.error('✘ error fatal en la suite', e.stack || e);
+  } finally {
+    if (server) server.close();
+    for (const a of R.active.values()) if (a.runId) require('./host').runOp(a.runId, 'killRun');
+    console.log(failed ? `\n${failed} FALLARON` : '\nTODO OK');
+    process.exitCode = failed ? 1 : 0;
+  }
 })();

@@ -5,6 +5,7 @@ const { spawn, execFile, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const https = require('node:https');
 
 // cfg: { dataDir, strict, roots[] } — strict = agente de campo: solo CLIs conocidos y rutas bajo roots
@@ -18,6 +19,62 @@ function create(cfg) {
   function canon(p) { try { return fs.realpathSync.native(path.resolve(p)); } catch { return path.resolve(p); } }
   const expand = s => String(s).replace(/%([^%]+)%/g, (m, v) => process.env[v] ?? m);
   const under = (p, r) => p.toLowerCase() === r.toLowerCase() || p.toLowerCase().startsWith(r.toLowerCase().replace(/[\\/]$/, '') + path.sep);
+  const sandboxRoot = path.join(canon(dataDir), 'sandbox');
+  const sameSandboxPath = (a, b) => {
+    const x = path.resolve(a), y = path.resolve(b);
+    return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
+  };
+  const withinSandbox = (p, r) => {
+    const rel = path.relative(r, p);
+    return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
+  };
+  function sandboxBase(name, createIfMissing = false) {
+    if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(name)) throw new Error('Nombre de sandbox inválido');
+    if (createIfMissing) fs.mkdirSync(sandboxRoot, { recursive: true });
+    let rootStat;
+    try { rootStat = fs.lstatSync(sandboxRoot); }
+    catch (e) { if (e.code === 'ENOENT' && !createIfMissing) return null; throw e; }
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error('Ruta sandbox inválida');
+    const realRoot = fs.realpathSync.native(sandboxRoot);
+    if (!sameSandboxPath(realRoot, sandboxRoot)) throw new Error('Ruta sandbox inválida');
+    const base = path.join(realRoot, name);
+    if (createIfMissing) {
+      try { fs.mkdirSync(base); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+    }
+    let baseStat;
+    try { baseStat = fs.lstatSync(base); }
+    catch (e) { if (e.code === 'ENOENT' && !createIfMissing) return null; throw e; }
+    if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) throw new Error('Ruta sandbox inválida');
+    const realBase = fs.realpathSync.native(base);
+    if (!withinSandbox(realBase, realRoot) || !sameSandboxPath(realBase, base)) throw new Error('Ruta sandbox inválida');
+    return realBase;
+  }
+  function sandboxParts(name) {
+    if (typeof name !== 'string' || !name || path.isAbsolute(name) || path.win32.isAbsolute(name)) throw new Error('Ruta sandbox inválida');
+    const normalized = name.replace(/\\/g, '/');
+    const parts = normalized.split('/');
+    if (parts.some(p => !p || p === '.' || p === '..' || p.includes(':'))) throw new Error('Ruta sandbox inválida');
+    return parts;
+  }
+  function sandboxEntry(base, name) {
+    const parts = sandboxParts(name);
+    const baseStat = fs.lstatSync(base);
+    if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) throw new Error('Ruta sandbox inválida');
+    const baseReal = fs.realpathSync.native(base);
+    if (!sameSandboxPath(baseReal, base)) throw new Error('Ruta sandbox inválida');
+    let current = baseReal;
+    let stat;
+    for (let i = 0; i < parts.length; i++) {
+      current = path.join(current, parts[i]);
+      stat = fs.lstatSync(current);
+      if (stat.isSymbolicLink()) throw new Error('Enlace no permitido en sandbox');
+      if (i < parts.length - 1 && !stat.isDirectory()) throw new Error('Ruta sandbox inválida');
+      const real = fs.realpathSync.native(current);
+      if (!withinSandbox(real, baseReal) || !sameSandboxPath(real, current)) throw new Error('Ruta sandbox inválida');
+      current = real;
+    }
+    return { path: current, stat };
+  }
   function checkPath(p) {
     if (!p || !path.isAbsolute(p)) throw new Error('La ruta debe ser absoluta');
     if (!fs.existsSync(p) || !fs.statSync(p).isDirectory()) throw new Error('La carpeta no existe');
@@ -74,7 +131,7 @@ function create(cfg) {
     },
     // prepara la carpeta de trabajo: sandbox, carpeta directa o worktree git por tarea
     workdir: ({ sandbox, folder, task, exclude: ex = [] }) => {
-      if (sandbox) { const d = path.join(dataDir, 'sandbox', sandbox); fs.mkdirSync(d, { recursive: true }); return { cwd: d, git: false }; }
+      if (sandbox != null) { const d = sandboxBase(sandbox, true); return { cwd: d, git: false }; }
       const base = checkPath(folder.path);
       const g = isGit(base);
       if (g) exclude(base, ['.oficina/', '.oficina-worktrees/', ...ex]);
@@ -121,16 +178,46 @@ function create(cfg) {
       return { exists, is_git: g, branch: g ? tryGit(p, 'rev-parse', '--abbrev-ref', 'HEAD') : null, dirty: g ? (tryGit(p, 'status', '--porcelain') || '').split(/\r?\n/).filter(Boolean).length : null, worktrees, free_bytes: free };
     },
     listFiles: ({ sandbox }) => {
-      const base = path.join(dataDir, 'sandbox', sandbox);
-      const walk = d => !fs.existsSync(d) ? [] : fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [{ name: path.relative(base, path.join(d, e.name)).replace(/\\/g, '/'), size: fs.statSync(path.join(d, e.name)).size }]);
-      return walk(base).filter(f => !f.name.startsWith('.oficina/adjuntos/'));
+      const base = sandboxBase(sandbox);
+      if (!base) return [];
+      const walk = (prefix = '') => {
+        const before = prefix ? sandboxEntry(base, prefix) : { path: base, stat: fs.lstatSync(base) };
+        if (before.stat.isSymbolicLink() || !before.stat.isDirectory()) throw new Error('Ruta sandbox inválida');
+        const entries = fs.readdirSync(before.path, { withFileTypes: true });
+        const after = prefix ? sandboxEntry(base, prefix) : { path: base, stat: fs.lstatSync(base) };
+        if (after.stat.isSymbolicLink() || !after.stat.isDirectory() || before.stat.dev !== after.stat.dev || before.stat.ino !== after.stat.ino)
+          throw new Error('Ruta sandbox modificada durante el listado');
+        return entries.flatMap(e => {
+          const rel = prefix ? `${prefix}/${e.name}` : e.name;
+          let entry;
+          try { entry = sandboxEntry(base, rel); } catch (err) {
+            if (err.code === 'ENOENT' || /Enlace no permitido/.test(err.message)) return [];
+            throw err;
+          }
+          if (entry.stat.isDirectory()) return walk(rel);
+          return entry.stat.isFile() ? [{ name: rel, size: entry.stat.size }] : [];
+        });
+      };
+      return walk().filter(f => !f.name.startsWith('.oficina/adjuntos/'));
     },
     readFileB64: ({ sandbox, name }) => {
-      const base = path.join(dataDir, 'sandbox', sandbox);
-      const f = path.resolve(base, name);
-      if (!f.startsWith(base + path.sep) || !fs.existsSync(f)) throw new Error('Archivo no encontrado');
-      if (fs.statSync(f).size > 25e6) throw new Error('Archivo demasiado grande (>25 MB)');
-      return fs.readFileSync(f).toString('base64');
+      const base = sandboxBase(sandbox);
+      if (!base) throw new Error('Archivo no encontrado');
+      let f;
+      try { f = sandboxEntry(base, name); }
+      catch (e) { if (e.code === 'ENOENT') throw new Error('Archivo no encontrado'); throw e; }
+      if (!f.stat.isFile()) throw new Error('Archivo no encontrado');
+      const noFollow = process.platform === 'win32' ? 0 : (fs.constants.O_NOFOLLOW || 0);
+      const fd = fs.openSync(f.path, fs.constants.O_RDONLY | noFollow);
+      try {
+        const opened = fs.fstatSync(fd);
+        if (!opened.isFile()) throw new Error('Archivo no encontrado');
+        // Revalidar tras abrir evita aceptar un enlace cambiado entre lstat y open.
+        const current = sandboxEntry(base, name);
+        if (!current.stat.isFile() || opened.dev !== current.stat.dev || opened.ino !== current.stat.ino) throw new Error('Ruta sandbox modificada durante la lectura');
+        if (opened.size > 25e6) throw new Error('Archivo demasiado grande (>25 MB)');
+        return fs.readFileSync(fd).toString('base64');
+      } finally { fs.closeSync(fd); }
     },
     // adjuntos: files = [{id, name, size, url?|src?}] → .oficina/adjuntos/<name>; fetcher lo aporta quien llama
     probe: async ({ exe, pre_args = [] }) => {
@@ -354,14 +441,26 @@ $d = New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Console]::In.ReadT
   ops.putFiles = async ({ cwd, files }, get) => {
     const dir = path.join(cwd, '.oficina', 'adjuntos');
     fs.mkdirSync(dir, { recursive: true });
-    const out = [];
-    for (const f of files) {
-      const name = path.basename(f.name).replace(/[<>:"|?*\x00-\x1f]/g, '_');
+    const refs = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const bytes = Buffer.from(await get(f));
+      const rawName = String(f.name ?? 'adjunto').replace(/\\/g, '/').split('/').pop();
+      let name = rawName.replace(/[<>:"|?*\x00-\x1f]/g, '_').replace(/[ .]+$/g, '_');
+      if (!name || name === '.' || name === '..') name = 'adjunto';
+      const ext = path.posix.extname(name).slice(0, 48);
+      const stem = ext ? name.slice(0, -path.posix.extname(name).length) : name;
+      const identity = f.id == null || String(f.id) === ''
+        ? crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 20)
+        : String(f.id).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 48);
+      const suffix = `__${identity || crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 20)}`;
+      const maxStem = Math.max(1, 180 - suffix.length - ext.length);
+      name = `${stem.slice(0, maxStem)}${suffix}${ext}`;
       const dest = path.join(dir, name);
-      if (!(fs.existsSync(dest) && fs.statSync(dest).size === f.size)) fs.writeFileSync(dest, await get(f));
-      out.push('.oficina/adjuntos/' + name);
+      fs.writeFileSync(dest, bytes);
+      refs.push('.oficina/adjuntos/' + name);
     }
-    return out;
+    return refs;
   };
 
   // Lanza un agente. onEvent({t:'out',line}|{t:'err',text}|{t:'exit',code,error})
