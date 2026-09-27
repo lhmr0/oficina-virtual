@@ -5,6 +5,7 @@ const { spawn, execFile, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const https = require('node:https');
 
 // cfg: { dataDir, strict, roots[] } — strict = agente de campo: solo CLIs conocidos y rutas bajo roots
 function create(cfg) {
@@ -48,6 +49,15 @@ function create(cfg) {
   const slug = s => String(s).toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
   const sh = (exe, args, timeout = 20000) => new Promise(res => execFile(exe, args, { timeout, windowsHide: true, encoding: 'utf8', maxBuffer: 20e6 },
     (err, out, errOut) => res({ err, out: (out || '').trim(), errOut: (errOut || '').trim() })));
+  // protobuf-JSON omite los ceros: remainingFraction ausente = cuota agotada
+  const lsUserStatus = (port, token) => new Promise(res => {
+    const body = JSON.stringify({ metadata: { ideName: 'antigravity', extensionName: 'antigravity', locale: 'es' } });
+    const r = https.request({ host: '127.0.0.1', port, path: '/exa.language_server_pb.LanguageServerService/GetUserStatus', method: 'POST', rejectUnauthorized: false, timeout: 5000, // certificado autofirmado del propio language_server
+      headers: { 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1', 'X-Codeium-Csrf-Token': token, 'Content-Length': Buffer.byteLength(body) } }, s => {
+      let d = ''; s.on('data', c => d += c); s.on('end', () => { try { res(s.statusCode === 200 ? JSON.parse(d).userStatus : null); } catch { res(null); } });
+    });
+    r.on('error', () => res(null)); r.on('timeout', () => r.destroy()); r.end(body);
+  });
   const resolveExe = exe => { const e = expand(exe); return e === 'node' ? process.execPath : e; };
 
   // ---------- operaciones (todas serializables: entran y salen JSON) ----------
@@ -248,6 +258,40 @@ function create(cfg) {
         return res;
       }
       return res;
+    },
+    // `codex exec --json` no informa límites; el rollout de la sesión (~/.codex/sessions/…/rollout-*-<thread>.jsonl) sí:
+    // cada token_count trae rate_limits { primary: 5 h, secondary: semanal }. Devuelve el último.
+    codexLimits: ({ thread_id }) => {
+      if (!/^[\w-]{8,}$/.test(thread_id || '')) return null;
+      const dir = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
+      if (!fs.existsSync(dir)) return null;
+      // ponytail: recorre todo sessions/ (cientos de archivos); indexar por fecha si crece a decenas de miles
+      const f = fs.readdirSync(dir, { recursive: true }).map(String).find(p => p.endsWith(`-${thread_id}.jsonl`));
+      if (!f) return null;
+      const lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n');
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].includes('"rate_limits"')) continue;
+        try { const rl = JSON.parse(lines[i]).payload?.rate_limits; if (rl) return rl; } catch {}
+      }
+      return null;
+    },
+    // Antigravity: agy no informa su cuota; la app de escritorio sí, vía su language_server local (GetUserStatus).
+    // El token CSRF se toma de la línea de comandos del proceso y solo se usa contra 127.0.0.1: no se guarda ni sale de la máquina.
+    agyQuota: async () => {
+      if (process.platform !== 'win32') return null; // ponytail: solo Windows (Get-CimInstance); en mac/linux sería `ps -o args`
+      const ps = await sh('powershell', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process -Filter \"Name='language_server.exe'\" | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"], 15000);
+      const ns = await sh('netstat', ['-ano', '-p', 'tcp'], 15000);
+      for (const l of ps.out.split(/\r?\n/)) {
+        const [pid, cl = ''] = l.split('\t'), token = cl.match(/--csrf_token[= ](\S+)/)?.[1];
+        if (!token || !/antigravity/i.test(cl)) continue;
+        const ports = new Set([...ns.out.matchAll(new RegExp(`127\\.0\\.0\\.1:(\\d+)\\s+\\S+\\s+LISTENING\\s+${pid}\\b`, 'g'))].map(m => m[1]));
+        for (const port of ports) {
+          const u = await lsUserStatus(port, token);
+          if (u) return { plan: u.planStatus?.planInfo?.planName || null,
+            models: (u.cascadeModelConfigData?.clientModelConfigs || []).filter(m => m.quotaInfo).map(m => ({ label: m.label, remaining: m.quotaInfo.remainingFraction ?? 0, resets: m.quotaInfo.resetTime || null })) };
+        }
+      }
+      return null;
     },
     toast: ({ title, body, url }) => {
       if (process.platform !== 'win32') return false;

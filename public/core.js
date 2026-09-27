@@ -1,7 +1,7 @@
 // Núcleo del cliente: estado, API, helpers, widgets, modal, hologramas y sonido
 import { sprite, agentSprite } from './sprites.js';
 
-export const S = { boot: null, project: +localStorage.getItem('ov_project') || null, unseen: 0, sound: localStorage.getItem('ov_sound') !== '0', theme: localStorage.getItem('ov_theme') || 'oscuro' };
+export const S = { boot: null, project: +localStorage.getItem('ov_project') || null, stationFilter: localStorage.getItem('ov_station_filter') || '', unseen: 0, sound: localStorage.getItem('ov_sound') !== '0', theme: localStorage.getItem('ov_theme') || 'oscuro' };
 
 export function applyTheme(theme) {
   const isLight = (theme === 'blanco' || theme === 'crema');

@@ -1,7 +1,7 @@
 // Arranque, login, shell, router, tiempo real (SSE) y bandeja de pendientes
 import { S, get, post, put, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme } from './core.js';
 import { sprite } from './sprites.js';
-import { VIEWS, taskForm, missionForm } from './views.js';
+import { VIEWS, taskForm, missionForm, approveDialog } from './views.js';
 
 const app = document.getElementById('app');
 let current = null;
@@ -50,14 +50,36 @@ export function setProject(id) {
   localStorage.setItem('ov_project', S.project || '');
   const s = $('#projSel'); if (s) s.value = S.project || '';
 }
-const MENU = [['proyectos', 'Proyectos'], ['kanban', 'Kanban'], ['cantina', 'Cantina'], ['consejo', 'Consejo Jedi'], ['archivos', 'Archivos Jedi'], ['puente', 'Puente de Mando'], ['config', 'Configuración']];
+// iconos de línea (24×24, trazo) para el dock y el menú
+const ICONS = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
+  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  folder: '<path d="M3 6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  council: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/>',
+  archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/>',
+  gauge: '<path d="m12 14 4-4"/><path d="M3.5 18a10 10 0 1 1 17 0"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  rocket: '<path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2M9 13l2 2M14 4c3-1 6-1 6-1s0 3-1 6l-7 7-5-5z"/><circle cx="15" cy="9" r="1.5"/>',
+  moon: '<path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/>',
+  sound: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/>',
+  logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l-5-5 5-5M5 12h11"/>',
+};
+const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
+const MENU = [['proyectos', 'Proyectos', 'folder'], ['kanban', 'Kanban', 'board'], ['cantina', 'Cantina', 'chat'], ['consejo', 'Consejo Jedi', 'council'], ['archivos', 'Archivos Jedi', 'archive'], ['puente', 'Puente de Mando', 'gauge'], ['config', 'Configuración', 'gear']];
 const WIDE = ['proyectos', 'kanban', 'consejo', 'archivos', 'puente', 'config'];
 function shell() {
   const me = S.boot.me;
   app.innerHTML = `
   <div class="hud-tl">
-    <a class="logo" href="#/estacion" title="Volver al mapa">★ OFICINA</a>
+    <a class="logo" href="#/estacion" title="Volver al mapa">★ <span>OFICINA</span></a>
     <select id="projSel" aria-label="Proyecto que se muestra en el mapa">${opts(S.boot.projects.map(p => [p.id, p.name]), S.project || '', 'Todos los proyectos')}</select>
+    <select id="stSel" aria-label="Filtrar la estación por agente o área"><option value="">Todos los agentes y áreas</option>
+      <optgroup label="Agente">${opts(S.boot.agents.map(a => ['a:' + a.id, a.name]), S.stationFilter)}</optgroup>
+      <optgroup label="Área">${opts(S.boot.areas.map(a => ['r:' + a.id, a.name]), S.stationFilter)}</optgroup></select>
   </div>
   <div id="qpaused" class="queue-paused" ${S.boot.queue_paused ? '' : 'hidden'}>⚠ Cola en pausa (Orden 66) ${isAdmin() ? '<button class="btn sm y" id="resumeQ">Reanudar cola</button>' : ''}</div>
   <div id="map" class="map"></div>
@@ -66,25 +88,28 @@ function shell() {
     <main id="view" tabindex="-1"></main>
   </aside>
   <nav class="dock" aria-label="Acciones">
-    <button class="dock-me" id="meBtn" aria-haspopup="menu" aria-expanded="false">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 2)}<span>${h(me.name.split(' ')[0])}</span></button>
-    ${canEdit() ? '<button id="dNew" class="dock-y">+ Tarea</button>' : ''}
-    <a href="#/kanban">Kanban</a>
-    <a href="#/cantina">Cantina</a>
-    <button id="dFind" title="Buscar y navegar (Ctrl+K)">Buscar <kbd>Ctrl K</kbd></button>
-    <button class="bell" id="bellBtn" aria-label="Bandeja">Bandeja<span class="n" id="bellN" hidden></span></button>
+    <button class="dock-me" id="meBtn" aria-haspopup="menu" aria-expanded="false" aria-label="Menú de ${h(me.name)}">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 2.4)}<span>${h(me.name.split(' ')[0])}</span></button>
+    <a href="#/kanban" data-nav="kanban">${ic('board')}<span>Kanban</span></a>
+    <a href="#/cantina" data-nav="cantina">${ic('chat')}<span>Cantina</span></a>
+    ${canEdit() ? `<button id="dNew" class="dock-y">${ic('plus')}<span>Tarea</span></button>` : ''}
+    <button id="dFind" title="Buscar y navegar (Ctrl+K)">${ic('search')}<span>Buscar</span><kbd>Ctrl K</kbd></button>
+    <button class="bell" id="bellBtn">${ic('bell')}<span>Bandeja</span><span class="n" id="bellN" hidden></span></button>
   </nav>
   <div class="menu" id="meMenu" role="menu" hidden>
-    <div class="menu-head">${h(me.name)}<br><small>${h(S.boot.users.find(u => u.id === me.id)?.rank || '')} · ${h(me.role)}</small></div>
-    <a role="menuitem" href="#/config/perfil">Mi perfil</a>
-    ${MENU.filter(([k]) => k !== 'config' || isAdmin()).map(([k, l]) => `<a role="menuitem" href="#/${k}">${l}</a>`).join('')}
-    ${canEdit() ? '<button role="menuitem" id="mMission">Nueva misión</button>' : ''}
-    <button role="menuitem" id="themeBtn">Tema: ${S.theme === 'blanco' ? 'crema (Tatooine)' : 'oscuro (espacio)'}</button>
-    <button role="menuitem" id="soundBtn">Sonido: ${S.sound ? 'sí' : 'no'}</button>
-    <button role="menuitem" id="logoutBtn">Salir</button>
+    <div class="menu-head">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3)}<div><b>${h(me.name)}</b><small>${h(S.boot.users.find(u => u.id === me.id)?.rank || '')} · ${h(me.role)}</small></div></div>
+    <a role="menuitem" href="#/config/perfil">${ic('user')}Mi perfil</a>
+    ${canEdit() ? `<button role="menuitem" id="mMission">${ic('rocket')}Nueva misión</button>` : ''}
+    <div class="menu-sep">Secciones</div>
+    ${MENU.filter(([k]) => k !== 'config' || isAdmin()).map(([k, l, i]) => `<a role="menuitem" href="#/${k}" data-nav="${k}">${ic(i)}${l}</a>`).join('')}
+    <div class="menu-sep">Preferencias</div>
+    <button role="menuitemcheckbox" id="themeBtn" aria-checked="${S.theme !== 'blanco'}">${ic('moon')}Tema oscuro<span class="switch"></span></button>
+    <button role="menuitemcheckbox" id="soundBtn" aria-checked="${S.sound}">${ic('sound')}Sonido<span class="switch"></span></button>
+    <button role="menuitem" id="logoutBtn" class="danger">${ic('logout')}Salir</button>
   </div>
   <dialog id="palette" class="palette" aria-label="Buscar"><input id="palQ" placeholder="Busca una tarea, proyecto o sección…" autocomplete="off"><div id="palList" role="listbox"></div></dialog>
   <aside class="inbox" id="inbox" hidden></aside>`;
   $('#projSel').onchange = e => { setProject(+e.target.value); mapSoon(0); if (current?.name === 'kanban') go('#/kanban/' + (S.project || 'todos')); };
+  $('#stSel').onchange = e => { S.stationFilter = e.target.value; localStorage.setItem('ov_station_filter', S.stationFilter); mapSoon(0); };
   $('#drawerX').onclick = closeDrawer;
   const menu = $('#meMenu');
   const placeMenu = () => {
@@ -103,7 +128,7 @@ function shell() {
   $('#themeBtn').onclick = async e => {
     const next = S.theme === 'blanco' ? 'oscuro' : 'blanco';
     applyTheme(next);
-    e.target.textContent = 'Tema: ' + (next === 'blanco' ? 'crema (Tatooine)' : 'oscuro (espacio)');
+    e.currentTarget.setAttribute('aria-checked', next !== 'blanco');
     if (S.sound) beep('ok');
     try {
       const prefs = S.boot?.me?.notif_prefs || {};
@@ -112,7 +137,7 @@ function shell() {
     } catch {}
     if (current?.name === 'config') refreshSoon();
   };
-  $('#soundBtn').onclick = e => { S.sound = !S.sound; localStorage.setItem('ov_sound', S.sound ? '1' : '0'); e.target.textContent = 'Sonido: ' + (S.sound ? 'sí' : 'no'); if (S.sound) beep('ok'); };
+  $('#soundBtn').onclick = e => { S.sound = !S.sound; localStorage.setItem('ov_sound', S.sound ? '1' : '0'); e.currentTarget.setAttribute('aria-checked', S.sound); if (S.sound) beep('ok'); };
   $('#mMission')?.addEventListener('click', () => { toggleMenu(false); missionForm(); });
   $('#dNew')?.addEventListener('click', () => taskForm());
   $('#dFind').onclick = openPalette;
@@ -179,6 +204,7 @@ export async function route(soft = false) {
   if (!S.boot) return start();
   const name = VIEWS[r.name] ? r.name : 'estacion';
   const drawer = $('#drawer');
+  $$('[data-nav]').forEach(a => a.dataset.nav === name ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
   if (name === 'estacion') {
     current = { ...r, name, view: VIEWS.estacion };
     drawer.hidden = true; document.body.classList.remove('drawer-open');
@@ -283,20 +309,29 @@ async function toggleInbox() {
 }
 function renderInbox(x) {
   const box = $('#inbox');
-  const item = (link, title, sub) => `<div class="inbox-item" data-link="${h(link)}"><div>${title}</div><small>${sub}</small></div>`;
+  const item = (link, title, sub, extra = '') => `<div class="inbox-item" data-link="${h(link)}"><div>${title}</div><small>${sub}</small>${canEdit() ? extra : ''}</div>`;
+  // responder o aprobar desde la bandeja, sin abrir la tarea
+  const reply = url => `<form class="inbox-reply" data-reply="${url}"><input name="text" placeholder="Responder…" aria-label="Respuesta" autocomplete="off" required><button class="btn sm y">Enviar</button></form>`;
   box.innerHTML = `<div class="row"><h2 style="margin:0">Bandeja</h2><button class="btn sm ghost right" id="inboxClose">Cerrar</button></div>
     ${'Notification' in window && Notification.permission !== 'granted' ? '<button class="btn sm y" id="deskN">Activar notificaciones de escritorio</button>' : ''}
     <h3>Permisos (${x.permissions.length})</h3>${x.permissions.map(p => `<div class="perm">${h(JSON.stringify(p.input).slice(0, 200))}<div class="row"><button class="btn sm g" data-perm="${h(p.request_id)}" data-allow="1">Aprobar</button><button class="btn sm r" data-perm="${h(p.request_id)}" data-allow="0">Denegar</button></div></div>`).join('') || '<div class="empty">—</div>'}
-    <h3>Consultas de agentes</h3>${[...x.tasks.filter(t => t.status === 'esperando').map(t => item(`#/tarea/${t.id}`, `#${t.id} ${h(t.title)}`, `${agentChip(t.agent_id, 1)} ${ago(t.updated_at)}`)),
-      ...x.chats.map(c => item(`#/cantina/${c.id}`, `💬 ${h(c.title)}`, `${agentChip(c.agent_id, 1)} ${ago(c.updated_at)}`))].join('') || '<div class="empty">Nadie pregunta nada</div>'}
-    <h3>Revisiones</h3>${x.tasks.filter(t => t.status === 'revision').map(t => item(`#/tarea/${t.id}`, `#${t.id} ${h(t.title)}`, `${chip('revision')} ${ago(t.updated_at)}`)).join('') || '<div class="empty">—</div>'}
+    <h3>Consultas de agentes</h3>${[...x.tasks.filter(t => t.status === 'esperando').map(t => item(`#/tarea/${t.id}`, `#${t.id} ${h(t.title)}`, `${agentChip(t.agent_id, 1)} ${ago(t.updated_at)}`, reply(`/api/tasks/${t.id}/reply`))),
+      ...x.chats.map(c => item(`#/cantina/${c.id}`, `💬 ${h(c.title)}`, `${agentChip(c.agent_id, 1)} ${ago(c.updated_at)}`, reply(`/api/conversations/${c.id}/reply`)))].join('') || '<div class="empty">Nadie pregunta nada</div>'}
+    <h3>Revisiones</h3>${x.tasks.filter(t => t.status === 'revision').map(t => item(`#/tarea/${t.id}`, `#${t.id} ${h(t.title)}`, `${chip('revision')} ${ago(t.updated_at)}`, `<div class="row"><button class="btn sm g" data-approve="${t.id}">✔ Aprobar</button></div>`)).join('') || '<div class="empty">—</div>'}
     <h3>Relevos / fallos</h3>${x.tasks.filter(t => ['pausada_cuota', 'fallida'].includes(t.status)).map(t => item(`#/tarea/${t.id}`, `#${t.id} ${h(t.title)}`, `${chip(t.status)} ${ago(t.updated_at)}`)).join('') || '<div class="empty">—</div>'}
     <div class="row"><h3>Notificaciones</h3><button class="btn sm ghost right" id="seenAll">Marcar leídas</button></div>
     ${x.notifications.map(n => item(n.link || '#/estacion', `${n.seen ? '' : '● '}${h(n.title)}`, `${h(n.body).slice(0, 120)} · ${ago(n.at)}`)).join('')}`;
   $('#inboxClose').onclick = () => box.hidden = true;
   $('#deskN')?.addEventListener('click', async () => { await Notification.requestPermission(); renderInbox(x); });
   $('#seenAll').onclick = async () => { await post('/api/notifications/seen'); inboxCount(); };
-  $$('[data-link]', box).forEach(i => i.onclick = () => { location.hash = i.dataset.link; });
+  $$('[data-link]', box).forEach(i => i.onclick = e => { if (!e.target.closest('form,button')) location.hash = i.dataset.link; });
+  $$('[data-approve]', box).forEach(b => b.onclick = async () => { try { approveDialog((await get('/api/tasks/' + b.dataset.approve)).task); } catch (err) { fail(err); } });
+  box.onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target, text = f.text.value.trim();
+    if (!text) return;
+    try { await post(f.dataset.reply, { text }); holo('Respuesta enviada', text); f.closest('.inbox-item').remove(); inboxCount(); } catch (err) { fail(err); }
+  };
 }
 
 // ---------- arranque ----------

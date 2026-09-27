@@ -668,10 +668,12 @@ r('POST', '/api/agents/:id/detect-models', 'admin', async ({ params }) => {
   const a = one('select * from agents where id=?', +params.id);
   return { models: await host.call(host.defaultMachine(), 'detectModels', { adapter: a.adapter, exe: a.exe, pre_args: J(a.pre_args, []) }) };
 });
-r('POST', '/api/areas', 'admin', ({ body, user }) => { need(body.name, 'Nombre requerido'); const id = insert('areas', { name: body.name, alias: body.alias || body.name, icon: body.icon || 'radar', color: body.color || '#ffe81f', default_agent_id: body.default_agent_id || null, fallback_chain: JSON.stringify(body.fallback_chain || []), auto_fallback: +!!body.auto_fallback }); log(user.id, 'config', id, 'crear_area'); return { id }; });
+const ROOMS = ['doc', 'dev', 'ana'];
+r('POST', '/api/areas', 'admin', ({ body, user }) => { need(body.name, 'Nombre requerido'); const id = insert('areas', { name: body.name, alias: body.alias || body.name, icon: body.icon || 'radar', color: body.color || '#ffe81f', default_agent_id: body.default_agent_id || null, fallback_chain: JSON.stringify(body.fallback_chain || []), auto_fallback: +!!body.auto_fallback, room: ROOMS.includes(body.room) ? body.room : '' }); log(user.id, 'config', id, 'crear_area'); return { id }; });
 r('PUT', '/api/areas/:id', 'admin', ({ params, body, user }) => {
   const p = {}; for (const k of ['name', 'alias', 'icon', 'color', 'default_agent_id', 'auto_fallback']) if (body[k] !== undefined) p[k] = typeof body[k] === 'boolean' ? +body[k] : body[k];
   if (body.fallback_chain) p.fallback_chain = JSON.stringify(body.fallback_chain.map(Number));
+  if (body.room !== undefined) p.room = ROOMS.includes(body.room) ? body.room : '';
   update('areas', +params.id, p); log(user.id, 'config', +params.id, 'editar_area', p); return { ok: true };
 });
 r('DELETE', '/api/areas/:id', 'admin', ({ params, user }) => { update('areas', +params.id, { deleted_at: now() }); log(user.id, 'config', +params.id, 'eliminar_area'); return { ok: true }; });
@@ -725,7 +727,7 @@ r('POST', '/api/proposals/:id/detail', 'operador', ({ params, user }) => {
 
 // ---------- HTTP ----------
 const RAW = Symbol('raw');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 const PUB = path.join(__dirname, 'public');
 function readBody(req, raw) {
   const max = raw ? 25e6 : 5e6;

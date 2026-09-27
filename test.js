@@ -82,6 +82,48 @@ function gitRepo(name) {
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log('✔', name); } catch (e) { failed++; console.error('✘', name, '\n  ', e.stack || e); } };
 
+  // un error de sintaxis en un módulo del frontend deja la app en negro sin que ninguna API falle
+  await t('frontend: los módulos de public/ compilan', async () => {
+    for (const f of fs.readdirSync(path.join(__dirname, 'public')).filter(f => f.endsWith('.js')))
+      execFileSync(process.execPath, ['--check', '--input-type=module'], { input: fs.readFileSync(path.join(__dirname, 'public', f)), stdio: ['pipe', 'ignore', 'pipe'] });
+  });
+  await t('codex: límites 5h/semanal leídos del rollout de la sesión', async () => {
+    const home = path.join(TMP, 'codex-home'), day = path.join(home, 'sessions', '2026', '09', '26');
+    fs.mkdirSync(day, { recursive: true });
+    const tc = pct => JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', rate_limits: { limit_id: 'codex', primary: { used_percent: pct, window_minutes: 300, resets_at: 1790471863 }, secondary: { used_percent: 12, window_minutes: 10080, resets_at: 1791058663 } } } });
+    fs.writeFileSync(path.join(day, 'rollout-2026-09-26T19-08-08-abc12345-6789.jsonl'), [JSON.stringify({ type: 'session_meta' }), tc(10), tc(42), ''].join('\n'));
+    const prev = process.env.CODEX_HOME; process.env.CODEX_HOME = home;
+    try {
+      const ops = require('./hostops').create({ dataDir: TMP }).ops;
+      const rl = ops.codexLimits({ thread_id: 'abc12345-6789' });
+      assert.equal(rl.primary.used_percent, 42, 'toma el último token_count');
+      assert.equal(rl.secondary.used_percent, 12);
+      assert.equal(ops.codexLimits({ thread_id: '../../etc' }), null);
+      assert.equal(ops.codexLimits({ thread_id: 'no-existe-123' }), null);
+    } finally { if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev; }
+  });
+  await t('antigravity: cuota por modelo → ventana de 5 h (modelo pedido o el más consumido)', async () => {
+    const q = { models: [{ label: 'Gemini 3.8 Flash (High)', remaining: 0.75, resets: '2026-09-27T04:46:48Z' }, { label: 'Claude Opus 4.6 (Thinking)', remaining: 0.1, resets: '2026-09-27T05:11:32Z' }] };
+    assert.deepEqual(R.agyLimits(q, 'gemini-3.8-flash-high'), [{ win: 'five_hour', pct: 25, resets: '2026-09-27T04:46:48Z' }]);
+    assert.equal(Math.round(R.agyLimits(q, 'otro')[0].pct), 90);
+    assert.deepEqual(R.agyLimits(null, 'x'), []);
+  });
+  await t('áreas: tipo de sala sembrado, validado y editable', async () => {
+    cookie = ''; await api('POST', '/api/login', { username: 'leia', password: 'secreto1' });
+    const areas = (await api('GET', '/api/bootstrap')).areas;
+    assert.equal(areas.find(a => a.name === 'Desarrollo').room, 'dev');
+    const { id } = await api('POST', '/api/areas', { name: 'QA', room: 'hackeo' });
+    assert.equal(one('select room from areas where id=?', id).room, '');
+    await api('PUT', '/api/areas/' + id, { room: 'ana' });
+    assert.equal(one('select room from areas where id=?', id).room, 'ana');
+    await api('DELETE', '/api/areas/' + id);
+  });
+  await t('PWA: manifest servido sin sesión y con iconos que existen', async () => {
+    const r = await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`);
+    assert.equal(r.headers.get('content-type'), 'application/manifest+json');
+    for (const i of (await r.json()).icons) assert.equal((await fetch(`http://127.0.0.1:${PORT}${i.src}`)).headers.get('content-type'), 'image/png', i.src);
+  });
+
   await t('login admin y roles (observador no ejecuta)', async () => {
     cookie = ''; await api('POST', '/api/login', { username: 'r2', password: 'secreto1' });
     assert.equal((await api('GET', '/api/me')).role, 'observador');

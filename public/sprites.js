@@ -117,20 +117,6 @@ const SHAPES = {
     '....KKKK....',
   ],
   // dispensador de agua Gather (water cooler)
-  cooler: [
-    '....HHHH....',
-    '...HHHHHH...',
-    '...HHHHHH...',
-    '....HHHH....',
-    '....WWWW....',
-    '....WKRW....',
-    '....WWWW....',
-    '....WWWW....',
-    '....WWWW....',
-    '....WWWW....',
-    '...KKKKKK...',
-    '..KK....KK..',
-  ],
   // Maestro Yoda
   yoda: [
     'L..........L',
@@ -220,19 +206,6 @@ const SHAPES = {
     'KKKKKKKKKK..',
   ],
   // pedestal de holocron Jedi
-  pedestal: [
-    '....HH....',
-    '...HHHH...',
-    '....HH....',
-    '..........',
-    '..KKKKKK..',
-    '..KDDDDDK.',
-    '...KDDDK..',
-    '...KDDDK..',
-    '..KKDDDKK.',
-    '.KKDDDDDKK',
-    'KKKKKKKKKK',
-  ],
   // planta frondosa / ficus
   bigplant: [
     '....LLL.....',
@@ -338,16 +311,6 @@ const SHAPES = {
     'KKKK....KKKK',
   ],
   // sofá lounge de la cantina
-  couch: [
-    '.KKKKKKKKKKKKKK.',
-    'KNNNNNNNNNNNNNNK',
-    'KNNNNNNNNNNNNNNK',
-    'KNNNNNNNNNNNNNNK',
-    'KKKKKKKKKKKKKKKK',
-    'KNNNNNNNNNNNNNNK',
-    'KKKKKKKKKKKKKKKK',
-    '.KK..........KK.',
-  ],
   // banco de trabajo y herramientas del hangar
   workbench: [
     'KKKKKKKKKKKKKKKK',
@@ -363,18 +326,6 @@ const SHAPES = {
     'KKK..........KKK',
   ],
   // base de recarga para droides
-  droid_dock: [
-    '..KKKKKK..',
-    '.KDDDDDDK.',
-    'KDGLLLLGDK',
-    'KDGGGGGGDK',
-    'KD.HH..HDK',
-    'KD.HH..HDK',
-    'KDDDDDDDDK',
-    'KKKKKKKKKK',
-    '.KGGGGGGK.',
-    'KKKKKKKKKK',
-  ],
   // pilar de holocrones y datacrones del templo
   archive_pillar: [
     '..KKKKKK..',
@@ -393,29 +344,7 @@ const SHAPES = {
     'KKKKKKKKKK',
   ],
   // silla del consejo / reunión
-  chair: [
-    '..KKKKKK..',
-    '.KDDDDDDK.',
-    '.KDDDDDDK.',
-    '.KDDDDDDK.',
-    'KKKKKKKKKK',
-    'KNNNNNNNNK',
-    'KKKKKKKKKK',
-    '.KK....KK.',
-    '.KK....KK.',
-    '.KK....KK.',
-  ],
   // ventanal de observación estelar
-  star_window: [
-    'KKKKKKKKKKKKKKKK',
-    'KDDDDDDDDDDDDDDK',
-    'KDKKKKKKKKKKKKDK',
-    'KDK.W...Y...W.DK',
-    'KDK.....H.....DK',
-    'KDK..W....W...DK',
-    'KDDDDDDDDDDDDDDK',
-    'KKKKKKKKKKKKKKKK',
-  ],
   // lámpara de mamparo para pasillos
   bulkhead_lamp: [
     '.KKKK.',
@@ -426,16 +355,6 @@ const SHAPES = {
     '..KK..',
   ],
   // cubo de reciclaje astromech
-  trash: [
-    '.KKKKKK.',
-    'KDDDDDDK',
-    'KKKKKKKK',
-    '.KDDDDK.',
-    '.KDGGLK.',
-    '.KDDDDK.',
-    '.KDDDDK.',
-    '.KKKKKK.',
-  ],
   // taza humeante de caf
   mug: [
     '..W.W..',

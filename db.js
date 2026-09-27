@@ -88,6 +88,8 @@ addCol('conversations', 'machine_id', 'integer');
 addCol('users', 'email', 'text');
 addCol('agents', 'prices', "text default '{}'");
 addCol('agents', 'model_efforts', "text default '{}'");
+addCol('areas', 'room', 'text'); // sala del mapa: doc | dev | ana | '' (solo en "Más salas"); antes se deducía del nombre
+db.exec(`update areas set room = case when lower(name) like '%doc%' then 'doc' when lower(name) like '%desarr%' then 'dev' when lower(name) like '%an_lisis%' then 'ana' else '' end where room is null`);
 fs.mkdirSync(path.join(DATA0, 'attachments'), { recursive: true });
 
 const now = () => new Date().toISOString();
@@ -129,8 +131,8 @@ const setSetting = (key, v) => run('insert into settings(key,value) values(?,?) 
 
 // ---------- seed ----------
 if (!one('select 1 from areas limit 1')) {
-  const a = [['Documentación', 'Archivo Jedi', 'holocron', '#4fa3ff'], ['Desarrollo', 'Hangar', 'xwing', '#ff7a1a'], ['Análisis', 'Sala de Mando', 'radar', '#3ddc84']];
-  for (const [name, alias, icon, color] of a) insert('areas', { name, alias, icon, color });
+  const a = [['Documentación', 'Archivo Jedi', 'holocron', '#4fa3ff', 'doc'], ['Desarrollo', 'Hangar', 'xwing', '#ff7a1a', 'dev'], ['Análisis', 'Sala de Mando', 'radar', '#3ddc84', 'ana']];
+  for (const [name, alias, icon, color, room] of a) insert('areas', { name, alias, icon, color, room });
 }
 if (!one('select 1 from agents limit 1')) {
   const Q = ['usage limit', 'rate limit', '\\b429\\b', 'quota', 'insufficient credits', 'credit balance', 'try again at', 'limit reached'];

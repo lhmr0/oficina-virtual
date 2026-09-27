@@ -165,22 +165,32 @@ const kanbanCard = (t, showProject = true) => {
     <div class="t">${h(t.title)}</div>
     <div class="meta">${t.executor === 'humano' ? `${sprite('rebel', '#ff8c42', 1)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${agentSprite(a, 1)}${h(a?.name || '—')} <span>${h(t.model || '')}</span>`}
     ${t.status === 'en_curso' ? `<span class="chip st-en_curso">⏱ ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}${t.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : ''}
-    ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div></div>`;
+    ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div>
+    ${canEdit() ? `<select class="kmove" aria-label="Mover #${t.id} a">${opts(COLS.filter(([k]) => k !== 'atascadas' && k !== t.status), '', 'Mover a…')}</select>` : ''}</div>`;
 };
 
+// mover una tarea (arrastrar en escritorio, "Mover a…" en pantallas táctiles, donde el arrastre HTML5 no funciona)
+async function moveTask(t, status, kanban_order) {
+  if (status === 'en_curso' && t.executor === 'agente' && t.status !== 'en_curso' && !await confirmBox(`¿Ejecutar #${t.id} con ${agent(t.agent_id)?.name || 'el agente'}?`, 'Ejecutar')) return refreshSoon(0);
+  try { await post(`/api/tasks/${t.id}/move`, { status: status === t.status ? undefined : status, kanban_order }); } catch (err) { fail(err); }
+  refreshSoon(0);
+}
+// con propiedades on* y no addEventListener: el mapa reutiliza el mismo elemento en cada refresco
 function bindKanbanDrag(root, getTasks) {
   let dragId = null;
-  root.addEventListener('dragstart', e => {
+  const all = () => typeof getTasks === 'function' ? getTasks() : getTasks;
+  root.onchange = e => { const s = e.target.closest('.kmove'); const t = s && all().find(x => x.id === +s.closest('.kcard').dataset.id); if (t && s.value) moveTask(t, s.value); };
+  root.ondragstart = e => {
     const c = e.target.closest('.kcard');
     if (!c) return;
     dragId = +c.dataset.id;
     c.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
-  });
-  root.addEventListener('dragend', e => {
+  };
+  root.ondragend = e => {
     e.target.closest?.('.kcard')?.classList.remove('dragging');
     $$('.kcol', root).forEach(x => x.classList.remove('over'));
-  });
+  };
   $$('.kcol', root).forEach(col => {
     col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
     col.addEventListener('dragleave', () => col.classList.remove('over'));
@@ -189,24 +199,14 @@ function bindKanbanDrag(root, getTasks) {
       col.classList.remove('over');
       if (!dragId) return;
       const k = col.dataset.col;
-      const all = typeof getTasks === 'function' ? getTasks() : getTasks;
       const cards = $$('.kcard', col).filter(c => +c.dataset.id !== dragId);
       const after = cards.find(c => e.clientY < c.getBoundingClientRect().top + c.offsetHeight / 2);
-      const ord = id => all.find(t => t.id === +id)?.kanban_order ?? 0;
+      const ord = id => all().find(t => t.id === +id)?.kanban_order ?? 0;
       const i = after ? cards.indexOf(after) : cards.length;
       const prev = i > 0 ? ord(cards[i - 1].dataset.id) : (cards[0] ? ord(cards[0].dataset.id) - 1000 : Date.now());
       const next = after ? ord(after.dataset.id) : prev + 2000;
-      const t = all.find(x => x.id === dragId);
-      if (!t) return;
-      const status = k === 'atascadas' ? t.status : k;
-      if (status === 'en_curso' && t.executor === 'agente' && t.status !== 'en_curso' && !await confirmBox(`¿Ejecutar #${t.id} con ${agent(t.agent_id)?.name || 'el agente'}?`, 'Ejecutar')) return;
-      try {
-        await post(`/api/tasks/${dragId}/move`, { status: status === t.status ? undefined : status, kanban_order: (prev + next) / 2 });
-        refreshSoon(0);
-      } catch (err) {
-        fail(err);
-        refreshSoon(0);
-      }
+      const t = all().find(x => x.id === dragId);
+      if (t) moveTask(t, k === 'atascadas' ? t.status : k, (prev + next) / 2);
     });
   });
 }
@@ -223,7 +223,6 @@ const LORE_MESSAGES = {
   gonk: { sound: 'gonk', text: '⚡ GNK: "¡Gonk... gonk... gonk!"' },
   arcade: { sound: 'arcade', text: '🕹 TRENCH RUN 84: ¡1UP +1000 PTS!' },
   coffee: { sound: 'coffee', text: '☕ Caf negro recién servido' },
-  cooler: { sound: 'cooler', text: '💧 *Glug glug* Dispensador Gather recargado' },
   mouse: { sound: 'mouse', text: '🤖 MSE-6: *¡Bip bip squeak!*' },
   holotable: { sound: 'holo', text: '📐 Holoproyector: Esquema táctico activo' },
   vending: { sound: 'vending', text: '🥤 Expendedora: Leche azul bien fría' },
@@ -232,14 +231,9 @@ const LORE_MESSAGES = {
   pillar: { sound: 'holo', text: '🔮 Holocrón iluminado con la Fuerza' },
   whiteboard: { sound: 'notify', text: '📋 Sprint sincronizado en la pizarra' },
   workbench: { sound: 'notify', text: '🔧 Banco de trabajo listo para compilar' },
-  dock: { sound: 'notify', text: '🔋 Baterías de droide cargando al 100%' },
   server: { sound: 'notify', text: '💻 Servidores en línea sin anomalías' },
-  pedestal1: { sound: 'holo', text: '💎 Holocrón del Conocimiento sincronizado' },
-  pedestal2: { sound: 'holo', text: '💎 Holocrón de la Sabiduría en resonancia' },
-  trash: { sound: 'notify', text: '🗑 Papelera astromech vaciada' },
   plant: { sound: 'notify', text: '🌿 Ficus regado y oxigenando la estación' },
   crate: { sound: 'notify', text: '📦 Contenedor de piezas beskar sellado' },
-  couch: { sound: 'notify', text: '🛋 Tomando un breve descanso en el sofá' },
 };
 
 function handleDecoInteract(target) {
@@ -258,172 +252,137 @@ function handleDecoInteract(target) {
   setTimeout(() => b.remove(), 2400);
 }
 
+// adornos: van en la franja de pared de cada sala; se activan con clic pero no están en el orden de Tab (son decorado)
+const deco = ([key, spr, title, cls = '', color = '']) => `<span class="deco-item deco-interactive ${cls}" data-interact="${key}" tabindex="-1" role="button" title="${h(title)}">${sprite(spr, color, 2.4)}</span>`;
+const ROOM_DECO = {
+  doc: [['bookshelf', 'bookshelf', 'Estantería de holocrones y códices'], ['pillar', 'archive_pillar', 'Pilar de Datacrones'], ['server', 'server', 'Servidor de archivo'], ['whiteboard', 'whiteboard', 'Pizarra de documentación'], ['plant', 'bigplant', 'Planta sagrada del archivo']],
+  dev: [['whiteboard', 'whiteboard', 'Pizarra de arquitectura y sprints'], ['holotable', 'holotable', 'Holoproyector de arquitectura', 'deco-holo'], ['server', 'server', 'Cluster de compilación'], ['workbench', 'workbench', 'Banco de herramientas'], ['gonk', 'gonk', 'Droide de energía GNK', 'deco-gonk'], ['crate', 'crate', 'Caja de repuestos']],
+  ana: [['holotable', 'holotable', 'Holoproyector táctico de análisis', 'deco-holo'], ['console', 'console', 'Consola de radar', '', '#3ddc84'], ['server', 'server', 'Servidor de telemetría'], ['whiteboard', 'whiteboard', 'Pizarra de análisis'], ['plant', 'bigplant', 'Planta de la sala de mando']],
+  cantina: [['coffee', 'coffee', 'Estación de caf'], ['vending', 'vending', 'Expendedora de leche azul'], ['arcade', 'arcade', 'Arcade: Trench Run', 'deco-arcade'], ['dejarik', 'dejarik', 'Mesa de Dejarik', 'deco-dejarik']],
+};
+const ROOMS = [['doc', 'Archivo (biblioteca)'], ['dev', 'Hangar (taller)'], ['ana', 'Sala de mando (radar)']];
+const ROOM_CODE = { doc: 'DOC-01', dev: 'DEV-02', ana: 'CMD-01' };
+const NEEDS = ['esperando', 'revision', 'fallida', 'pausada_cuota'];
+const agentState = (a, busy) => {
+  const sleeping = a.status === 'sin_cuota' || !a.enabled;
+  return { sleeping, text: busy.has(a.id) ? 'Trabajando' : sleeping ? (a.enabled ? 'Sin cuota' : 'Apagado') : 'Disponible' };
+};
+
 const estacion = {
-  refreshOn: ['task.updated', 'task.created', 'conv.updated', 'run.started', 'agent.status'],
+  refreshOn: ['task.updated', 'task.created', 'conv.updated', 'run.started', 'agent.status', 'council.updated'],
   async render(el) {
-    const [tasks, chats, execs] = await Promise.all([
+    let [tasks, chats, execs, council] = await Promise.all([
       get('/api/tasks'),
       get('/api/conversations'),
-      get('/api/history/ejecuciones?page=1').catch(() => ({ rows: [] }))
+      get('/api/history/ejecuciones?page=1').catch(() => ({ rows: [] })),
+      get('/api/council').catch(() => []),
     ]);
-    const vis = tasks.filter(t => !S.project || t.project_id === S.project);
     const busy = new Set([...tasks.filter(t => ACTIVE.includes(t.status)).map(t => t.agent_id), ...chats.filter(c => LIVE.includes(c.status)).map(c => c.agent_id)]);
+    // filtro de la estación (selector del HUD): "a:<agente>" o "r:<área>"
+    const [fk, fid] = (S.stationFilter || '').split(':').map((x, i) => i ? +x : x);
+    const vis = tasks.filter(t => (!S.project || t.project_id === S.project) && (!fk || (fk === 'a' ? t.agent_id : t.area_id) === fid));
+    if (fk === 'a') chats = chats.filter(c => c.agent_id === fid);
     const desk = t => {
       const a = agent(t.agent_id);
       const who = t.executor === 'humano' ? sprite('rebel', '#ff8c42', 3.8) : agentSprite(a, 3.8);
-      const isWorking = t.status === 'en_curso';
       return `<button class="desk ${t.status}" data-task="${t.id}" title="#${t.id} ${h(t.title)} · ${STATUS[t.status]}${a ? ' · ' + h(a.name) : ''}">
         <span class="who">${who}${BUB[t.status] || ''}</span>
         ${sprite('desk', MON[t.status], 3.2)}
-        ${isWorking ? `<span class="desk-mug" title="Café de trabajo">${sprite('mug', '', 1.4)}</span>` : ''}
+        ${t.status === 'en_curso' ? `<span class="desk-mug">${sprite('mug', '', 1.4)}</span>` : ''}
         <span class="lbl">${h(t.title)}</span>
       </button>`;
     };
     const free = `<span class="desk free" aria-hidden="true"><span class="who"></span>${sprite('desk', '#1d2447', 3.2)}<span class="lbl"></span></span>`;
+    // la placa es el botón de la sala (teclado); el resto de la sala también abre al hacer clic
+    const plaque = (ic, title, sub, code, label, extra = '') => `<div class="plaque"><button type="button" class="plaque-btn" aria-label="${h(label)}">${icon(ic, 2.5)}<b>${h(title)}</b></button><small>${h(sub)}</small><span class="room-code">[${code}]</span>${extra}</div>`;
     const room = a => {
-      const isDoc = a.name.toLowerCase().includes('doc');
-      const isAna = a.name.toLowerCase().includes('anál') || a.name.toLowerCase().includes('anal');
+      const kind = a.room;
       const at = vis.filter(t => t.area_id === a.id && AT_DESK.includes(t.status));
       const shown = at.slice(0, 6), pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
-
-      const decos = isDoc ? `
-        <span class="deco-item deco-window" style="top:4px;right:158px" title="Ventanal astronómico">${sprite('star_window', '', 2)}</span>
-        <span class="deco-item deco-interactive" data-interact="bookshelf" tabindex="0" role="button" style="top:26px;right:10px" title="Estantería de holocrones y códices">${sprite('bookshelf', '', 3.2)}</span>
-        <span class="deco-item deco-interactive" data-interact="pillar" tabindex="0" role="button" style="top:24px;right:64px" title="Pilar de Datacrones y Conocimiento">${sprite('archive_pillar', '', 2.8)}</span>
-        <span class="deco-item deco-interactive" data-interact="server" tabindex="0" role="button" style="top:24px;right:108px" title="Servidor de archivo">${sprite('server', '', 2.8)}</span>
-        <span class="deco-item deco-interactive" data-interact="whiteboard" tabindex="0" role="button" style="bottom:8px;right:10px" title="Pizarra de documentación">${sprite('whiteboard', '', 2.8)}</span>
-        <span class="deco-item deco-interactive" data-interact="plant" tabindex="0" role="button" style="bottom:8px;right:68px" title="Planta sagrada del archivo">${sprite('bigplant', '', 2.8)}</span>
-        <span class="deco-item deco-interactive" data-interact="trash" tabindex="0" role="button" style="bottom:8px;right:116px" title="Cubo de reciclaje astromech">${sprite('trash', '', 2.2)}</span>
-        <div class="room-rug rug-doc"></div>
-      ` : isAna ? `
-        <span class="deco-item deco-window" style="top:4px;right:158px" title="Ventanal táctico de observación">${sprite('star_window', '', 2)}</span>
-        <span class="deco-item deco-interactive deco-holo" data-interact="holotable" tabindex="0" role="button" style="top:24px;right:10px" title="Holoproyector táctico de análisis">${sprite('holotable', '', 2.6)}</span>
-        <span class="deco-item deco-interactive" data-interact="console" tabindex="0" role="button" style="top:26px;right:64px" title="Consola de radar y monitoreo">${sprite('console', '#3ddc84', 2.8)}</span>
-        <span class="deco-item deco-interactive" data-interact="server" tabindex="0" role="button" style="top:24px;right:108px" title="Servidor de telemetría y métricas">${sprite('server', '', 2.8)}</span>
-        <span class="deco-item deco-interactive" data-interact="whiteboard" tabindex="0" role="button" style="bottom:8px;right:10px" title="Pizarra de análisis y flujos">${sprite('whiteboard', '', 2.6)}</span>
-        <span class="deco-item deco-interactive" data-interact="plant" tabindex="0" role="button" style="bottom:8px;right:68px" title="Planta de la sala de mando">${sprite('bigplant', '', 2.6)}</span>
-        <span class="deco-item deco-interactive" data-interact="trash" tabindex="0" role="button" style="bottom:8px;right:116px" title="Cubo de reciclaje astromech">${sprite('trash', '', 2.2)}</span>
-        <div class="room-rug rug-ana"></div>
-      ` : `
-        <span class="deco-item deco-window" style="top:4px;right:166px" title="Observatorio del hangar espacial">${sprite('star_window', '', 2)}</span>
-        <span class="deco-item deco-interactive" data-interact="whiteboard" tabindex="0" role="button" style="top:26px;right:10px" title="Pizarra de arquitectura y sprints">${sprite('whiteboard', '', 2.8)}</span>
-        <span class="deco-item deco-interactive deco-holo" data-interact="holotable" tabindex="0" role="button" style="top:24px;right:68px" title="Holoproyector táctico de arquitectura">${sprite('holotable', '', 2.4)}</span>
-        <span class="deco-item deco-interactive" data-interact="server" tabindex="0" role="button" style="top:24px;right:118px" title="Cluster de servidores de compilación">${sprite('server', '', 2.8)}</span>
-        <span class="deco-item deco-interactive" data-interact="workbench" tabindex="0" role="button" style="bottom:8px;right:10px" title="Banco de herramientas y repuestos">${sprite('workbench', '', 2.5)}</span>
-        <span class="deco-item deco-interactive deco-gonk" data-interact="gonk" tabindex="0" role="button" style="bottom:8px;right:72px" title="Droide de energía GNK (Gonk... Gonk...)">${sprite('gonk', '', 2.6)}</span>
-        <span class="deco-item deco-interactive" data-interact="dock" tabindex="0" role="button" style="bottom:8px;right:116px" title="Estación de recarga de droides">${sprite('droid_dock', '', 2.4)}</span>
-        <span class="deco-item deco-interactive" data-interact="crate" tabindex="0" role="button" style="bottom:8px;right:154px" title="Caja de piezas y repuestos">${sprite('crate', '', 2.6)}</span>
-        <div class="room-rug rug-dev"></div>
-      `;
-
-      const roomCls = isDoc ? 'room-doc' : (isAna ? 'room-ana' : 'room-dev');
-      const roomCode = isDoc ? 'DOC-01' : (isAna ? 'CMD-01' : 'DEV-02');
-      return `<section class="room2 ${roomCls}" data-area="${a.id}" style="--c:${a.color}" tabindex="0" role="button" aria-label="${h(a.alias)}: ${at.length} en actividad, ${pend} pendientes">
-        <div class="plaque">${icon(a.icon, 2.5)}<b>${h(a.alias)}</b><small>${h(a.name)}</small><span class="room-code">[${roomCode}]</span>${pend ? `<small class="right" title="Tareas pendientes">${pend} pend.</small>` : ''}</div>
+      return `<section class="room2 room-${kind}" data-area="${a.id}" style="--c:${a.color}">
+        <div class="room-rug rug-${kind}"></div>
+        ${plaque(a.icon, a.alias, a.name, ROOM_CODE[kind], `${a.alias}: ${at.length} en actividad, ${pend} pendientes`, pend ? `<small class="right pend" title="Tareas pendientes">${pend} pend.</small>` : '')}
+        <div class="wall">${ROOM_DECO[kind].map(deco).join('')}</div>
         <div class="desks2">${shown.map(desk).join('')}${Array(Math.max(0, 3 - shown.length)).fill(free).join('')}${at.length > 6 ? `<span class="more">+${at.length - 6}</span>` : ''}</div>
-        ${decos}
       </section>`;
     };
     const live = chats.filter(c => LIVE.includes(c.status));
-    const cantina = `<section class="room2 cantina2" data-go="#/cantina" style="--c:#ffe81f" tabindex="0" role="button" aria-label="Cantina: ${live.length} consultas activas">
-      <div class="plaque">${icon('cantina', 2.5)}<b>Cantina</b><small>Consultas rápidas</small><span class="room-code">[REC-01]</span></div>
-      <div class="stools">${live.map(c => `<button class="desk ${c.status}" data-chat="${c.id}" title="${h(c.title)}"><span class="who">${agentSprite(agent(c.agent_id), 3.8)}${c.status === 'esperando' ? BUB.esperando : ''}</span><span class="lbl">${h(c.title)}</span></button>`).join('') || '<span class="hint">Nadie en la barra</span>'}</div>
-      <div class="bar"></div>
-      <span class="deco-item cooler-deco deco-interactive" data-interact="cooler" tabindex="0" role="button" title="Dispensador de agua Gather">${sprite('cooler', '', 2.8)}</span>
-      <span class="deco-item deco-interactive deco-coffee" data-interact="coffee" tabindex="0" role="button" style="top:26px;right:12px" title="Estación de café y caf caliente">${sprite('coffee', '', 2.8)}</span>
-      <span class="deco-item deco-interactive deco-vending" data-interact="vending" tabindex="0" role="button" style="top:26px;right:52px" title="Expendedora de leche azul y raciones">${sprite('vending', '', 2.4)}</span>
-      <span class="deco-item deco-interactive deco-arcade" data-interact="arcade" tabindex="0" role="button" style="top:26px;right:94px" title="Máquina recreativa arcade: Trench Run 1980">${sprite('arcade', '', 2.4)}</span>
-      <span class="deco-item deco-interactive deco-dejarik" data-interact="dejarik" tabindex="0" role="button" style="bottom:8px;right:96px" title="Mesa de Dejarik (¡Deja ganar al Wookiee!)">${sprite('dejarik', '', 2.4)}</span>
-      <span class="deco-item deco-interactive" data-interact="couch" tabindex="0" role="button" style="bottom:8px;right:10px" title="Sofá lounge de la Cantina">${sprite('couch', '', 2.2)}</span>
-      <span class="deco-item deco-interactive" data-interact="crate" tabindex="0" role="button" style="bottom:8px;right:58px" title="Caja de provisiones">${sprite('crate', '', 2.4)}</span>
-      <span class="deco-item deco-interactive" data-interact="plant" tabindex="0" role="button" style="bottom:8px;left:42px" title="Planta exótica de Tatooine">${sprite('plant', '', 2.8)}</span>
+    const recent = chats.filter(c => !LIVE.includes(c.status)).slice(0, 3);
+    const cantina = `<section class="room2 cantina2" data-go="#/cantina" style="--c:#ffe81f">
       <div class="room-rug rug-cantina"></div>
+      ${plaque('cantina', 'Cantina', 'Consultas rápidas', 'REC-01', `Cantina: ${live.length} consultas activas`)}
+      <div class="wall">${ROOM_DECO.cantina.map(deco).join('')}</div>
+      <div class="stools">${live.map(c => `<button class="desk ${c.status}" data-chat="${c.id}" title="${h(c.title)}"><span class="who">${agentSprite(agent(c.agent_id), 3.8)}${c.status === 'esperando' ? BUB.esperando : ''}</span><span class="lbl">${h(c.title)}</span></button>`).join('')}
+        ${live.length ? '' : recent.length ? `<div class="room-info"><small class="muted">Últimas consultas</small>${recent.map(c => `<button type="button" class="room-link" data-chat="${c.id}">${agentSprite(agent(c.agent_id), 1.5)}<span class="ellipsis">${h(c.title)}</span><small>${ago(c.updated_at)}</small></button>`).join('')}</div>` : '<span class="hint">Nadie en la barra</span>'}</div>
+      <div class="bar"></div>
     </section>`;
-    const consejo = `<section class="room2 consejo2" data-go="#/consejo" style="--c:#b98cff" tabindex="0" role="button" aria-label="Sala del Consejo">
-      <div class="plaque">${icon('holocron', 2.5)}<b>Consejo Jedi</b><small>Propuestas de mejora</small><span class="room-code">[CMD-00]</span></div>
-      <div class="council-dais">
-        <span class="council-chair left-chair" title="Silla del Consejo">${sprite('chair', '', 2.4)}</span>
-        <div class="round-table">
-          <span class="council-yoda deco-interactive" data-interact="yoda" tabindex="0" role="button" title="Gran Maestro Yoda">${sprite('yoda', '', 3.5)}</span>
-        </div>
-        <span class="council-chair right-chair" title="Silla del Consejo">${sprite('chair', '', 2.4)}</span>
-      </div>
-      <span class="deco-item deco-window" style="top:4px;left:48px" title="Mirador del Templo Jedi">${sprite('star_window', '', 2)}</span>
-      <span class="deco-item deco-window" style="top:4px;right:48px" title="Mirador del Templo Jedi">${sprite('star_window', '', 2)}</span>
-      <span class="deco-item deco-interactive deco-pedestal" data-interact="pedestal1" tabindex="0" role="button" style="top:26px;left:14px" title="Pedestal del Holocrón del Conocimiento">${sprite('pedestal', '', 3)}</span>
-      <span class="deco-item deco-interactive deco-pedestal" data-interact="pedestal2" tabindex="0" role="button" style="top:26px;right:14px" title="Pedestal del Holocrón de la Sabiduría">${sprite('pedestal', '', 3)}</span>
-      <span class="deco-item deco-interactive" data-interact="plant" tabindex="0" role="button" style="bottom:8px;left:14px" title="Planta sagrada del Templo">${sprite('bigplant', '', 2.8)}</span>
-      <span class="deco-item deco-interactive" data-interact="plant" tabindex="0" role="button" style="bottom:8px;right:14px" title="Planta sagrada del Templo">${sprite('bigplant', '', 2.8)}</span>
+    const last = council[0];
+    const consejo = `<section class="room2 consejo2" data-go="#/consejo" style="--c:#b98cff">
       <div class="room-rug rug-council"></div>
+      ${plaque('holocron', 'Consejo Jedi', 'Propuestas de mejora', 'CMD-00', 'Sala del Consejo')}
+      <div class="council-body">
+        <div class="round-table"><span class="council-yoda deco-interactive" data-interact="yoda" tabindex="-1" role="button" title="Gran Maestro Yoda">${sprite('yoda', '', 3.2)}</span></div>
+        <div class="room-info">${last
+          ? `<small class="muted">Última sesión · ${ago(last.at)}</small><b>${last.status === 'lista' ? `${last.aceptadas}/${last.propuestas} propuestas aceptadas` : last.status === 'error' ? 'Terminó con error' : 'En sesión…'}</b>`
+          : '<small class="muted">El consejo aún no se ha reunido</small><b>Convoca uno para recibir propuestas</b>'}</div>
+      </div>
     </section>`;
     const me = S.boot.me;
-    const busy = new Set([...tasks.filter(t => ACTIVE.includes(t.status)).map(t => t.agent_id), ...chats.filter(c => LIVE.includes(c.status)).map(c => c.agent_id)]);
 
-    // Mostrar salas operativas principales: Documentación, Desarrollo y Análisis arriba; Cantina y Consejo Jedi abajo
-    const docArea = S.boot.areas.find(a => a.name.toLowerCase().includes('doc')) || S.boot.areas[0];
-    const devArea = S.boot.areas.find(a => a.name.toLowerCase().includes('desarr')) || S.boot.areas[1];
-    const anaArea = S.boot.areas.find(a => a.name.toLowerCase().includes('anál') || a.name.toLowerCase().includes('anal')) || S.boot.areas[2];
-    const fixedAreas = [docArea, devArea, anaArea].filter(Boolean);
+    // salas fijas arriba según el tipo de sala de cada área (Configuración → Áreas); el resto va a "Más salas"
+    const fixedAreas = ROOMS.map(([k]) => S.boot.areas.find(a => a.room === k)).filter(Boolean);
     const otherAreas = S.boot.areas.filter(a => !fixedAreas.includes(a));
-    const moreCount = otherAreas.length + 2; // + puente + archivos
 
     const hall = `<div class="hall" aria-label="Pasillo principal">
       <div class="hall-runner"><span class="hall-arrows">‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹</span></div>
-      <span class="hall-lamp" style="left:12%" title="Lámpara de mamparo">${sprite('bulkhead_lamp', '', 2)}</span>
-      <span class="hall-lamp" style="left:38%" title="Lámpara de mamparo">${sprite('bulkhead_lamp', '', 2)}</span>
-      <span class="hall-lamp" style="left:64%" title="Lámpara de mamparo">${sprite('bulkhead_lamp', '', 2)}</span>
+      ${[12, 38, 64].map(x => `<span class="hall-lamp" style="left:${x}%">${sprite('bulkhead_lamp', '', 2)}</span>`).join('')}
       <div class="hall-crew">
         <span class="avatar" title="Tú">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3.8)}<span class="tag">${h(me.name.split(' ')[0])}</span><span class="avatar-status">Tú</span></span>
         ${S.boot.agents.map(a => {
-          const isBusy = busy.has(a.id);
-          const isSleeping = a.status === 'sin_cuota' || !a.enabled;
-          const statusText = isBusy ? 'Trabajando' : (isSleeping ? (a.enabled ? 'Sin cuota' : 'Apagado') : 'Disponible');
-          const lim = agentLimits(a);
-          const limTip = [
-            lim.fiveHour ? `5h: ${lim.fiveHour.pct}%` + (lim.fiveHour.resets_at ? ` (reinicia ${ago(lim.fiveHour.resets_at)})` : '') : null,
-            lim.weekly ? `Semanal: ${lim.weekly.pct}%` + (lim.weekly.resets_at ? ` (reinicia ${ago(lim.weekly.resets_at)})` : '') : null,
-          ].filter(Boolean).join(' · ');
-          const title = `${h(a.name)} · ${statusText}${limTip ? ' · ' + limTip : ''}`;
-          return `<span class="avatar ${isSleeping ? 'sleeping' : ''}" data-go="#/puente" tabindex="0" role="button" title="${title}">
-            ${agentSprite(a, 3.8)}${isSleeping && a.enabled ? '<span class="bubble z">Zz</span>' : ''}
+          const st = agentState(a, busy), lim = agentLimits(a);
+          return `<button type="button" class="avatar ${st.sleeping ? 'sleeping' : ''}" data-agent="${a.id}" title="${h(a.name)} · ${st.text}">
+            ${agentSprite(a, 3.8)}${st.sleeping && a.enabled ? '<span class="bubble z">Zz</span>' : ''}
             <span class="tag">${h(a.name)}</span>
-            <span class="avatar-status">${statusText}</span>
-            <span class="avatar-limits">${agentLimitsBadge(a)}</span>
-          </span>`;
+            <span class="avatar-status">${st.text}</span>
+            ${lim.fiveHour || lim.weekly || lim.usage5h?.tokens ? `<span class="avatar-limits">${agentLimitsBadge(a, true)}</span>` : ''}
+          </button>`;
         }).join('')}
       </div>
-      <span class="avatar mouse-droid-walker deco-interactive" data-interact="mouse" tabindex="0" role="button" style="--d:9s" title="Droide ratón MSE-6 (Patrulla y limpieza de pasillos)">${sprite('mousedroid', '', 2.6)}<span class="tag">MSE-6</span></span>
-      <button type="button" class="hall-more-btn" id="btnMoreRooms" title="Ver salas adicionales, Puente de Mando y Archivos">
-        🏛 <b>+ Más salas</b> <span class="chip" style="font-size:9px;padding:1px 5px;margin-left:2px">${moreCount}</span> ▾
-      </button>
+      <span class="avatar mouse-droid-walker deco-interactive" data-interact="mouse" tabindex="-1" role="button" style="--d:9s" title="Droide ratón MSE-6">${sprite('mousedroid', '', 2.6)}<span class="tag">MSE-6</span></span>
+      <button type="button" class="hall-more-btn" id="btnMoreRooms" title="Salas adicionales, Puente de Mando y Archivos">Más salas <span class="n">${otherAreas.length + 2}</span></button>
     </div>`;
 
-    const runsList = (execs?.rows || []).slice(0, 8);
+    // lo que está en curso primero, luego lo más reciente
+    const runsList = (execs?.rows || []).slice(0, 8).sort((x, y) => !y.ended_at - !x.ended_at);
     const runItemHTML = r => {
       const a = agent(r.agent_id);
       const t = tasks.find(x => x.id === r.task_id);
       const targetTitle = t ? `#${t.id} ${t.title}` : (r.task_id ? `Tarea #${r.task_id}` : `Chat #${r.conversation_id}`);
-      const link = r.task_id ? `#/tarea/${r.task_id}` : `#/cantina/${r.conversation_id}`;
       const isRunning = !r.ended_at;
       const isOk = r.exit_code === 0 || r.end_reason === 'listo' || r.end_reason === 'completado';
       const statusDot = isRunning ? '<span class="dot ok blink"></span>' : isOk ? '<span class="dot ok"></span>' : '<span class="dot bad"></span>';
-      const statusText = isRunning ? 'en curso' : r.ended_at ? dur((Date.parse(r.ended_at) - Date.parse(r.started_at)) / 1000) : 'falló';
+      const statusText = isRunning ? 'en curso' : dur((Date.parse(r.ended_at) - Date.parse(r.started_at)) / 1000);
       const tok = (r.tokens_in || 0) + (r.tokens_out || 0);
-      return `<a class="run-item" href="${link}">
+      return `<a class="run-item ${isRunning ? 'running' : ''}" href="${r.task_id ? `#/tarea/${r.task_id}` : `#/cantina/${r.conversation_id}`}">
         <div class="row" style="justify-content:space-between;gap:4px">
           <span class="row" style="gap:5px;font-size:12px;font-weight:600">${agentSprite(a, 1.5)} ${h(a?.name || 'Agente')}</span>
           <span class="run-status">${statusDot} ${statusText}</span>
         </div>
         <div class="run-desc ellipsis" title="${h(targetTitle)}">${h(targetTitle)}</div>
-        <div class="run-meta row" style="justify-content:space-between">
-          <span>${h(r.model || '')}</span>
-          <span>${tok ? num(tok) + ' tok · ' : ''}${ago(r.started_at)}</span>
-        </div>
+        <div class="run-meta row" style="justify-content:space-between"><span>${h(r.model || '')}</span><span>${tok ? num(tok) + ' tok · ' : ''}${ago(r.started_at)}</span></div>
       </a>`;
     };
+    // sin ejecuciones el panel empieza plegado (salvo que el usuario lo haya abierto a mano)
+    const sidePref = localStorage.getItem('ov_station_aside');
+    const sideHidden = sidePref === '0' || (sidePref !== '1' && !runsList.length);
 
-    const sideHidden = localStorage.getItem('ov_station_aside') === '0';
+    const needs = [...vis.filter(t => NEEDS.includes(t.status)).map(t => [`#/tarea/${t.id}`, t.status, `#${t.id} ${t.title}`]),
+      ...chats.filter(c => c.status === 'esperando').map(c => [`#/cantina/${c.id}`, 'esperando', c.title])];
+    const attention = needs.length ? `<nav class="attention" aria-label="Necesita atención"><b>Necesita atención</b>${needs.map(([link, st, t]) => `<a class="att-item st-${st}" href="${link}"><span>${STATUS[st]}</span>${h(t)}</a>`).join('')}</nav>` : '';
+
+    const kbHidden = localStorage.getItem('ov_station_kanban') === '0';
     el.innerHTML = `<div class="station-layout">
+      ${attention}
       <div class="station-top-row">
         <div class="station-main">
           <div class="floor">
@@ -434,35 +393,28 @@ const estacion = {
         </div>
         <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Últimas ejecuciones">
           <div class="station-aside-head">
-            <div class="row" style="gap:6px">
-              <span class="dot ok"></span>
-              <b class="pixel" style="font-size:9px;color:var(--yellow)">EJECUCIONES</b>
-            </div>
+            <b class="aside-title"><span class="dot ok"></span> Ejecuciones</b>
             <div class="row" style="gap:4px">
-              <a href="#/archivos/ejecuciones" class="btn sm ghost" title="Ver historial">Historial</a>
-              <button type="button" class="btn sm ghost" id="hideSideBtn" title="Ocultar pestaña" aria-label="Ocultar">✕</button>
+              <a href="#/archivos/ejecuciones" class="btn sm ghost">Historial</a>
+              <button type="button" class="btn sm ghost" id="hideSideBtn" aria-label="Ocultar ejecuciones">✕</button>
             </div>
           </div>
-          <div class="station-aside-body">
-            ${runsList.map(runItemHTML).join('') || '<div class="empty" style="padding:14px">Sin ejecuciones recientes</div>'}
-          </div>
+          <div class="station-aside-body">${runsList.map(runItemHTML).join('') || '<div class="empty" style="padding:14px">Sin ejecuciones recientes</div>'}</div>
         </aside>
-        <button type="button" class="station-tab-btn" id="openSideBtn" ${sideHidden ? '' : 'hidden'} title="Ver últimas ejecuciones">
-          📡 <span>Ejecuciones</span>
-        </button>
+        <button type="button" class="station-tab-btn" id="openSideBtn" ${sideHidden ? '' : 'hidden'} title="Ver últimas ejecuciones">📡 <span>Ejecuciones</span>${runsList.some(r => !r.ended_at) ? '<span class="dot ok blink"></span>' : ''}</button>
       </div>
 
-      <section class="station-kanban-box ${localStorage.getItem('ov_station_kanban') === '0' ? 'collapsed' : ''}" id="stationKanban" aria-label="Tablero Kanban de tareas">
+      <section class="station-kanban-box ${kbHidden ? 'collapsed' : ''}" id="stationKanban" aria-label="Tablero Kanban de tareas">
         <div class="station-kanban-head">
-          <div class="row" style="gap:10px">
-            <span class="pixel" style="font-size:10px;color:var(--yellow)">■ TABLERO KANBAN</span>
-            <span class="chip">${vis.length} tareas</span>
-            ${S.project ? `<span class="chip" style="border-color:${h(project(S.project)?.color)}">${h(project(S.project)?.name)}</span>` : '<span class="chip">Todos los proyectos</span>'}
-          </div>
           <div class="row" style="gap:8px">
-            <button type="button" class="btn sm ghost" id="toggleKanbanBtn">${localStorage.getItem('ov_station_kanban') === '0' ? '▲ Mostrar tablero' : '▼ Ocultar tablero'}</button>
-            ${canEdit() ? '<button type="button" class="btn sm y" id="skNewTask">+ Nueva tarea</button>' : ''}
-            <a class="btn sm ghost" href="#/kanban/${S.project || 'todos'}">Ver kanban con filtros ↗</a>
+            <b class="aside-title">Tablero</b>
+            <span class="chip">${vis.length} tareas</span>
+            ${S.project ? `<span class="chip" style="border-color:${h(project(S.project)?.color)}">${h(project(S.project)?.name)}</span>` : ''}
+          </div>
+          <div class="row" style="gap:6px">
+            ${canEdit() ? '<button type="button" class="btn sm y" id="skNewTask">+ Tarea</button>' : ''}
+            <a class="btn sm ghost" href="#/kanban/${S.project || 'todos'}">Filtros ↗</a>
+            <button type="button" class="btn sm ghost" id="toggleKanbanBtn" aria-expanded="${!kbHidden}">${kbHidden ? '▲ Mostrar' : '▼ Ocultar'}</button>
           </div>
         </div>
         <div class="kanban" id="skGrid">
@@ -480,50 +432,28 @@ const estacion = {
     bindKanbanDrag(el, vis);
 
     el.onclick = e => {
+      if (e.target.closest('.kmove')) return;
       const tk = e.target.closest('#toggleKanbanBtn');
       if (tk) {
-        e.preventDefault();
-        const kb = $('#stationKanban', el);
-        const isCollapsed = kb.classList.toggle('collapsed');
+        const isCollapsed = $('#stationKanban', el).classList.toggle('collapsed');
         localStorage.setItem('ov_station_kanban', isCollapsed ? '0' : '1');
-        tk.textContent = isCollapsed ? '▲ Mostrar tablero' : '▼ Ocultar tablero';
+        tk.textContent = isCollapsed ? '▲ Mostrar' : '▼ Ocultar';
+        tk.setAttribute('aria-expanded', !isCollapsed);
         return;
       }
-      const hideBtn = e.target.closest('#hideSideBtn');
-      if (hideBtn) {
-        e.preventDefault();
-        localStorage.setItem('ov_station_aside', '0');
-        const aside = $('#stationAside', el);
-        const openBtn = $('#openSideBtn', el);
-        if (aside) aside.hidden = true;
-        if (openBtn) openBtn.hidden = false;
+      const side = e.target.closest('#hideSideBtn,#openSideBtn');
+      if (side) {
+        const show = side.id === 'openSideBtn';
+        localStorage.setItem('ov_station_aside', show ? '1' : '0');
+        $('#stationAside', el).hidden = !show;
+        $('#openSideBtn', el).hidden = show;
         return;
       }
-      const openBtn = e.target.closest('#openSideBtn');
-      if (openBtn) {
-        e.preventDefault();
-        localStorage.setItem('ov_station_aside', '1');
-        const aside = $('#stationAside', el);
-        if (aside) aside.hidden = false;
-        openBtn.hidden = true;
-        return;
-      }
-      const nt = e.target.closest('#skNewTask');
-      if (nt) {
-        e.preventDefault();
-        return taskForm({}, { project_id: S.project });
-      }
-      const moreBtn = e.target.closest('#btnMoreRooms');
-      if (moreBtn) {
-        e.preventDefault();
-        return otherRoomsModal(vis, busy, chats);
-      }
+      if (e.target.closest('#skNewTask')) return taskForm({}, { project_id: S.project });
+      if (e.target.closest('#btnMoreRooms')) return otherRoomsModal(vis, busy, otherAreas);
       const di = e.target.closest('.deco-interactive');
-      if (di) {
-        e.preventDefault();
-        e.stopPropagation();
-        return handleDecoInteract(di);
-      }
+      if (di) { e.stopPropagation(); return handleDecoInteract(di); }
+      const ag = e.target.closest('[data-agent]'); if (ag) return agentCard(agent(ag.dataset.agent), tasks, busy);
       const kc = e.target.closest('.kcard');
       if (kc) return go('#/tarea/' + kc.dataset.id);
       const d = e.target.closest('[data-task]'); if (d) return go('#/tarea/' + d.dataset.task);
@@ -531,69 +461,41 @@ const estacion = {
       const g = e.target.closest('[data-go]'); if (g) return go(g.dataset.go);
       const r = e.target.closest('[data-area]'); if (r) roomModal(+r.dataset.area, vis);
     };
-    el.onkeydown = e => {
-      if (e.key === 'Enter') {
-        const di = e.target.closest('.deco-interactive');
-        if (di) {
-          e.preventDefault();
-          return handleDecoInteract(di);
-        }
-        if (e.target.matches('[data-area],[data-go],.kcard,#btnMoreRooms')) e.target.click();
-      }
-    };
+    el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('.kcard')) e.target.click(); };
   },
 };
 
-function otherRoomsModal(vis, busy, chats) {
-  const docArea = S.boot.areas.find(a => a.name.toLowerCase().includes('doc')) || S.boot.areas[0];
-  const devArea = S.boot.areas.find(a => a.name.toLowerCase().includes('desarr')) || S.boot.areas[1];
-  const fixedAreas = [docArea, devArea].filter(Boolean);
-  const otherAreas = S.boot.areas.filter(a => !fixedAreas.includes(a));
-  const lamp = a => a.status === 'sin_cuota' ? '#ff3b3b' : !a.enabled ? '#444a6e' : busy.has(a.id) ? '#3ddc84' : '#4fc3f7';
+// ficha rápida del agente (en móvil no hay hover para ver estado y cuota)
+function agentCard(a, tasks, busy) {
+  const st = agentState(a, busy), lim = agentLimits(a);
+  const mine = tasks.filter(t => t.agent_id === a.id && AT_DESK.includes(t.status));
+  const win = (l, w) => w ? `<div class="kv"><b>${l}</b><span>${w.pct}%${w.resets_at ? ' · reinicia ' + ago(w.resets_at) : ''}</span></div>` : '';
+  const d = modal(`<div class="agent-head" style="--c:${h(a.color)}">${agentSprite(a, 6)}<div><h2 style="margin:0">${h(a.name)}</h2>
+      <span class="chip ${st.sleeping ? 'st-fallida' : busy.has(a.id) ? 'st-en_curso' : 'st-completada'}">${st.text}</span> <small class="muted">${h(a.default_model || '')}</small></div></div>
+    ${win('Límite 5 horas', lim.fiveHour)}${win('Límite semanal', lim.weekly)}${!lim.fiveHour && !lim.weekly ? '<p class="muted">El CLI no informa límites de uso.</p>' : ''}
+    <h3>En su escritorio (${mine.length})</h3>
+    ${mine.map(t => `<button type="button" class="room-link" data-t="${t.id}">${chip(t.status)}<span class="ellipsis">#${t.id} ${h(t.title)}</span></button>`).join('') || '<p class="muted">Sin tareas activas.</p>'}
+    <div class="row" style="margin-top:14px">${canEdit() && a.enabled ? '<button class="btn y" id="acNew">+ Asignarle una tarea</button>' : ''}<a class="btn ghost" href="#/puente" data-close>Puente de Mando</a><button class="btn ghost" value="c">Cerrar</button></div>`);
+  $$('[data-t]', d).forEach(b => b.onclick = e => { e.preventDefault(); closeModal(); go('#/tarea/' + b.dataset.t); });
+  $('#acNew', d)?.addEventListener('click', e => { e.preventDefault(); closeModal(); taskForm({ agent_id: a.id }); });
+}
 
-  const d = modal(`<h2>🏛 Más salas de la estación</h2>
-    <p class="muted">Acceso a las áreas operativas adicionales, puente de mando e historial.</p>
+function otherRoomsModal(vis, busy, otherAreas) {
+  const lamp = a => a.status === 'sin_cuota' ? '#ff3b3b' : !a.enabled ? '#444a6e' : busy.has(a.id) ? '#3ddc84' : '#4fc3f7';
+  const card = (attrs, c, ic, title, sub, body) => `<button type="button" class="more-room-card" ${attrs} style="--c:${c}"><div class="card-head">${icon(ic, 3)}<div><b>${h(title)}</b><br><small class="muted">${h(sub)}</small></div></div>${body}</button>`;
+  const d = modal(`<h2>Más salas de la estación</h2>
     <div class="more-rooms-grid">
       ${otherAreas.map(a => {
-        const at = vis.filter(t => t.area_id === a.id && AT_DESK.includes(t.status));
+        const at = vis.filter(t => t.area_id === a.id && AT_DESK.includes(t.status)).length;
         const pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
-        return `<div class="more-room-card" data-area-modal="${a.id}" style="--c:${a.color}" tabindex="0" role="button">
-          <div class="card-head">${icon(a.icon, 3)}<div><b>${h(a.alias)}</b><br><small class="muted">${h(a.name)}</small></div></div>
-          <div class="card-meta">
-            <span><b>${at.length}</b> en actividad</span> · <span><b>${pend}</b> pendientes</span>
-          </div>
-          <p class="muted" style="margin:4px 0 0;font-size:11px">Haz clic para ver tareas abiertas o crear una nueva en esta área.</p>
-        </div>`;
+        return card(`data-area-modal="${a.id}"`, a.color, a.icon, a.alias, a.name, `<div class="card-meta"><b>${at}</b> en actividad · <b>${pend}</b> pendientes</div>`);
       }).join('')}
-      <div class="more-room-card" data-go-modal="#/puente" style="--c:#4fc3f7" tabindex="0" role="button">
-        <div class="card-head">${icon('radar', 3)}<div><b>Puente de Mando</b><br><small class="muted">Estado y límites de agentes</small></div></div>
-        <div class="consoles" style="margin:6px 0">${S.boot.agents.map(a => `<span title="${h(a.name)}">${sprite('console', lamp(a), 2.5)}</span>`).join('')}</div>
-        <p class="muted" style="margin:4px 0 0;font-size:11px">Monitorea en tiempo real los modelos, cuotas y límites de cómputo.</p>
-      </div>
-      <div class="more-room-card" data-go-modal="#/archivos" style="--c:#8c97c9" tabindex="0" role="button">
-        <div class="card-head">${icon('holocron', 3)}<div><b>Archivos Jedi</b><br><small class="muted">Historial y ejecuciones</small></div></div>
-        <div class="card-meta"><span>Registros de auditoría, logs y ejecuciones históricas.</span></div>
-        <p class="muted" style="margin:4px 0 0;font-size:11px">Explora el registro permanente de todas las misiones y comandos ejecutados.</p>
-      </div>
+      ${card('data-go-modal="#/puente"', '#4fc3f7', 'radar', 'Puente de Mando', 'Estado y límites de agentes', `<div class="consoles">${S.boot.agents.map(a => `<span title="${h(a.name)}">${sprite('console', lamp(a), 2.5)}</span>`).join('')}</div>`)}
+      ${card('data-go-modal="#/archivos"', '#8c97c9', 'holocron', 'Archivos Jedi', 'Historial y ejecuciones', '<div class="card-meta">Chats, tareas, ejecuciones, relevos y bitácora.</div>')}
     </div>
-    <div class="row" style="margin-top:14px;justify-content:flex-end">
-      <button class="btn ghost" value="c">Cerrar</button>
-    </div>`);
-
-  $$('[data-area-modal]', d).forEach(b => {
-    b.onclick = () => {
-      const aid = +b.dataset.areaModal;
-      closeModal();
-      roomModal(aid, vis);
-    };
-  });
-  $$('[data-go-modal]', d).forEach(b => {
-    b.onclick = () => {
-      const target = b.dataset.goModal;
-      closeModal();
-      go(target);
-    };
-  });
+    <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn ghost" value="c">Cerrar</button></div>`);
+  $$('[data-area-modal]', d).forEach(b => b.onclick = e => { e.preventDefault(); closeModal(); roomModal(+b.dataset.areaModal, vis); });
+  $$('[data-go-modal]', d).forEach(b => b.onclick = e => { e.preventDefault(); closeModal(); go(b.dataset.goModal); });
 }
 function roomModal(areaId, tasks) {
   const a = area(areaId);
@@ -730,7 +632,7 @@ const kanban = {
     $('#kf', el)?.addEventListener('click', () => projectCard(pid));
     $('#kfProj', el).onchange = e => go('#/kanban/' + (e.target.value || 'todos'));
     for (const [id, k] of [['#kfA', 'area'], ['#kfG', 'agent'], ['#kfP', 'pri'], ['#kfW', 'who']]) $(id, el).onchange = e => { f[k] = e.target.value; route(true); };
-    el.onclick = e => { const c = e.target.closest('.kcard'); if (c) go('#/tarea/' + c.dataset.id); };
+    el.onclick = e => { const c = !e.target.closest('.kmove') && e.target.closest('.kcard'); if (c) go('#/tarea/' + c.dataset.id); };
     el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('.kcard')) go('#/tarea/' + e.target.dataset.id); };
     bindKanbanDrag(el, all);
   },
@@ -899,7 +801,7 @@ function runDialog(t) {
     try { await post(`/api/tasks/${t.id}/run`, { agent_id: +f.agent_id, model: f.model, effort: f.effort, mode: f.mode, fresh: f.fresh }); closeModal(); S.taskTab = 'consola'; if (S.taskRun) delete S.taskRun[t.id]; beep('ok'); refreshSoon(0); } catch (err) { fail(err); }
   };
 }
-function approveDialog(t) {
+export function approveDialog(t) {
   const d = modal(`<h2>Aprobar #${t.id}</h2>
     ${t.branch ? `<label class="row"><input type="checkbox" name="merge" checked> Fusionar la rama <code>${h(t.branch)}</code> en <code>${h(t.base_branch)}</code></label>` : ''}
     ${t.executor === 'agente' ? `<label class="row"><input type="checkbox" name="second_opinion"> Crear tarea de segunda opinión con otro agente</label><label class="row"><input type="checkbox" name="run_second"> …y ejecutarla ya</label>` : ''}
@@ -1312,12 +1214,13 @@ const config = {
     } else if (tab === 'areas') {
       body = S.boot.areas.map(a => `<form class="panel" data-area="${a.id}" style="margin-bottom:12px;border-color:${a.color}"><div class="row">${icon(a.icon, 4)}<h2 style="margin:0">${h(a.name)}</h2></div>
         <div class="field-row"><div><label class="l">Nombre</label><input name="name" value="${h(a.name)}"></div><div><label class="l">Alias</label><input name="alias" value="${h(a.alias)}"></div>
-        <div><label class="l">Icono</label><select name="icon">${opts(ICON_NAMES.map(i => [i, i]), a.icon)}</select></div><div><label class="l">Color</label><input type="color" name="color" value="${h(a.color)}" style="height:40px"></div></div>
+        <div><label class="l">Icono</label><select name="icon">${opts(ICON_NAMES.map(i => [i, i]), a.icon)}</select></div><div><label class="l">Color</label><input type="color" name="color" value="${h(a.color)}" style="height:40px"></div>
+        <div><label class="l">Sala en el mapa</label><select name="room">${opts(ROOMS, a.room, 'Solo en «Más salas»')}</select></div></div>
         <div class="field-row"><div><label class="l">Agente por defecto</label><select name="default_agent_id">${opts(S.boot.agents.map(x => [x.id, x.name]), a.default_agent_id, '—')}</select></div>
         <div><label class="l">Cadena de relevo (claves en orden)</label><input name="chain" value="${h(a.fallback_chain.map(id => agent(id)?.key).filter(Boolean).join(', '))}" placeholder="claude, codex, commandcode"></div></div>
         <label class="row"><input type="checkbox" name="auto_fallback" ${a.auto_fallback ? 'checked' : ''}> Relevo automático al siguiente de la cadena si un agente se queda sin cuota</label>
         <div class="row"><button class="btn y">Guardar</button><button class="btn r" type="button" data-delarea="${a.id}">Eliminar área</button></div></form>`).join('') +
-        `<form class="panel" id="newArea"><h3>Nueva área (sala)</h3><div class="field-row"><div><label class="l">Nombre</label><input name="name" required placeholder="QA"></div><div><label class="l">Alias</label><input name="alias" placeholder="Sala de pruebas de Kamino"></div><div><label class="l">Icono</label><select name="icon">${opts(ICON_NAMES.map(i => [i, i]), 'radar')}</select></div></div><button class="btn y" style="margin-top:10px">Crear área</button></form>`;
+        `<form class="panel" id="newArea"><h3>Nueva área (sala)</h3><div class="field-row"><div><label class="l">Nombre</label><input name="name" required placeholder="QA"></div><div><label class="l">Alias</label><input name="alias" placeholder="Sala de pruebas de Kamino"></div><div><label class="l">Icono</label><select name="icon">${opts(ICON_NAMES.map(i => [i, i]), 'radar')}</select></div><div><label class="l">Sala en el mapa</label><select name="room">${opts(ROOMS, '', 'Solo en «Más salas»')}</select></div></div><button class="btn y" style="margin-top:10px">Crear área</button></form>`;
     } else if (tab === 'usuarios') {
       const users = await get('/api/users');
       body = `<div class="panel table-wrap"><table class="grid"><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Creado</th><th></th></tr>${users.map(u => `<tr><td>${h(u.username)}${u.deleted_at ? ' <small>(eliminado)</small>' : ''}</td><td>${h(u.name)}</td>
@@ -1443,7 +1346,7 @@ const config = {
             <button class="btn ghost" value="c">Listo</button>`);
           return loadBoot();
         } else if (fm.id === 'newAg') { await post('/api/agents', f); await loadBoot(); route(true); }
-        else if (fm.dataset.area) { await put('/api/areas/' + fm.dataset.area, { name: f.name, alias: f.alias, icon: f.icon, color: f.color, default_agent_id: +f.default_agent_id || null, auto_fallback: f.auto_fallback, fallback_chain: list(f.chain).map(k => S.boot.agents.find(a => a.key === k)?.id).filter(Boolean) }); holo('Área guardada'); await loadBoot(); }
+        else if (fm.dataset.area) { await put('/api/areas/' + fm.dataset.area, { name: f.name, alias: f.alias, icon: f.icon, color: f.color, room: f.room, default_agent_id: +f.default_agent_id || null, auto_fallback: f.auto_fallback, fallback_chain: list(f.chain).map(k => S.boot.agents.find(a => a.key === k)?.id).filter(Boolean) }); holo('Área guardada'); await loadBoot(); }
         else if (fm.id === 'newArea') { await post('/api/areas', f); await loadBoot(); route(true); }
         else if (fm.id === 'newUser') { await post('/api/users', f); route(true); }
         else if (fm.id === 'newLim') { await post('/api/limits', { ...f, agent_id: +f.agent_id }); route(true); }

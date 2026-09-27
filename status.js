@@ -152,6 +152,9 @@ async function status() {
 async function scan() {
   const agents = all('select * from agents order by id');
   await Promise.all(agents.map(probe));
+  const mid = host.defaultMachine();
+  if (host.online(mid)) for (const ag of agents.filter(a => a.adapter === 'agy' && a.enabled)) // cuota de Antigravity aunque no haya corrido nada
+    try { R.saveLimits(ag.id, R.agyLimits(await host.call(mid, 'agyQuota'), ag.default_model)); } catch {}
   const alerted = setting('alerted', {});
   const at = now();
   for (const ag of agents) {
