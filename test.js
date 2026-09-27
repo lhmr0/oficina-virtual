@@ -196,6 +196,10 @@ function gitRepo(name) {
     const diff = await api('GET', `/api/tasks/${qid}/diff`);
     assert.match(diff.diff, /salida\.txt/);
     assert.ok(!/progreso\.md/.test(diff.diff), '.oficina excluido de git');
+    const d = await api('GET', `/api/tasks/${qid}`);
+    assert.ok(d.files.some(f => f.name === 'salida.txt'), 'lista el archivo generado en el worktree (tarea con carpeta git)');
+    const dl = await api('GET', `/api/tasks/${qid}/file?name=salida.txt`, null, true);
+    assert.equal(await dl.text(), fs.readFileSync(path.join(wt, 'salida.txt'), 'utf8'), 'descarga el mismo contenido del archivo generado');
     await api('POST', `/api/tasks/${qid}/approve`, { merge: true });
     assert.equal(task(qid).status, 'completada');
     assert.ok(fs.existsSync(path.join(repo, 'salida.txt')), 'fusionado en main');
