@@ -2,12 +2,13 @@
 import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS, PSTATUS, chip, agent, area, user, project, isAdmin, canEdit,
   agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
   machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML, WIN_LABELS, agentLimits, agentLimitsBadge } from './core.js';
-import { sprite, agentSprite, icon, ICON_NAMES } from './sprites.js';
+import { sprite, agentSprite, userSprite, icon, ICON_NAMES } from './sprites.js';
 import { route, refreshSoon, loadBoot, setProject, applyTheme } from './app.js';
 
 const go = hash => { location.hash = hash; };
 const ACTIVE = ['en_curso', 'en_cola', 'esperando'];
 const PRI = { alta: '▲ alta', media: '■ media', baja: '▼ baja' };
+const AVATARS = [['rebel', 'Piloto rebelde'], ['imperial', 'Oficial imperial'], ['vader', 'Darth Vader']];
 const agentsOn = () => S.boot.agents.filter(a => a.enabled);
 
 // ---------- selector agente / modelo / esfuerzo ----------
@@ -163,7 +164,7 @@ const kanbanCard = (t, showProject = true) => {
   return `<div class="kcard" draggable="${canEdit()}" data-id="${t.id}" style="--c:${ar?.color || '#46529a'}" tabindex="0" title="#${t.id} ${h(t.title)}">
     <div class="row" style="gap:4px;font-size:10px;line-height:1"><small>#${t.id}</small>${tp ? `<span class="chip" style="border-color:${h(tp.color)}">${h(tp.name)}</span>` : ''}${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
     <div class="t">${h(t.title)}</div>
-    <div class="meta">${t.executor === 'humano' ? `${sprite('rebel', '#ff8c42', 1)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${agentSprite(a, 1)}${h(a?.name || '—')} <span>${h(t.model || '')}</span>`}
+    <div class="meta">${t.executor === 'humano' ? `${userSprite(user(t.assignee_user_id), 1)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${agentSprite(a, 1)}${h(a?.name || '—')} <span>${h(t.model || '')}</span>`}
     ${t.status === 'en_curso' ? `<span class="chip st-en_curso">⏱ ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}${t.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : ''}
     ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div>
     ${canEdit() ? `<select class="kmove" aria-label="Mover #${t.id} a">${opts(COLS.filter(([k]) => k !== 'atascadas' && k !== t.status), '', 'Mover a…')}</select>` : ''}</div>`;
@@ -284,7 +285,7 @@ const estacion = {
     if (fk === 'a') chats = chats.filter(c => c.agent_id === fid);
     const desk = t => {
       const a = agent(t.agent_id);
-      const who = t.executor === 'humano' ? sprite('rebel', '#ff8c42', 3.8) : agentSprite(a, 3.8);
+      const who = t.executor === 'humano' ? userSprite(user(t.assignee_user_id), 3.8) : agentSprite(a, 3.8);
       return `<button class="desk ${t.status}" data-task="${t.id}" title="#${t.id} ${h(t.title)} · ${STATUS[t.status]}${a ? ' · ' + h(a.name) : ''}">
         <span class="who">${who}${BUB[t.status] || ''}</span>
         ${sprite('desk', MON[t.status], 3.2)}
@@ -337,7 +338,7 @@ const estacion = {
       <div class="hall-runner"><span class="hall-arrows">‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹</span></div>
       ${[12, 38, 64].map(x => `<span class="hall-lamp" style="left:${x}%">${sprite('bulkhead_lamp', '', 2)}</span>`).join('')}
       <div class="hall-crew">
-        <span class="avatar" title="Tú">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3.8)}<span class="tag">${h(me.name.split(' ')[0])}</span><span class="avatar-status">Tú</span></span>
+        <span class="avatar" title="Tú">${userSprite(me, 3.8)}<span class="tag">${h(me.name.split(' ')[0])}</span><span class="avatar-status">Tú</span></span>
         ${S.boot.agents.map(a => {
           const st = agentState(a, busy), lim = agentLimits(a);
           return `<button type="button" class="avatar ${st.sleeping ? 'sleeping' : ''}" data-agent="${a.id}" title="${h(a.name)} · ${st.text}">
@@ -972,11 +973,11 @@ const consejo = {
       <h2>Propuestas</h2><div class="grid2">${props.map(pc).join('')}</div>` : v.status !== 'en_curso' ? '<div class="empty">Sin propuestas</div>' : ''}
       <h3>Conversaciones del consejo</h3>${x.conversations.map(c => `<div><a href="#/cantina/${c.id}">${h(c.title)}</a></div>`).join('')}`;
     el.onclick = async e => {
-      const tc = e.target.closest('.theme-card');
+      const tc = e.target.closest('.theme-card[data-t]');
       if (tc) {
         const t = tc.dataset.t;
         applyTheme(t);
-        $('.theme-card', el).forEach(c => {
+        $('.theme-card[data-t]', el).forEach(c => {
           const match = c.dataset.t === t;
           c.classList.toggle('on', match);
           const r = $('input[name=theme]', c);
@@ -984,6 +985,17 @@ const consejo = {
         });
         const tb = $('#themeBtn');
         if (tb) tb.textContent = 'Tema: ' + (t === 'blanco' ? 'blanco (Hoth)' : 'oscuro (espacio)');
+        if (S.sound) beep('ok');
+      }
+      const ac = e.target.closest('.theme-card[data-av]');
+      if (ac) {
+        const av = ac.dataset.av;
+        $$('.theme-card[data-av]', el).forEach(c => {
+          const match = c.dataset.av === av;
+          c.classList.toggle('on', match);
+          const r = $('input[name=avatar]', c);
+          if (r) r.checked = match;
+        });
         if (S.sound) beep('ok');
       }
       const b = e.target.closest('button'); if (!b) return;
@@ -1288,8 +1300,16 @@ const config = {
     } else {
       const me = S.boot.me, prefs = me.notif_prefs || {};
       const cur = S.theme || 'oscuro';
-      body = `<form class="panel" id="meF"><div class="row">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 5)}<div><h2 style="margin:0">${h(me.name)}</h2><small>${h(me.username)} · ${h(me.role)} · ${h(S.boot.users.find(u => u.id === me.id)?.rank || '')}</small></div></div>
+      body = `<form class="panel" id="meF"><div class="row">${userSprite(me, 5)}<div><h2 style="margin:0">${h(me.name)}</h2><small>${h(me.username)} · ${h(me.role)} · ${h(S.boot.users.find(u => u.id === me.id)?.rank || '')}</small></div></div>
         <label class="l">Nombre</label><input name="name" value="${h(me.name)}"><label class="l">Nueva contraseña (vacío = no cambiar)</label><input name="password" type="password" minlength="6" autocomplete="new-password">
+        <h3>Avatar</h3>
+        <div class="theme-picks">
+          ${AVATARS.map(([k, l]) => `<label class="theme-card avatar-card ${(me.avatar || 'rebel') === k ? 'on' : ''}" data-av="${k}">
+            <input type="radio" name="avatar" value="${k}" ${(me.avatar || 'rebel') === k ? 'checked' : ''} style="display:none">
+            ${sprite(k, '#ff8c42', 4)}
+            <b>${l}</b>
+          </label>`).join('')}
+        </div>
         <h3>Tema de la interfaz</h3>
         <div class="theme-picks">
           <label class="theme-card ${cur === 'oscuro' ? 'on' : ''}" data-t="oscuro">
@@ -1385,17 +1405,17 @@ const config = {
           const chosenTheme = f.theme || S.theme || 'oscuro';
           notif_prefs.theme = chosenTheme;
           applyTheme(chosenTheme);
-          await put('/api/me', { name: f.name, password: f.password || undefined, notif_prefs }); holo('Perfil guardado'); await loadBoot();
+          await put('/api/me', { name: f.name, avatar: f.avatar, password: f.password || undefined, notif_prefs }); holo('Perfil guardado'); await loadBoot();
         }
         beep('ok');
       } catch (err) { fail(err); }
     };
     el.onclick = async e => {
-      const tc = e.target.closest('.theme-card');
+      const tc = e.target.closest('.theme-card[data-t]');
       if (tc) {
         const t = tc.dataset.t;
         applyTheme(t);
-        $$('.theme-card', el).forEach(c => {
+        $$('.theme-card[data-t]', el).forEach(c => {
           const match = c.dataset.t === t;
           c.classList.toggle('on', match);
           const r = $('input[name=theme]', c);
@@ -1403,6 +1423,17 @@ const config = {
         });
         const tb = $('#themeBtn');
         if (tb) tb.textContent = 'Tema: ' + (t === 'blanco' ? 'crema (Tatooine)' : 'oscuro (espacio)');
+        if (S.sound) beep('ok');
+      }
+      const ac = e.target.closest('.theme-card[data-av]');
+      if (ac) {
+        const av = ac.dataset.av;
+        $$('.theme-card[data-av]', el).forEach(c => {
+          const match = c.dataset.av === av;
+          c.classList.toggle('on', match);
+          const r = $('input[name=avatar]', c);
+          if (r) r.checked = match;
+        });
         if (S.sound) beep('ok');
       }
       const b = e.target.closest('button'); if (!b) return;

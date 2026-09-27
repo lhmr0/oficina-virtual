@@ -1,5 +1,5 @@
 // Núcleo del cliente: estado, API, helpers, widgets, modal, hologramas y sonido
-import { sprite, agentSprite } from './sprites.js';
+import { agentSprite, userSprite } from './sprites.js';
 
 export const S = { boot: null, project: +localStorage.getItem('ov_project') || null, stationFilter: localStorage.getItem('ov_station_filter') || '', unseen: 0, sound: localStorage.getItem('ov_sound') !== '0', theme: localStorage.getItem('ov_theme') || 'oscuro' };
 
@@ -69,7 +69,7 @@ export function agentChip(id, px = 2) {
 export function userChip(id) {
   const u = user(id);
   if (!u) return id ? `#${id}` : '<span class="muted">sistema</span>';
-  return `<span class="row" style="gap:4px;display:inline-flex">${sprite(u.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 2)}${h(u.name)}</span>`;
+  return `<span class="row" style="gap:4px;display:inline-flex">${userSprite(u, 2)}${h(u.name)}</span>`;
 }
 export const WIN_LABELS = {
   five_hour: '5 horas',

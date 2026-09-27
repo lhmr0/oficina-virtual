@@ -380,6 +380,21 @@ const SHAPES = {
     'KGKKGGGGKKGK',
     'KKK......KKK',
   ],
+  // Darth Vader (avatar del jefe)
+  vader: [
+    '...KKKKKK...',
+    '..KDDDDDDK..',
+    '.KDDDDDDDDK.',
+    '.KDDGGGGDDK.',
+    '.KDGGKKGGDK.',
+    '.KDGGKKGGDK.',
+    '.KDDGGGGDDK.',
+    '.KDDDDDDDDK.',
+    '..KDGGGGDK..',
+    '..KD.GG.DK..',
+    '...KKKKKK...',
+    '..KKK..KKK..',
+  ],
 };
 
 export function sprite(kind = 'droid', color = '#4fc3f7', px = 4, extra = '') {
@@ -400,6 +415,14 @@ export function agentSprite(a, px = 4, extra = '') {
   if (k.includes('codex') || k === 'bb8') return sprite('elefante', a?.color || '#3ddc84', px, extra);
   if (k.includes('command') || k.includes('chopper') || k === 'c1-10p') return sprite('chopper', a?.color || '#ff4d4d', px, extra);
   return sprite('droid', a?.color || '#4fc3f7', px, extra);
+}
+
+// avatar elegido por el usuario (rebel, imperial, vader…). Sin avatar, usa el rol.
+const USER_SHAPES = { rebel: 'rebel', imperial: 'imperial', vader: 'vader', yoda: 'yoda' };
+export function userSprite(u, px = 2, extra = '') {
+  const av = String(typeof u === 'string' ? u : (u?.avatar || '')).toLowerCase();
+  const kind = USER_SHAPES[av] || (u?.role === 'admin' ? 'imperial' : 'rebel');
+  return sprite(kind, u?.color || '#ff8c42', px, extra);
 }
 
 // icono pixel del área
