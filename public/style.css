@@ -653,7 +653,8 @@ dialog::backdrop { background: var(--dialog-backdrop); backdrop-filter: blur(3px
   .drawer, .drawer.wide { width: 100vw; box-shadow: none; }
   .drawer main { padding: 14px 14px 90px; }
   .hud-tl { left: 8px; top: 8px; right: 8px; }
-  .hud-tl select { flex: 1; max-width: none; }
+  .hud-tl select { flex: 1; max-width: none; min-width: 0; }
+  .logo span { display: none; }
   .drawer-open .hud-tl { display: none; }
   .dock { bottom: calc(6px + env(safe-area-inset-bottom)); left: 6px; right: 6px; width: auto; transform: none; justify-content: space-around; gap: 0; padding: 4px; border-radius: 14px; }
   .dock kbd, .dock-me span { display: none; }

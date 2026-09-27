@@ -75,8 +75,11 @@ function shell() {
   const me = S.boot.me;
   app.innerHTML = `
   <div class="hud-tl">
-    <a class="logo" href="#/estacion" title="Volver al mapa">★ OFICINA</a>
+    <a class="logo" href="#/estacion" title="Volver al mapa">★ <span>OFICINA</span></a>
     <select id="projSel" aria-label="Proyecto que se muestra en el mapa">${opts(S.boot.projects.map(p => [p.id, p.name]), S.project || '', 'Todos los proyectos')}</select>
+    <select id="stSel" aria-label="Filtrar la estación por agente o área"><option value="">Todos los agentes y áreas</option>
+      <optgroup label="Agente">${opts(S.boot.agents.map(a => ['a:' + a.id, a.name]), S.stationFilter)}</optgroup>
+      <optgroup label="Área">${opts(S.boot.areas.map(a => ['r:' + a.id, a.name]), S.stationFilter)}</optgroup></select>
   </div>
   <div id="qpaused" class="queue-paused" ${S.boot.queue_paused ? '' : 'hidden'}>⚠ Cola en pausa (Orden 66) ${isAdmin() ? '<button class="btn sm y" id="resumeQ">Reanudar cola</button>' : ''}</div>
   <div id="map" class="map"></div>
@@ -106,6 +109,7 @@ function shell() {
   <dialog id="palette" class="palette" aria-label="Buscar"><input id="palQ" placeholder="Busca una tarea, proyecto o sección…" autocomplete="off"><div id="palList" role="listbox"></div></dialog>
   <aside class="inbox" id="inbox" hidden></aside>`;
   $('#projSel').onchange = e => { setProject(+e.target.value); mapSoon(0); if (current?.name === 'kanban') go('#/kanban/' + (S.project || 'todos')); };
+  $('#stSel').onchange = e => { S.stationFilter = e.target.value; localStorage.setItem('ov_station_filter', S.stationFilter); mapSoon(0); };
   $('#drawerX').onclick = closeDrawer;
   const menu = $('#meMenu');
   const placeMenu = () => {

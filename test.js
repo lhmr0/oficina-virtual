@@ -102,6 +102,22 @@ function gitRepo(name) {
       assert.equal(ops.codexLimits({ thread_id: 'no-existe-123' }), null);
     } finally { if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev; }
   });
+  await t('antigravity: cuota por modelo → ventana de 5 h (modelo pedido o el más consumido)', async () => {
+    const q = { models: [{ label: 'Gemini 3.8 Flash (High)', remaining: 0.75, resets: '2026-09-27T04:46:48Z' }, { label: 'Claude Opus 4.6 (Thinking)', remaining: 0.1, resets: '2026-09-27T05:11:32Z' }] };
+    assert.deepEqual(R.agyLimits(q, 'gemini-3.8-flash-high'), [{ win: 'five_hour', pct: 25, resets: '2026-09-27T04:46:48Z' }]);
+    assert.equal(Math.round(R.agyLimits(q, 'otro')[0].pct), 90);
+    assert.deepEqual(R.agyLimits(null, 'x'), []);
+  });
+  await t('áreas: tipo de sala sembrado, validado y editable', async () => {
+    cookie = ''; await api('POST', '/api/login', { username: 'leia', password: 'secreto1' });
+    const areas = (await api('GET', '/api/bootstrap')).areas;
+    assert.equal(areas.find(a => a.name === 'Desarrollo').room, 'dev');
+    const { id } = await api('POST', '/api/areas', { name: 'QA', room: 'hackeo' });
+    assert.equal(one('select room from areas where id=?', id).room, '');
+    await api('PUT', '/api/areas/' + id, { room: 'ana' });
+    assert.equal(one('select room from areas where id=?', id).room, 'ana');
+    await api('DELETE', '/api/areas/' + id);
+  });
   await t('PWA: manifest servido sin sesión y con iconos que existen', async () => {
     const r = await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`);
     assert.equal(r.headers.get('content-type'), 'application/manifest+json');

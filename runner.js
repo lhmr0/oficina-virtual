@@ -343,6 +343,7 @@ async function start(item, mid) {
 
   const code = await exited;
   clearTimeout(timer);
+  if (ag.adapter === 'agy') try { st.limits.push(...agyLimits(await host.call(mid, 'agyQuota'), cc.model || ag.default_model)); } catch {}
   // Codex no manda sus límites por stdout: se leen del rollout de la sesión en la máquina (mismo formato rate_limits)
   if (ag.adapter === 'codex' && !st.limits.length && (st.sessionId || cc.session_id)) {
     try { const rl = await host.call(mid, 'codexLimits', { thread_id: st.sessionId || cc.session_id }); if (rl) ad.parse({ rate_limits: rl }, st, () => {}); } catch {} // agente de campo sin actualizar: sin límites, como antes
@@ -471,6 +472,13 @@ function toIsoReset(r) {
     return isNaN(d.getTime()) ? null : d.toISOString();
   }
   return null;
+}
+// Antigravity: cuota por modelo en ventanas de ~5 h (sin ventana semanal). Se usa el modelo pedido; si no aparece, el más consumido.
+function agyLimits(q, model) {
+  const slug = s => String(s).toLowerCase().replace(/[()]/g, '').trim().replace(/\s+/g, '-'); // "Gemini 3.8 Flash (High)" → gemini-3.8-flash-high
+  const ms = q?.models || [];
+  const m = ms.find(x => slug(x.label) === model) || ms.reduce((a, b) => !a || b.remaining < a.remaining ? b : a, null);
+  return m ? [{ win: 'five_hour', pct: (1 - m.remaining) * 100, resets: m.resets }] : [];
 }
 function saveLimits(agentId, limits) {
   for (const l of limits) run(`insert into agent_limits(agent_id,source,win,metric,limit_value,used_value,resets_at,updated_at) values(?,?,?,?,?,?,?,?)
@@ -774,4 +782,4 @@ function resumeQueue(userId) { setSetting('queue_paused', false); log(userId, 's
 
 module.exports = { DEFAULT_EXCLUDE, ADAPTERS, STATUS, RULES, RULES_CHAT, codexFallback, queue, active, pendingPerms, runTurn, runTask, runTaskBg, abortConv, answerPermission, setStatus, changeTask,
   createTask, approveTask, returnTask, handoffTask, createHandoff, snapshot, taskPrompt, workdir, folderOf, machineOfTask, machineOfConv, recover, order66,
-  resumeQueue, quotaTick, parseReset, saveLimits, markQuota, pump, question, isPaused, depsPending };
+  resumeQueue, quotaTick, parseReset, saveLimits, agyLimits, markQuota, pump, question, isPaused, depsPending };

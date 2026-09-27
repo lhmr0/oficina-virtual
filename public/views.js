@@ -241,7 +241,7 @@ const ROOM_DECO = {
   ana: [['holotable', 'holotable', 'Holoproyector táctico de análisis', 'deco-holo'], ['console', 'console', 'Consola de radar', '', '#3ddc84'], ['server', 'server', 'Servidor de telemetría'], ['whiteboard', 'whiteboard', 'Pizarra de análisis'], ['plant', 'bigplant', 'Planta de la sala de mando']],
   cantina: [['coffee', 'coffee', 'Estación de caf'], ['vending', 'vending', 'Expendedora de leche azul'], ['arcade', 'arcade', 'Arcade: Trench Run', 'deco-arcade'], ['dejarik', 'dejarik', 'Mesa de Dejarik', 'deco-dejarik']],
 };
-const roomKind = a => { const n = a.name.toLowerCase(); return n.includes('doc') ? 'doc' : n.includes('anál') || n.includes('anal') ? 'ana' : 'dev'; };
+const ROOMS = [['doc', 'Archivo (biblioteca)'], ['dev', 'Hangar (taller)'], ['ana', 'Sala de mando (radar)']];
 const ROOM_CODE = { doc: 'DOC-01', dev: 'DEV-02', ana: 'CMD-01' };
 const NEEDS = ['esperando', 'revision', 'fallida', 'pausada_cuota'];
 const agentState = (a, busy) => {
@@ -252,14 +252,17 @@ const agentState = (a, busy) => {
 const estacion = {
   refreshOn: ['task.updated', 'task.created', 'conv.updated', 'run.started', 'agent.status', 'council.updated'],
   async render(el) {
-    const [tasks, chats, execs, council] = await Promise.all([
+    let [tasks, chats, execs, council] = await Promise.all([
       get('/api/tasks'),
       get('/api/conversations'),
       get('/api/history/ejecuciones?page=1').catch(() => ({ rows: [] })),
       get('/api/council').catch(() => []),
     ]);
-    const vis = tasks.filter(t => !S.project || t.project_id === S.project);
     const busy = new Set([...tasks.filter(t => ACTIVE.includes(t.status)).map(t => t.agent_id), ...chats.filter(c => LIVE.includes(c.status)).map(c => c.agent_id)]);
+    // filtro de la estación (selector del HUD): "a:<agente>" o "r:<área>"
+    const [fk, fid] = (S.stationFilter || '').split(':').map((x, i) => i ? +x : x);
+    const vis = tasks.filter(t => (!S.project || t.project_id === S.project) && (!fk || (fk === 'a' ? t.agent_id : t.area_id) === fid));
+    if (fk === 'a') chats = chats.filter(c => c.agent_id === fid);
     const desk = t => {
       const a = agent(t.agent_id);
       const who = t.executor === 'humano' ? sprite('rebel', '#ff8c42', 3.8) : agentSprite(a, 3.8);
@@ -274,7 +277,7 @@ const estacion = {
     // la placa es el botón de la sala (teclado); el resto de la sala también abre al hacer clic
     const plaque = (ic, title, sub, code, label, extra = '') => `<div class="plaque"><button type="button" class="plaque-btn" aria-label="${h(label)}">${icon(ic, 2.5)}<b>${h(title)}</b></button><small>${h(sub)}</small><span class="room-code">[${code}]</span>${extra}</div>`;
     const room = a => {
-      const kind = roomKind(a);
+      const kind = a.room;
       const at = vis.filter(t => t.area_id === a.id && AT_DESK.includes(t.status));
       const shown = at.slice(0, 6), pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
       return `<section class="room2 room-${kind}" data-area="${a.id}" style="--c:${a.color}">
@@ -307,9 +310,8 @@ const estacion = {
     </section>`;
     const me = S.boot.me;
 
-    // salas fijas arriba (Documentación, Desarrollo, Análisis); el resto va a "Más salas"
-    const byName = (...ks) => S.boot.areas.find(a => ks.some(k => a.name.toLowerCase().includes(k)));
-    const fixedAreas = [byName('doc') || S.boot.areas[0], byName('desarr') || S.boot.areas[1], byName('anál', 'anal') || S.boot.areas[2]].filter(Boolean);
+    // salas fijas arriba según el tipo de sala de cada área (Configuración → Áreas); el resto va a "Más salas"
+    const fixedAreas = ROOMS.map(([k]) => S.boot.areas.find(a => a.room === k)).filter(Boolean);
     const otherAreas = S.boot.areas.filter(a => !fixedAreas.includes(a));
 
     const hall = `<div class="hall" aria-label="Pasillo principal">
@@ -1193,12 +1195,13 @@ const config = {
     } else if (tab === 'areas') {
       body = S.boot.areas.map(a => `<form class="panel" data-area="${a.id}" style="margin-bottom:12px;border-color:${a.color}"><div class="row">${icon(a.icon, 4)}<h2 style="margin:0">${h(a.name)}</h2></div>
         <div class="field-row"><div><label class="l">Nombre</label><input name="name" value="${h(a.name)}"></div><div><label class="l">Alias</label><input name="alias" value="${h(a.alias)}"></div>
-        <div><label class="l">Icono</label><select name="icon">${opts(ICON_NAMES.map(i => [i, i]), a.icon)}</select></div><div><label class="l">Color</label><input type="color" name="color" value="${h(a.color)}" style="height:40px"></div></div>
+        <div><label class="l">Icono</label><select name="icon">${opts(ICON_NAMES.map(i => [i, i]), a.icon)}</select></div><div><label class="l">Color</label><input type="color" name="color" value="${h(a.color)}" style="height:40px"></div>
+        <div><label class="l">Sala en el mapa</label><select name="room">${opts(ROOMS, a.room, 'Solo en «Más salas»')}</select></div></div>
         <div class="field-row"><div><label class="l">Agente por defecto</label><select name="default_agent_id">${opts(S.boot.agents.map(x => [x.id, x.name]), a.default_agent_id, '—')}</select></div>
         <div><label class="l">Cadena de relevo (claves en orden)</label><input name="chain" value="${h(a.fallback_chain.map(id => agent(id)?.key).filter(Boolean).join(', '))}" placeholder="claude, codex, commandcode"></div></div>
         <label class="row"><input type="checkbox" name="auto_fallback" ${a.auto_fallback ? 'checked' : ''}> Relevo automático al siguiente de la cadena si un agente se queda sin cuota</label>
         <div class="row"><button class="btn y">Guardar</button><button class="btn r" type="button" data-delarea="${a.id}">Eliminar área</button></div></form>`).join('') +
-        `<form class="panel" id="newArea"><h3>Nueva área (sala)</h3><div class="field-row"><div><label class="l">Nombre</label><input name="name" required placeholder="QA"></div><div><label class="l">Alias</label><input name="alias" placeholder="Sala de pruebas de Kamino"></div><div><label class="l">Icono</label><select name="icon">${opts(ICON_NAMES.map(i => [i, i]), 'radar')}</select></div></div><button class="btn y" style="margin-top:10px">Crear área</button></form>`;
+        `<form class="panel" id="newArea"><h3>Nueva área (sala)</h3><div class="field-row"><div><label class="l">Nombre</label><input name="name" required placeholder="QA"></div><div><label class="l">Alias</label><input name="alias" placeholder="Sala de pruebas de Kamino"></div><div><label class="l">Icono</label><select name="icon">${opts(ICON_NAMES.map(i => [i, i]), 'radar')}</select></div><div><label class="l">Sala en el mapa</label><select name="room">${opts(ROOMS, '', 'Solo en «Más salas»')}</select></div></div><button class="btn y" style="margin-top:10px">Crear área</button></form>`;
     } else if (tab === 'usuarios') {
       const users = await get('/api/users');
       body = `<div class="panel table-wrap"><table class="grid"><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Creado</th><th></th></tr>${users.map(u => `<tr><td>${h(u.username)}${u.deleted_at ? ' <small>(eliminado)</small>' : ''}</td><td>${h(u.name)}</td>
@@ -1324,7 +1327,7 @@ const config = {
             <button class="btn ghost" value="c">Listo</button>`);
           return loadBoot();
         } else if (fm.id === 'newAg') { await post('/api/agents', f); await loadBoot(); route(true); }
-        else if (fm.dataset.area) { await put('/api/areas/' + fm.dataset.area, { name: f.name, alias: f.alias, icon: f.icon, color: f.color, default_agent_id: +f.default_agent_id || null, auto_fallback: f.auto_fallback, fallback_chain: list(f.chain).map(k => S.boot.agents.find(a => a.key === k)?.id).filter(Boolean) }); holo('Área guardada'); await loadBoot(); }
+        else if (fm.dataset.area) { await put('/api/areas/' + fm.dataset.area, { name: f.name, alias: f.alias, icon: f.icon, color: f.color, room: f.room, default_agent_id: +f.default_agent_id || null, auto_fallback: f.auto_fallback, fallback_chain: list(f.chain).map(k => S.boot.agents.find(a => a.key === k)?.id).filter(Boolean) }); holo('Área guardada'); await loadBoot(); }
         else if (fm.id === 'newArea') { await post('/api/areas', f); await loadBoot(); route(true); }
         else if (fm.id === 'newUser') { await post('/api/users', f); route(true); }
         else if (fm.id === 'newLim') { await post('/api/limits', { ...f, agent_id: +f.agent_id }); route(true); }
