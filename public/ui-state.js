@@ -26,7 +26,8 @@ export function captureInputState(controls, activeElement) {
   const values = Object.create(null);
   let focusKey = null;
   for (const { control, key } of controlsWithKeys(controls)) {
-    if (control.type === 'file' || control.type === 'button' || !key || !('value' in control)) continue;
+    if (control.type === 'button' || !key || !('value' in control)) continue;
+    if (control.type === 'file') { if (control.files?.length) values[key] = { files: control.files }; continue; } // value de un file no se puede restaurar
     values[key] = { value: readValue(control), ...selection(control) };
     if (control === activeElement) focusKey = key;
   }
@@ -37,9 +38,10 @@ export function restoreInputState(root, state) {
   const controls = controlsWithKeys(root.querySelectorAll('input,select,textarea'));
   let focused = null;
   for (const { control, key } of controls) {
-    if (!key || control.type === 'file' || control.type === 'button') continue;
+    if (!key || control.type === 'button') continue;
     const saved = state.values[key];
     if (!saved) continue;
+    if (control.type === 'file') { if (saved.files) { control.files = saved.files; control.dispatchEvent(new Event('change', { bubbles: true })); } continue; }
     if (control.type === 'checkbox' || control.type === 'radio') control.checked = saved.value;
     else if (control.tagName !== 'SELECT' || Array.from(control.options || []).some(option => option.value === saved.value)) control.value = saved.value;
     if (saved.selectionStart !== undefined && typeof control.setSelectionRange === 'function') {

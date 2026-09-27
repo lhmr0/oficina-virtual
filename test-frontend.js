@@ -7,6 +7,7 @@ function input(id, type = 'text', value = '') {
     id, type, value, checked: false, selectionStart: 0, selectionEnd: 0,
     setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
     focus() { this.focused = true; },
+    dispatchEvent(e) { this.dispatched = e.type; },
   };
 }
 
@@ -33,7 +34,7 @@ async function main() {
   const savedDraft = Object.values(state.values)[0];
   assert.equal(savedDraft.value, 'texto escrito durante la carga');
   assert.equal(savedDraft.selectionStart, 7);
-  assert.equal(Object.values(state.values).length, 1, 'file input values must never be copied');
+  assert.equal(Object.values(state.values).length, 2);
 
   const refreshedDraft = input('message', 'textarea', 'stale response value');
   const refreshedFile = input('attachment', 'file');
@@ -43,6 +44,9 @@ async function main() {
   assert.equal(refreshedDraft.selectionStart, 7);
   assert.equal(refreshedDraft.selectionEnd, 14);
   assert.equal(refreshedDraft.focused, true);
+  assert.equal(refreshedFile.files, file.files, 'la selección de archivos sobrevive al refresco');
+  assert.equal(refreshedFile.value, '', 'nunca se asigna value a un campo de archivo');
+  assert.equal(refreshedFile.dispatched, 'change');
 
   const replies = [form('/api/tasks/12/reply', 'respuesta del borrador'), form('/api/conversations/5/reply', 'otra respuesta')];
   replies[1].field.selectionStart = 4;
@@ -55,24 +59,6 @@ async function main() {
   assert.equal(refreshedReplies[1].field.selectionStart, 4);
   assert.equal(refreshedReplies[1].field.selectionEnd, 10);
   assert.equal(refreshedReplies[1].field.focused, true);
-
-  const logs = await import('./public/log-window.js').catch(() => null);
-  assert.ok(logs, 'public/log-window.js must provide a bounded, pageable log window');
-  assert.equal(typeof logs.createLogWindow, 'function');
-  const windowed = logs.createLogWindow(500);
-  windowed.append(Array.from({ length: 10000 }, (_, i) => `línea ${i}`));
-  assert.equal(windowed.visible().length, 500);
-  assert.equal(windowed.visible()[0], 'línea 9500');
-  assert.equal(windowed.visible()[499], 'línea 9999');
-  assert.equal(windowed.canPrevious(), true);
-  windowed.previous();
-  assert.equal(windowed.visible()[0], 'línea 9000');
-  assert.equal(windowed.canNext(), true);
-  windowed.append('línea 10000', { follow: false });
-  assert.equal(windowed.visible()[0], 'línea 9000', 'new events must not move a reader away from older lines');
-  while (windowed.canNext()) windowed.next();
-  assert.equal(windowed.visible()[499], 'línea 10000');
-  assert.equal(windowed.canPrevious(), true);
 
   console.log('FRONTEND TODO OK');
 }

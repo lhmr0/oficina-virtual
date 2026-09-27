@@ -31,8 +31,11 @@ async function download(id) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-// eventos de los procesos (salida, fin): cola en memoria con reintento, así no se pierden si se corta la red
+// eventos de los procesos (salida, fin): cola en memoria con reintento, así no se pierden si se corta la red;
+// seq creciente para que el servidor descarte los repetidos si reenviamos un lote ya procesado
+// ponytail: cola solo en memoria; persistirla si hace falta recuperar eventos tras reiniciar el worker
 const outbox = [];
+let seq = 0;
 (async function flush() {
   for (;;) {
     if (!outbox.length) { await sleep(150); continue; }
@@ -45,7 +48,7 @@ const outbox = [];
 async function handleCall({ id, op, args }) {
   try {
     let result;
-    if (op === 'spawnRun') { result = H.spawnRun(args, ev => outbox.push({ runId: args.runId, ...ev })); say(`▶ run ${args.runId}: ${path.basename(args.exe)} en ${args.cwd}`); }
+    if (op === 'spawnRun') { result = H.spawnRun(args, ev => outbox.push({ runId: args.runId, seq: ++seq, ...ev })); say(`▶ run ${args.runId}: ${path.basename(args.exe)} en ${args.cwd}`); }
     else if (op === 'putFiles') result = await H.ops.putFiles(args, f => download(f.id));
     else if (Object.hasOwn(H.ops, op)) result = await H.ops[op](args);
     else throw new Error('Operación desconocida: ' + op);

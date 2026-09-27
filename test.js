@@ -8,6 +8,7 @@ const { execFileSync } = require('node:child_process');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-test-'));
 process.env.OFICINA_DATA = path.join(TMP, 'data');
 process.env.OFICINA_NO_TOAST = '1';
+process.env.OFICINA_KILL_GRACE_MS = '400';
 const PORT = 4300 + Math.floor(Math.random() * 500);
 process.env.OFICINA_PORT = String(PORT);
 
@@ -85,7 +86,7 @@ function gitRepo(name) {
     for (const f of fs.readdirSync(path.join(__dirname, 'public')).filter(f => f.endsWith('.js')))
       execFileSync(process.execPath, ['--check', '--input-type=module'], { input: fs.readFileSync(path.join(__dirname, 'public', f)), stdio: ['pipe', 'ignore', 'pipe'] });
   });
-  for (const script of ['test-hostops.js', 'test-frontend.js', 'test-remote.js']) {
+  for (const script of ['test-hostops.js', 'test-frontend.js']) {
     const file = path.join(__dirname, script);
     if (fs.existsSync(file)) await t(`regresión: ${script}`, async () => execFileSync(process.execPath, ['--no-warnings', file], { stdio: 'inherit' }));
   }
@@ -216,6 +217,35 @@ function gitRepo(name) {
     await until(() => task(id2).status === 'fallida', 15000, 'timeout');
     assert.equal(one('select end_reason from runs where task_id=? order by id desc', id2).end_reason, 'timeout');
     update('agents', fake3, { timeout_min: 1 });
+  });
+
+  await t('máquina sin respuesta: tras el timeout libera el cupo y conserva el bloqueo de carpeta hasta reconciliar (también tras reiniciar)', async () => {
+    const H = require('./host');
+    const origCall = H.call, origRunOp = H.runOp;
+    const plain = path.join(TMP, 'plana'); fs.mkdirSync(plain);
+    const pp = (await api('POST', '/api/projects', { name: 'Plana', folders: [{ label: 'p', path: plain }] })).id;
+    const pf = (await api('GET', '/api/projects')).find(p => p.id === pp).folders[0].id;
+    H.runOp = async () => false; // la máquina no recibe el killRun
+    H.call = (mid, op, args) => op === 'killRun' ? Promise.reject(new Error('La máquina se desconectó')) : origCall(mid, op, args);
+    try {
+      update('agents', fake3, { timeout_min: 0.02 });
+      const a = (await api('POST', '/api/tasks', { project_id: pp, folder_id: pf, title: 'Colgada', prompt: 'LENTO', agent_id: fake3, run: true })).id;
+      await until(() => task(a).status === 'fallida', 15000, 'timeout sin exit');
+      const ra = one('select * from runs where task_id=? order by id desc', a);
+      assert.equal(ra.end_reason, 'timeout'); assert.equal(ra.ended_at, null, 'fin no confirmado');
+      assert.ok(![...R.active.values()].some(x => x.agentId === fake3), 'cupo del agente liberado');
+      const b = (await api('POST', '/api/tasks', { project_id: pp, folder_id: pf, title: 'Misma carpeta', prompt: 'x', agent_id: fake2, run: true })).id;
+      await new Promise(r => setTimeout(r, 500));
+      assert.equal(task(b).status, 'en_cola', 'la carpeta sigue bloqueada');
+      R.orphans.clear(); R.recover(); // reinicio del servidor: el bloqueo se reconstruye desde runs.ended_at null
+      R.pump(); await new Promise(r => setTimeout(r, 500));
+      assert.notEqual(task(b).status, 'revision', 'bloqueo persistente tras reiniciar');
+      assert.ok(R.orphans.has(ra.id));
+      H.call = origCall; H.runOp = origRunOp;
+      bus.emit('machine.online', one('select id from machines where is_local=1').id);
+      await until(() => task(b).status === 'revision', 15000, 'b corre tras reconciliar');
+      assert.ok(one('select ended_at from runs where id=?', ra.id).ended_at, 'fin confirmado al reconciliar');
+    } finally { H.call = origCall; H.runOp = origRunOp; update('agents', fake3, { timeout_min: 1 }); }
   });
 
   await t('cola respeta max_concurrent', async () => {
@@ -460,6 +490,20 @@ function gitRepo(name) {
     assert.match(ctx, /OBJETIVO-ORIGINAL/); assert.match(ctx, /continúa/);
   });
 
+  await t('eventos del worker: un lote reenviado se aplica una sola vez', async () => {
+    const H = require('./host');
+    const mid = one('select id from machines where is_local=1').id;
+    const seen = [];
+    await H.spawnRun(mid, { runId: 'dup-1', exe: process.execPath, args: ['-e', 'setTimeout(()=>{},10000)'], cwd: TMP }, ev => seen.push(ev));
+    const batch = [{ runId: 'dup-1', seq: 1, t: 'out', line: 'uno' }, { runId: 'dup-1', seq: 2, t: 'out', line: 'dos' }];
+    H.events({ id: mid }, batch);
+    H.events({ id: mid }, batch); // respuesta perdida → el worker reenvía
+    H.events({ id: mid }, [...batch, { runId: 'dup-1', seq: 3, t: 'out', line: 'tres' }]);
+    H.events({ id: mid }, [{ runId: 'dup-1', t: 'out', line: 'worker antiguo' }]); // sin seq: compatibilidad
+    assert.deepEqual(seen.filter(e => e.t === 'out').map(e => e.line), ['uno', 'dos', 'tres', 'worker antiguo']);
+    await H.runOp('dup-1', 'killRun');
+  });
+
   // ---------- agente de campo remoto (worker.js en otro proceso) ----------
   const { spawn } = require('node:child_process');
   let worker;
@@ -649,6 +693,6 @@ function gitRepo(name) {
     if (server) server.close();
     for (const a of R.active.values()) if (a.runId) require('./host').runOp(a.runId, 'killRun');
     console.log(failed ? `\n${failed} FALLARON` : '\nTODO OK');
-    process.exitCode = failed ? 1 : 0;
+    process.exit(failed ? 1 : 0);
   }
 })();

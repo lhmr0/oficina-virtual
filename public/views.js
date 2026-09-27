@@ -518,7 +518,7 @@ const proyectos = {
     el.innerHTML = `<div class="row"><h1 style="margin:0">Proyectos</h1><span class="right">${canEdit() ? '<button class="btn y" id="np">+ Proyecto</button>' : ''}</span></div>
       <div class="row" style="margin:12px 0"><select id="pfSt" style="width:auto">${opts(Object.entries(PSTATUS), f.status, 'Todos los estados')}</select><input id="pfQ" placeholder="Buscar proyecto" value="${h(f.q)}" style="max-width:280px"></div>
       <div class="panel table-wrap"><table class="grid"><tr><th>Código</th><th>Proyecto</th><th>Tipo</th><th>Estado</th><th>Carpetas</th><th>Avance</th><th>Tareas</th><th>Agentes</th><th>Actividad</th><th></th></tr>
-      ${list.map(p => `<tr class="click" data-p="${p.id}"><td><span style="color:${h(p.color)}">■</span> ${h(p.code || '-')}</td><td><b>${h(p.name)}</b><br><small>${h(p.description).slice(0, 80)}</small></td>
+      ${list.map(p => `<tr class="click" data-p="${p.id}"><td><span style="color:${h(p.color)}">■</span> ${h(p.code || '-')}</td><td><b><a href="#/kanban/${p.id}">${h(p.name)}</a></b><br><small>${h(p.description).slice(0, 80)}</small></td>
         <td>${p.kind === 'con_carpetas' ? '📁 carpetas' : '📝 registro'}</td><td>${chip(p.status === 'activo' ? 'en_curso' : p.status === 'completado' ? 'completada' : p.status === 'pausado' ? 'esperando' : 'pendiente', PSTATUS[p.status])}</td>
         <td>${p.folders.map(x => `<span class="chip" title="${h(x.path)}">${h(x.label)}${x.is_git ? ' (git)' : ''}</span>`).join(' ') || '<small class="muted">—</small>'}</td>
         <td>${saber(p.progress, p.color)}<small>${p.progress}% (${p.counts.completada || 0}/${p.total})</small></td>
@@ -641,6 +641,26 @@ const kanban = {
 // ===================== TAREA =====================
 const logClass = l => l.startsWith('⚠') || /\[(?:AVISO|ERROR)\]/i.test(l) ? 'w' : /^[▶■]|^Listo:/i.test(l) ? 's' : l.startsWith('💬') ? 'e' : '';
 const logHTML = txt => txt.split('\n').map(l => `<div class="${logClass(l)}">${h(l)}</div>`).join('');
+// ponytail: tope fijo de líneas en pantalla; el log completo sigue en el servidor y se pide con el botón
+const LOG_MAX = 1000;
+const MORE = '<button type="button" class="btn sm ghost" data-more>⤒ Ver líneas anteriores</button>';
+function showLog(c, txt, all = false) {
+  const lines = txt.split('\n'), cut = all ? 0 : Math.max(0, lines.length - LOG_MAX);
+  c.innerHTML = (cut ? MORE : '') + logHTML(lines.slice(cut).join('\n'));
+}
+function appendLog(c, line) {
+  const stick = c.scrollHeight - c.scrollTop - c.clientHeight < 40;
+  c.insertAdjacentHTML('beforeend', `<div class="${logClass(line)}">${h(line)}</div>`);
+  if (!stick) return; // quien lee arriba no sufre saltos: se recorta al volver al final
+  let extra = c.querySelectorAll(':scope > div').length - LOG_MAX;
+  if (extra > 0 && c.dataset.run && !c.querySelector(':scope > [data-more]')) c.insertAdjacentHTML('afterbegin', MORE);
+  while (extra-- > 0) c.querySelector(':scope > div').remove();
+  c.scrollTop = c.scrollHeight;
+}
+document.addEventListener('click', e => {
+  const c = e.target.closest('[data-more]')?.parentElement;
+  if (c?.dataset.run) get(`/api/runs/${c.dataset.run}/log`).then(lg => { showLog(c, lg.log, true); c.scrollTop = 0; }, fail);
+});
 function messagesHTML(msgs) {
   return msgs.map(m => `<div class="msg ${m.role} ${m.kind === 'consulta' ? 'consulta' : ''}"><div class="who">${m.role === 'agente' ? agentChip(m.agent_id, 1) : m.role === 'usuario' ? userChip(m.user_id) : 'SISTEMA'} · ${fmtDate(m.at)}${m.kind !== 'mensaje' ? ' · ' + h(m.kind) : ''}</div>${md(m.text)}</div>`).join('') || '<div class="empty">Sin mensajes</div>';
 }
@@ -675,9 +695,7 @@ const tarea = {
       const c = $('#console');
       if (c && (+c.dataset.run === d.run_id || c.dataset.live === '1')) {
         if (+c.dataset.run !== d.run_id) { c.dataset.run = d.run_id; c.innerHTML = ''; }
-        const stick = c.scrollHeight - c.scrollTop - c.clientHeight < 40;
-        c.insertAdjacentHTML('beforeend', `<div class="${logClass(d.line)}">${h(d.line)}</div>`);
-        if (stick) c.scrollTop = c.scrollHeight;
+        appendLog(c, d.line);
       }
       return 'handled';
     }
@@ -731,7 +749,7 @@ const tarea = {
         <button type="button" class="btn sm ghost" id="fsConsoleBtn" title="Pantalla completa">⛶ Maximizar</button>
       </div><div class="console" id="console" data-scroll="console" data-run="${runId}" data-live="${runId === x.runs[0]?.id ? 1 : 0}">cargando…</div>` : '<div class="empty">Aún no se ejecuta. Pulsa ▶ Ejecutar.</div>';
       if (runId) {
-        get(`/api/runs/${runId}/log`).then(lg => { const c = $('#console', el); if (c) { c.innerHTML = logHTML(lg.log); c.scrollTop = c.scrollHeight; } });
+        get(`/api/runs/${runId}/log`).then(lg => { const c = $('#console', el); if (c) { showLog(c, lg.log); c.scrollTop = c.scrollHeight; } });
         $('#runSel', body).onchange = e => { (S.taskRun ||= {})[id] = +e.target.value; route(true); };
       }
     } else if (tab === 'chat') {
@@ -764,7 +782,7 @@ const tarea = {
         ${t.worktree_path ? `<h3>Worktree</h3><code>${h(t.worktree_path)}</code>` : ''}`;
     }
     $$('.tabs [data-tab]', el).forEach(b => b.onclick = () => { S.taskTab = b.dataset.tab; route(true); });
-    $('#attIn', el)?.addEventListener('change', async e => { try { await uploadAll([...e.target.files], { task_id: id }); holo('Adjuntado', 'Lo recibirá el agente en su próximo turno'); } catch (err) { fail(err); } });
+    $('#attIn', el)?.addEventListener('change', async e => { try { await uploadAll([...e.target.files], { task_id: id }); e.target.value = ''; holo('Adjuntado', 'Lo recibirá el agente en su próximo turno'); } catch (err) { fail(err); } });
     $('#replyF', el)?.addEventListener('submit', async e => {
       e.preventDefault(); const text = $('#replyT').value.trim(); if (!text) return;
       try { await post(`/api/tasks/${id}/reply`, { text }); $('#replyT').value = ''; beep('ok'); refreshSoon(0); } catch (err) { fail(err); }
@@ -833,7 +851,7 @@ const cantina = {
     const cid = +cur.args[0];
     if (type === 'run.log') {
       if (d.conv_id !== cid) return 'handled';
-      const c = $('#chatLive'); if (c) { c.hidden = false; c.insertAdjacentHTML('beforeend', `<div class="${logClass(d.line)}">${h(d.line)}</div>`); c.scrollTop = c.scrollHeight; }
+      const c = $('#chatLive'); if (c) { c.hidden = false; c.dataset.run = d.run_id; appendLog(c, d.line); }
       return 'handled';
     }
     if (type === 'conv.updated' || type === 'run.started' || type === 'permiso') return 'refresh';
@@ -844,7 +862,7 @@ const cantina = {
     const list = await get(`/api/conversations?q=${encodeURIComponent(q.q)}${q.archived ? '&archived=1' : ''}`);
     const left = `<div class="col-flex"><button class="btn y" id="newChat">+ Nueva consulta</button><input id="chatQ" placeholder="Buscar chats" value="${h(q.q)}">
       <label class="row" style="font-size:13px"><input type="checkbox" id="chatArch" ${q.archived ? 'checked' : ''}> ver archivados</label>
-      <div class="chat-list" data-scroll="clist">${list.map(c => `<div class="chat-item ${c.id === cid ? 'on' : ''}" data-c="${c.id}"><div class="row" style="gap:6px">${agentSprite(agent(c.agent_id), 2)}<b class="ellipsis grow">${c.pinned ? '📌 ' : ''}${h(c.title)}</b>${c.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : c.status === 'en_curso' ? '<span class="chip st-en_curso">…</span>' : ''}</div><small>${h(agent(c.agent_id)?.name)} · ${c.n_runs} turnos · ${ago(c.updated_at)}</small></div>`).join('') || '<div class="empty">Sin consultas todavía</div>'}</div></div>`;
+      <div class="chat-list" data-scroll="clist">${list.map(c => `<div class="chat-item ${c.id === cid ? 'on' : ''}" data-c="${c.id}"><div class="row" style="gap:6px">${agentSprite(agent(c.agent_id), 2)}<a class="ellipsis grow" href="#/cantina/${c.id}"><b>${c.pinned ? '📌 ' : ''}${h(c.title)}</b></a>${c.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : c.status === 'en_curso' ? '<span class="chip st-en_curso">…</span>' : ''}</div><small>${h(agent(c.agent_id)?.name)} · ${c.n_runs} turnos · ${ago(c.updated_at)}</small></div>`).join('') || '<div class="empty">Sin consultas todavía</div>'}</div></div>`;
     let right;
     if (!cid) {
       right = `<div class="panel y"><h2 style="margin-top:0">Nueva consulta rápida</h2><p class="muted">Pregunta lo que sea a un agente sin crear tarea. Queda en el historial y puedes convertirla en tarea o proyecto.</p>
@@ -871,7 +889,7 @@ const cantina = {
         <div class="console" id="chatLive" style="height:160px" ${x.running ? '' : 'hidden'}></div>
         ${canEdit() ? `<form id="crF" class="col-flex" style="margin-top:10px"><textarea id="crT" rows="3" placeholder="${c.status === 'esperando' ? 'Responde la consulta…' : 'Sigue la conversación…'}"></textarea><div class="row"><button class="btn y" ${x.running ? 'disabled' : ''}>Enviar</button><label class="btn ghost">📎 Adjuntar<input type="file" id="crFiles" multiple hidden></label><small id="crFilesN" class="muted"></small></div></form>` : ''}</div>`;
       setTimeout(() => { const ch = $('.chat', el); if (ch) ch.scrollTop = ch.scrollHeight; });
-      if (x.running && x.runs[0]) get(`/api/runs/${x.runs[0].id}/log`).then(lg => { const lv = $('#chatLive', el); if (lv) { lv.innerHTML = logHTML(lg.log); lv.scrollTop = lv.scrollHeight; } });
+      if (x.running && x.runs[0]) get(`/api/runs/${x.runs[0].id}/log`).then(lg => { const lv = $('#chatLive', el); if (lv) { lv.dataset.run = x.runs[0].id; showLog(lv, lg.log); lv.scrollTop = lv.scrollHeight; } });
     }
     el.innerHTML = `<h1>Cantina de Mos Eisley</h1><div class="cantina">${left}<div>${right}</div></div>`;
     $('#newChat', el).onclick = () => go('#/cantina');
@@ -1159,9 +1177,7 @@ const config = {
       const c = $('#marcarConsole');
       if (c) {
         c.style.display = 'block';
-        const stick = c.scrollHeight - c.scrollTop - c.clientHeight < 40;
-        c.insertAdjacentHTML('beforeend', `<div class="${logClass(d.line)}">${h(d.line)}</div>`);
-        if (stick) c.scrollTop = c.scrollHeight;
+        appendLog(c, d.line);
       }
       return 'handled';
     }

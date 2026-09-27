@@ -2,6 +2,7 @@
 import { S, get, post, put, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme } from './core.js';
 import { sprite } from './sprites.js';
 import { VIEWS, taskForm, missionForm, approveDialog } from './views.js';
+import { captureInputState, restoreInputState, captureReplyDrafts, restoreReplyDrafts } from './ui-state.js';
 
 const app = document.getElementById('app');
 let current = null;
@@ -213,12 +214,11 @@ export async function route(soft = false) {
   const v = VIEWS[name];
   drawer.hidden = false; document.body.classList.add('drawer-open');
   drawer.classList.toggle('wide', WIDE.includes(name));
-  const old = $('#view');
-  const keep = soft ? snapshot(old) : null;
-  const el = old.cloneNode(false); // elemento nuevo: sin listeners de la vista anterior
+  const el = $('#view').cloneNode(false); // elemento nuevo: sin listeners de la vista anterior
   const token = current = { ...r, name, view: v };
   try { await v.render(el, r); } catch (e) { el.innerHTML = `<div class="panel r">${h(e.message)}</div>`; }
   if (current !== token) return; // otra navegación empezó mientras cargaba
+  const keep = soft ? snapshot($('#view')) : null; // tras la carga: incluye lo escrito mientras esperaba
   linkLabels(el);
   $('#view').replaceWith(el);
   if (keep) restore(el, keep, drawer); else { drawer.scrollTop = 0; el.focus({ preventScroll: true }); }
@@ -234,14 +234,13 @@ async function renderMap() {
 function mapSoon(ms = 400) { clearTimeout(mapT); mapT = setTimeout(renderMap, ms); }
 // conserva lo que el usuario está escribiendo durante refrescos en vivo
 function snapshot(el) {
-  const vals = {}; $$('[id]', el).forEach(i => { if ('value' in i && i.type !== 'button') vals[i.id] = i.type === 'checkbox' ? i.checked : i.value; });
   const scroll = {}; $$('[data-scroll]', el).forEach(s => scroll[s.dataset.scroll] = [s.scrollTop, s.scrollHeight - s.scrollTop - s.clientHeight < 40]);
-  return { vals, focus: document.activeElement?.id, scroll, y: $('#drawer').scrollTop };
+  return { focus: document.activeElement?.id, inputs: captureInputState($$('input,select,textarea', el), document.activeElement), scroll, y: $('#drawer').scrollTop };
 }
 function restore(el, k, drawer) {
-  for (const [id, v] of Object.entries(k.vals)) { const i = document.getElementById(id); if (i && el.contains(i)) { if (i.type === 'checkbox') i.checked = v; else if (i.tagName !== 'SELECT' || [...i.options].some(o => o.value === v)) i.value = v; } }
+  restoreInputState(el, k.inputs);
+  if (k.focus && !el.contains(document.activeElement)) document.getElementById(k.focus)?.focus({ preventScroll: true }); // botones y demás
   $$('[data-scroll]', el).forEach(s => { const x = k.scroll[s.dataset.scroll]; if (x) s.scrollTop = x[1] ? s.scrollHeight : x[0]; });
-  if (k.focus) document.getElementById(k.focus)?.focus({ preventScroll: true });
   drawer.scrollTop = k.y;
 }
 let refreshT;
@@ -309,7 +308,8 @@ async function toggleInbox() {
 }
 function renderInbox(x) {
   const box = $('#inbox');
-  const item = (link, title, sub, extra = '') => `<div class="inbox-item" data-link="${h(link)}"><div>${title}</div><small>${sub}</small>${canEdit() ? extra : ''}</div>`;
+  const drafts = captureReplyDrafts($$('form[data-reply]', box), document.activeElement); // la bandeja se redibuja con cada aviso
+  const item = (link, title, sub, extra = '') => `<div class="inbox-item" data-link="${h(link)}"><div><a href="${h(link)}">${title}</a></div><small>${sub}</small>${canEdit() ? extra : ''}</div>`;
   // responder o aprobar desde la bandeja, sin abrir la tarea
   const reply = url => `<form class="inbox-reply" data-reply="${url}"><input name="text" placeholder="Responder…" aria-label="Respuesta" autocomplete="off" required><button class="btn sm y">Enviar</button></form>`;
   box.innerHTML = `<div class="row"><h2 style="margin:0">Bandeja</h2><button class="btn sm ghost right" id="inboxClose">Cerrar</button></div>
@@ -321,6 +321,7 @@ function renderInbox(x) {
     <h3>Relevos / fallos</h3>${x.tasks.filter(t => ['pausada_cuota', 'fallida'].includes(t.status)).map(t => item(`#/tarea/${t.id}`, `#${t.id} ${h(t.title)}`, `${chip(t.status)} ${ago(t.updated_at)}`)).join('') || '<div class="empty">—</div>'}
     <div class="row"><h3>Notificaciones</h3><button class="btn sm ghost right" id="seenAll">Marcar leídas</button></div>
     ${x.notifications.map(n => item(n.link || '#/estacion', `${n.seen ? '' : '● '}${h(n.title)}`, `${h(n.body).slice(0, 120)} · ${ago(n.at)}`)).join('')}`;
+  restoreReplyDrafts($$('form[data-reply]', box), drafts);
   $('#inboxClose').onclick = () => box.hidden = true;
   $('#deskN')?.addEventListener('click', async () => { await Notification.requestPermission(); renderInbox(x); });
   $('#seenAll').onclick = async () => { await post('/api/notifications/seen'); inboxCount(); };

@@ -194,6 +194,7 @@ const active = new Map();      // runId → {convId, agentId, mid, lock, st, abo
 const pendingPerms = new Map();// requestId → {runId, input, convId, taskId}
 const PRI = { alta: 0, media: 1, baja: 2 };
 const isPaused = () => setting('queue_paused', false);
+const KILL_GRACE_MS = +process.env.OFICINA_KILL_GRACE_MS || 60000;
 
 function agentOf(id) { return one('select * from agents where id=?', id); }
 function conv(id) { return one('select * from conversations where id=?', id); }
@@ -209,7 +210,8 @@ function pump() {
     if (busyCount(ag.id) >= ag.max_concurrent) continue;
     const mid = machineOfConv(c);
     if (!host.online(mid)) continue; // la PC está apagada/desconectada: espera en cola
-    if (item.lock && [...active.values()].some(a => a.lock === item.lock)) continue;
+    if (item.lock && [...active.values(), ...orphans.values()].some(a => a.lock === item.lock)) continue;
+    if ([...orphans.values()].some(o => o.convId === c.id || (o.taskId && o.taskId === c.task_id))) continue; // proceso anterior sin confirmar fin
     queue.splice(queue.indexOf(item), 1);
     start(item, mid).catch(e => finishConv(item, { end_reason: 'error', error: e.message, final: '' }));
   }
@@ -335,14 +337,16 @@ async function start(item, mid) {
       exitRes(ev.code);
     }
   };
-  const timer = setTimeout(() => { act.timedOut = true; host.runOp(runId, 'killRun'); }, (ag.timeout_min || 30) * 60000);
+  // si la máquina no confirma el fin (desconectada), se deja de esperar: libera el cupo pero conserva bloqueos (orphans) hasta reconciliar
+  act.stop = () => { host.runOp(runId, 'killRun'); act.grace ||= setTimeout(() => { act.unconfirmed = true; st.error ||= 'La máquina no confirmó el fin del proceso'; exitRes(-1); }, KILL_GRACE_MS); };
+  const timer = setTimeout(() => { act.timedOut = true; act.stop(); }, (ag.timeout_min || 30) * 60000);
   try {
     const { pid } = await host.spawnRun(mid, { runId, exe: ag.exe, args, cwd, env: { OFICINA_TASK: String(task?.id ?? ''), OFICINA_CONV: String(c.id) }, stdin: b.stdin, keepOpen: b.keepOpen }, onEvent);
     update('runs', runId, { pid: pid ?? null });
   } catch (e) { st.error = e.message; exitRes(-1); }
 
   const code = await exited;
-  clearTimeout(timer);
+  clearTimeout(timer); clearTimeout(act.grace);
   if (ag.adapter === 'agy') try { st.limits.push(...agyLimits(await host.call(mid, 'agyQuota'), cc.model || ag.default_model)); } catch {}
   // Codex no manda sus límites por stdout: se leen del rollout de la sesión en la máquina (mismo formato rate_limits)
   if (ag.adapter === 'codex' && !st.limits.length && (st.sessionId || cc.session_id)) {
@@ -382,13 +386,14 @@ async function start(item, mid) {
   const pr = J(ag.prices, {})[cc.model || ag.default_model];
   if (!st.cost && pr) st.cost = ((st.tin - (st.tcache || 0)) * pr[0] + (st.tcache || 0) * (pr[2] ?? pr[0] / 10) + st.tout * pr[1]) / 1e6;
   if (!retryModel && st.sessionId && st.sessionId !== cc.session_id) update('conversations', c.id, { session_id: st.sessionId });
-  update('runs', runId, { ended_at: now(), exit_code: code, end_reason, tokens_in: st.tin, tokens_out: st.tout, cost_usd: st.cost });
+  update('runs', runId, { ended_at: act.unconfirmed ? null : now(), exit_code: code, end_reason, tokens_in: st.tin, tokens_out: st.tout, cost_usd: st.cost });
   saveLimits(ag.id, st.limits);
   if (end_reason === 'cuota') markQuota(ag, errText || '', st.resetAt);
   else if (end_reason !== 'error') update('agents', ag.id, { last_error: null });
   if (end_reason === 'error') update('agents', ag.id, { last_error: errText.slice(0, 500) });
 
   active.delete(runId);
+  if (act.unconfirmed) hold(runId, { mid, lock: act.lock, convId: c.id, taskId: task?.id ?? null });
   if (retryModel) {
     queue.push(item);
     queue.sort((a, b) => a.pri - b.pri || a.at - b.at);
@@ -428,7 +433,7 @@ const question = t => { const [a, b = ''] = String(t).split('[[CONSULTA]]'); ret
 function abortConv(convId) {
   const qi = queue.findIndex(q => q.convId === convId);
   if (qi >= 0) { const [it] = queue.splice(qi, 1); finishConv(it, { end_reason: 'abortado', final: '' }); return true; }
-  for (const a of active.values()) if (a.convId === convId && a.runId) { a.aborted = true; host.runOp(a.runId, 'killRun'); return true; }
+  for (const a of active.values()) if (a.convId === convId && a.runId) { a.aborted = true; a.stop(); return true; }
   return false;
 }
 async function answerPermission(requestId, allow, userId) {
@@ -754,12 +759,25 @@ function createTask(d, userId) {
 }
 
 // ---------- arranque / emergencias ----------
-const orphans = new Map(); // runId → máquina: procesos que pueden seguir vivos en la PC tras un reinicio del servidor
-bus.on('machine.online', mid => { for (const [runId, m] of orphans) if (m === mid) { orphans.delete(runId); host.call(mid, 'killRun', { runId }).catch(() => {}); } });
+// runId → {mid, lock, convId, taskId}: procesos que pueden seguir vivos en la PC (reinicio del servidor o máquina sin responder).
+// Bloquean su carpeta y conversación/tarea hasta que la máquina confirme el killRun; persistido como runs.ended_at null.
+const orphans = new Map();
+const release = runId => { orphans.delete(runId); update('runs', runId, { ended_at: now() }); pump(); };
+// ponytail: la respuesta al killRun cuenta como fin confirmado (taskkill /F o SIGKILL ya enviados)
+const reconcile = (runId, o) => host.call(o.mid, 'killRun', { runId }).then(() => orphans.get(runId) === o && release(runId), () => {});
+function hold(runId, o) {
+  orphans.set(runId, o);
+  if (!host.machine(o.mid)) release(runId);
+  else if (host.online(o.mid)) reconcile(runId, o);
+}
+bus.on('machine.online', mid => { for (const [runId, o] of orphans) if (o.mid === mid) reconcile(runId, o); });
 function recover() {
   for (const r of all('select * from runs where ended_at is null')) {
-    update('runs', r.id, { ended_at: now(), end_reason: 'interrumpido' });
-    const c = conv(r.conversation_id); if (c) orphans.set(r.id, machineOfConv(c));
+    if (!r.end_reason) update('runs', r.id, { end_reason: 'interrumpido' });
+    const c = conv(r.conversation_id);
+    if (!c) { update('runs', r.id, { ended_at: now() }); continue; }
+    const t = taskOfConv(c);
+    hold(r.id, { mid: machineOfConv(c), lock: t ? staticLock(t) : null, convId: c.id, taskId: t?.id ?? null });
   }
   for (const c of all(`select * from conversations where status in ('en_curso','en_cola')`)) {
     update('conversations', c.id, { status: 'esperando' });
@@ -772,7 +790,7 @@ function order66(userId) {
   setSetting('queue_paused', true);
   const n = queue.length + active.size;
   for (const it of queue.splice(0)) finishConv(it, { end_reason: 'abortado', final: '' });
-  for (const a of active.values()) if (a.runId) { a.aborted = true; host.runOp(a.runId, 'killRun'); }
+  for (const a of active.values()) if (a.runId) { a.aborted = true; a.stop(); }
   log(userId, 'sistema', null, 'orden66', { detenidos: n });
   notify('sistema', 'Orden 66 ejecutada', `${n} ejecuciones detenidas. La cola está en pausa.`, '#/puente');
   emit('queue', { paused: true });
@@ -780,6 +798,6 @@ function order66(userId) {
 }
 function resumeQueue(userId) { setSetting('queue_paused', false); log(userId, 'sistema', null, 'reanudar_cola'); emit('queue', { paused: false }); pump(); }
 
-module.exports = { DEFAULT_EXCLUDE, ADAPTERS, STATUS, RULES, RULES_CHAT, codexFallback, queue, active, pendingPerms, runTurn, runTask, runTaskBg, abortConv, answerPermission, setStatus, changeTask,
+module.exports = { DEFAULT_EXCLUDE, ADAPTERS, STATUS, RULES, RULES_CHAT, codexFallback, queue, active, orphans, pendingPerms, runTurn, runTask, runTaskBg, abortConv, answerPermission, setStatus, changeTask,
   createTask, approveTask, returnTask, handoffTask, createHandoff, snapshot, taskPrompt, workdir, folderOf, machineOfTask, machineOfConv, recover, order66,
   resumeQueue, quotaTick, parseReset, saveLimits, agyLimits, markQuota, pump, question, isPaused, depsPending };

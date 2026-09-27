@@ -123,7 +123,12 @@ function reply(m, { id, ok, result, error }) {
 }
 function events(m, list = []) {
   update('machines', m.id, { last_seen: now() });
-  for (const ev of list) { const r = runHandlers.get(ev.runId); if (r && r.mid === m.id) r.onEvent(ev); }
+  for (const ev of list) {
+    const r = runHandlers.get(ev.runId);
+    if (!r || r.mid !== m.id) continue;
+    if (ev.seq != null) { if (ev.seq <= (r.seq || 0)) continue; r.seq = ev.seq; } // lote reenviado tras perder la respuesta
+    r.onEvent(ev);
+  }
 }
 function machineList() {
   return machines().map(m => ({ id: m.id, name: m.name, is_local: !!m.is_local, online: online(m.id), last_seen: m.last_seen, info: m.info ? JSON.parse(m.info) : null,
