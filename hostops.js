@@ -56,6 +56,24 @@ function create(cfg) {
     if (parts.some(p => !p || p === '.' || p === '..' || p.includes(':'))) throw new Error('Ruta sandbox inválida');
     return parts;
   }
+  // Lee un archivo dentro de `base` (ya resuelto/real) verificando enlaces antes y después de abrir.
+  function readEntryB64(base, name) {
+    let f;
+    try { f = sandboxEntry(base, name); }
+    catch (e) { if (e.code === 'ENOENT') throw new Error('Archivo no encontrado'); throw e; }
+    if (!f.stat.isFile()) throw new Error('Archivo no encontrado');
+    const noFollow = process.platform === 'win32' ? 0 : (fs.constants.O_NOFOLLOW || 0);
+    const fd = fs.openSync(f.path, fs.constants.O_RDONLY | noFollow);
+    try {
+      const opened = fs.fstatSync(fd);
+      if (!opened.isFile()) throw new Error('Archivo no encontrado');
+      // Revalidar tras abrir evita aceptar un enlace cambiado entre lstat y open.
+      const current = sandboxEntry(base, name);
+      if (!current.stat.isFile() || opened.dev !== current.stat.dev || opened.ino !== current.stat.ino) throw new Error('Ruta sandbox modificada durante la lectura');
+      if (opened.size > 25e6) throw new Error('Archivo demasiado grande (>25 MB)');
+      return fs.readFileSync(fd).toString('base64');
+    } finally { fs.closeSync(fd); }
+  }
   function sandboxEntry(base, name) {
     const parts = sandboxParts(name);
     const baseStat = fs.lstatSync(base);
@@ -203,21 +221,28 @@ function create(cfg) {
     readFileB64: ({ sandbox, name }) => {
       const base = sandboxBase(sandbox);
       if (!base) throw new Error('Archivo no encontrado');
-      let f;
-      try { f = sandboxEntry(base, name); }
-      catch (e) { if (e.code === 'ENOENT') throw new Error('Archivo no encontrado'); throw e; }
-      if (!f.stat.isFile()) throw new Error('Archivo no encontrado');
-      const noFollow = process.platform === 'win32' ? 0 : (fs.constants.O_NOFOLLOW || 0);
-      const fd = fs.openSync(f.path, fs.constants.O_RDONLY | noFollow);
-      try {
-        const opened = fs.fstatSync(fd);
-        if (!opened.isFile()) throw new Error('Archivo no encontrado');
-        // Revalidar tras abrir evita aceptar un enlace cambiado entre lstat y open.
-        const current = sandboxEntry(base, name);
-        if (!current.stat.isFile() || opened.dev !== current.stat.dev || opened.ino !== current.stat.ino) throw new Error('Ruta sandbox modificada durante la lectura');
-        if (opened.size > 25e6) throw new Error('Archivo demasiado grande (>25 MB)');
-        return fs.readFileSync(fd).toString('base64');
-      } finally { fs.closeSync(fd); }
+      return readEntryB64(base, name);
+    },
+    // archivos nuevos que el agente dejó en una tarea con carpeta git: sin commitear (untracked) o agregados desde base_branch
+    listNewFiles: ({ cwd, base }) => {
+      if (!cwd || !fs.existsSync(cwd) || !isGit(cwd)) return [];
+      let root;
+      try { root = fs.realpathSync.native(cwd); } catch { return []; }
+      const untracked = (tryGit(cwd, 'status', '--porcelain', '-uall') || '').split(/\r?\n/)
+        .filter(l => l.startsWith('?? ')).map(l => l.slice(3));
+      const added = base ? (tryGit(cwd, 'diff', '--name-status', `${base}...HEAD`) || '').split(/\r?\n/)
+        .filter(l => l.startsWith('A\t')).map(l => l.slice(2)) : [];
+      const names = [...new Set([...untracked, ...added])];
+      return names.flatMap(rel => {
+        try { const e = sandboxEntry(root, rel); return e.stat.isFile() ? [{ name: rel, size: e.stat.size }] : []; }
+        catch { return []; }
+      });
+    },
+    readNewFile: ({ cwd, name }) => {
+      if (!cwd || !fs.existsSync(cwd)) throw new Error('Archivo no encontrado');
+      let root;
+      try { root = fs.realpathSync.native(cwd); } catch { throw new Error('Archivo no encontrado'); }
+      return readEntryB64(root, name);
     },
     // adjuntos: files = [{id, name, size, url?|src?}] → .oficina/adjuntos/<name>; fetcher lo aporta quien llama
     probe: async ({ exe, pre_args = [] }) => {

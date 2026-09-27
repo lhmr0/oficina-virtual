@@ -759,7 +759,7 @@ const tarea = {
       body.innerHTML = '<div class="empty">Cargando diff…</div>';
       get(`/api/tasks/${id}/diff`).then(df => {
         body.innerHTML = df.diff || df.log ? `${df.log ? `<h3>Commits</h3><pre class="console" style="height:auto;max-height:200px">${h(df.log)}</pre>` : ''}<h3>Diff de cambios</h3>${renderStructuredDiff(df.diff)}` : `<div class="empty">Sin cambios en git${x.files.length ? '' : ''}.</div>`;
-        if (x.files.length) body.insertAdjacentHTML('beforeend', `<h3>Archivos producidos (sandbox)</h3>${x.files.map(f => `<div><a href="/api/tasks/${id}/file?name=${encodeURIComponent(f.name)}">${h(f.name)}</a> <small>${bytes(f.size)}</small></div>`).join('')}`);
+        if (x.files.length) body.insertAdjacentHTML('beforeend', `<h3>Archivos generados</h3>${x.files.map(f => `<div><a href="/api/tasks/${id}/file?name=${encodeURIComponent(f.name)}">${h(f.name)}</a> <small>${bytes(f.size)}</small></div>`).join('')}`);
       });
     } else if (tab === 'runs') {
       body.innerHTML = `<div class="table-wrap"><table class="grid"><tr><th>Turno</th><th>Agente</th><th>Modelo</th><th>Inicio</th><th>Duración</th><th>Fin</th><th>Tokens</th><th>Costo</th><th>Cambios</th></tr>

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { create } = require('./hostops');
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-hostops-'));
@@ -93,6 +94,28 @@ async function main() {
     const first = await ops.putFiles({ cwd, files: sameSize }, () => Buffer.from('AAAA'));
     await ops.putFiles({ cwd, files: sameSize }, () => Buffer.from('BBBB'));
     assert.equal(fs.readFileSync(path.join(cwd, first[0])).toString(), 'BBBB', 'actualiza bytes aunque coincidan nombre y tamaño');
+
+    // listNewFiles / readNewFile: archivos que el agente genera en una tarea con carpeta git (worktree)
+    const repo = path.join(temp, 'repo');
+    fs.mkdirSync(repo);
+    const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+    git('init', '-q'); git('config', 'user.email', 'a@a.com'); git('config', 'user.name', 'a');
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'v1');
+    git('add', '.'); git('commit', '-q', '-m', 'base');
+    const base = git('rev-parse', 'HEAD').trim();
+    fs.writeFileSync(path.join(repo, 'nuevo.txt'), 'contenido nuevo');
+    fs.mkdirSync(path.join(repo, 'salida'));
+    fs.writeFileSync(path.join(repo, 'salida', 'reporte.csv'), 'a,b');
+    git('add', 'salida/reporte.csv'); git('commit', '-q', '-m', 'agrega reporte');
+
+    assert.deepEqual(
+      ops.listNewFiles({ cwd: repo, base }).map(f => f.name).sort(),
+      ['nuevo.txt', 'salida/reporte.csv'],
+      'lista archivos sin commitear y archivos agregados desde base_branch'
+    );
+    assert.equal(Buffer.from(ops.readNewFile({ cwd: repo, name: 'salida/reporte.csv' }), 'base64').toString(), 'a,b');
+    assert.throws(() => ops.readNewFile({ cwd: repo, name: '../outside.txt' }), /ruta|archivo/i, 'rechaza escapar del worktree');
+    assert.deepEqual(ops.listNewFiles({ cwd: path.join(temp, 'no-existe') }), [], 'carpeta inexistente devuelve lista vacía');
 
     console.log('OK hostops');
   } finally {

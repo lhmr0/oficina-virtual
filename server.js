@@ -322,7 +322,8 @@ r('GET', '/api/tasks/:id', 'observador', async ({ params }) => {
     dependents: all(`select id, title, status from tasks where depends_on like ? and deleted_at is null`, `%${t.id}%`).filter(x => J(one('select depends_on from tasks where id=?', x.id).depends_on, []).includes(t.id)),
     permissions: [...R.pendingPerms.entries()].filter(([, p]) => p.taskId === t.id).map(([id, p]) => ({ request_id: id, input: p.input })),
     running: [...R.active.values()].some(a => ids.includes(a.convId)), queued: R.queue.some(q => ids.includes(q.convId)),
-    files: t.folder_id || !host.online(R.machineOfTask(t)) ? [] : await host.call(R.machineOfTask(t), 'listFiles', { sandbox: 'task-' + t.id }).catch(() => []),
+    files: !host.online(R.machineOfTask(t)) ? [] : await host.call(R.machineOfTask(t), t.folder_id ? 'listNewFiles' : 'listFiles',
+      t.folder_id ? { cwd: t.worktree_path || R.folderOf(t)?.path, base: t.worktree_path ? t.base_branch : null } : { sandbox: 'task-' + t.id }).catch(() => []),
     attachments: attachmentsOf(t.id, [...new Set(ids)]),
     machine: host.machine(R.machineOfTask(t))?.name || null, machine_online: host.online(R.machineOfTask(t)),
     proposal: t.proposal_id ? one('select * from proposals where id=?', t.proposal_id) : null,
@@ -330,7 +331,9 @@ r('GET', '/api/tasks/:id', 'observador', async ({ params }) => {
 });
 r('GET', '/api/tasks/:id/file', 'observador', async ({ params, query, res }) => {
   const t = one('select * from tasks where id=?', +params.id); need(t, 'No existe', 404);
-  const b64 = await host.call(R.machineOfTask(t), 'readFileB64', { sandbox: 'task-' + t.id, name: String(query.name || '') });
+  const b64 = t.folder_id
+    ? await host.call(R.machineOfTask(t), 'readNewFile', { cwd: t.worktree_path || R.folderOf(t)?.path, name: String(query.name || '') })
+    : await host.call(R.machineOfTask(t), 'readFileB64', { sandbox: 'task-' + t.id, name: String(query.name || '') });
   res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${String(query.name).split('/').pop().replace(/"/g, '')}"` });
   res.end(Buffer.from(b64, 'base64'));
   return RAW;
