@@ -87,6 +87,21 @@ function gitRepo(name) {
     for (const f of fs.readdirSync(path.join(__dirname, 'public')).filter(f => f.endsWith('.js')))
       execFileSync(process.execPath, ['--check', '--input-type=module'], { input: fs.readFileSync(path.join(__dirname, 'public', f)), stdio: ['pipe', 'ignore', 'pipe'] });
   });
+  await t('codex: límites 5h/semanal leídos del rollout de la sesión', async () => {
+    const home = path.join(TMP, 'codex-home'), day = path.join(home, 'sessions', '2026', '09', '26');
+    fs.mkdirSync(day, { recursive: true });
+    const tc = pct => JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', rate_limits: { limit_id: 'codex', primary: { used_percent: pct, window_minutes: 300, resets_at: 1790471863 }, secondary: { used_percent: 12, window_minutes: 10080, resets_at: 1791058663 } } } });
+    fs.writeFileSync(path.join(day, 'rollout-2026-09-26T19-08-08-abc12345-6789.jsonl'), [JSON.stringify({ type: 'session_meta' }), tc(10), tc(42), ''].join('\n'));
+    const prev = process.env.CODEX_HOME; process.env.CODEX_HOME = home;
+    try {
+      const ops = require('./hostops').create({ dataDir: TMP }).ops;
+      const rl = ops.codexLimits({ thread_id: 'abc12345-6789' });
+      assert.equal(rl.primary.used_percent, 42, 'toma el último token_count');
+      assert.equal(rl.secondary.used_percent, 12);
+      assert.equal(ops.codexLimits({ thread_id: '../../etc' }), null);
+      assert.equal(ops.codexLimits({ thread_id: 'no-existe-123' }), null);
+    } finally { if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev; }
+  });
   await t('PWA: manifest servido sin sesión y con iconos que existen', async () => {
     const r = await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`);
     assert.equal(r.headers.get('content-type'), 'application/manifest+json');

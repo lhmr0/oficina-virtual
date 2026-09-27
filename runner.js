@@ -343,6 +343,10 @@ async function start(item, mid) {
 
   const code = await exited;
   clearTimeout(timer);
+  // Codex no manda sus límites por stdout: se leen del rollout de la sesión en la máquina (mismo formato rate_limits)
+  if (ag.adapter === 'codex' && !st.limits.length && (st.sessionId || cc.session_id)) {
+    try { const rl = await host.call(mid, 'codexLimits', { thread_id: st.sessionId || cc.session_id }); if (rl) ad.parse({ rate_limits: rl }, st, () => {}); } catch {} // agente de campo sin actualizar: sin límites, como antes
+  }
   for (const [k, v] of pendingPerms) if (v.runId === runId) pendingPerms.delete(k);
 
   // clasificar

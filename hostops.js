@@ -155,6 +155,22 @@ function create(cfg) {
       if (adapter === 'claude') return ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'];
       return [];
     },
+    // `codex exec --json` no informa límites; el rollout de la sesión (~/.codex/sessions/…/rollout-*-<thread>.jsonl) sí:
+    // cada token_count trae rate_limits { primary: 5 h, secondary: semanal }. Devuelve el último.
+    codexLimits: ({ thread_id }) => {
+      if (!/^[\w-]{8,}$/.test(thread_id || '')) return null;
+      const dir = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
+      if (!fs.existsSync(dir)) return null;
+      // ponytail: recorre todo sessions/ (cientos de archivos); indexar por fecha si crece a decenas de miles
+      const f = fs.readdirSync(dir, { recursive: true }).map(String).find(p => p.endsWith(`-${thread_id}.jsonl`));
+      if (!f) return null;
+      const lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n');
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].includes('"rate_limits"')) continue;
+        try { const rl = JSON.parse(lines[i]).payload?.rate_limits; if (rl) return rl; } catch {}
+      }
+      return null;
+    },
     toast: ({ title, body, url }) => {
       if (process.platform !== 'win32') return false;
       const xml = s => String(s ?? '').replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
