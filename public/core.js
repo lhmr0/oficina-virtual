@@ -167,8 +167,8 @@ export function folderPicker(machineId, start) {
         d.innerHTML = `<h2>Elegir carpeta · ${h(machineName(machineId || defaultMachine()))}</h2>
           <div class="row"><code class="grow ellipsis">${h(x.path || 'Raíces permitidas')}</code>${x.is_git ? '<span class="chip st-completada">git</span>' : ''}</div>
           <div class="chat-list" style="max-height:50vh;margin:10px 0">
-            ${x.parent ? `<div class="chat-item" data-p="${h(x.parent)}">⬆ ..</div>` : x.path ? '<div class="chat-item" data-p="">⬆ raíces</div>' : ''}
-            ${x.dirs.map(f => `<div class="chat-item" data-p="${h(f.path)}">📁 ${h(f.name)}</div>`).join('') || '<div class="empty">Sin subcarpetas</div>'}
+            ${x.parent ? `<button type="button" class="chat-item" data-p="${h(x.parent)}">⬆ ..</button>` : x.path ? '<button type="button" class="chat-item" data-p="">⬆ raíces</button>' : ''}
+            ${x.dirs.map(f => `<button type="button" class="chat-item" data-p="${h(f.path)}">📁 ${h(f.name)}</button>`).join('') || '<div class="empty">Sin subcarpetas</div>'}
           </div>
           <div class="row"><button class="btn y" id="pkOk" ${x.path ? '' : 'disabled'}>Elegir esta carpeta</button><button class="btn ghost" id="pkNo">Cancelar</button></div>`;
         d.querySelectorAll('[data-p]').forEach(i => i.onclick = () => load(i.dataset.p));

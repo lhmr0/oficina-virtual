@@ -8,6 +8,7 @@ const { execFileSync } = require('node:child_process');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-test-'));
 process.env.OFICINA_DATA = path.join(TMP, 'data');
 process.env.OFICINA_NO_TOAST = '1';
+process.env.OFICINA_KILL_GRACE_MS = '400';
 const PORT = 4300 + Math.floor(Math.random() * 500);
 process.env.OFICINA_PORT = String(PORT);
 
@@ -20,7 +21,7 @@ const C = require('./council');
 const FAKE = `let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const fs=require('fs');
 if(s.includes('Consejo Jedi')||s.includes('moderador'))return console.log('Aquí va:\\n\`\`\`json\\n'+JSON.stringify({propuestas:[{title:'Agregar pruebas',description:'Cubrir salida.txt',impact:'alto',effort:'bajo',area:'Desarrollo',agent:'fake'},{title:'Documentar API',description:'README',impact:'medio',effort:'bajo',area:'Documentación'}]})+'\\n\`\`\`');
 if(s.includes('JSONMALO'))return console.log('no hay json aquí');
-if(s.includes('ADJUNTO')&&!s.includes('# RELEVO')){const t=fs.readFileSync('.oficina/adjuntos/nota.txt','utf8');fs.writeFileSync('salida.txt',t);return console.log('Leí: '+t+'\\n[[LISTO]] Leí: '+t);}
+if(s.includes('ADJUNTO')&&!s.includes('# RELEVO')){const rel=(s.match(/- (\\.oficina\\/adjuntos\\/[^\\s]+)/)||[])[1];if(!rel)throw Error('No encontré la ruta anunciada del adjunto');const t=fs.readFileSync(rel,'utf8');fs.writeFileSync('salida.txt',t);return console.log('Leí: '+t+'\\n[[LISTO]] Leí: '+t);}
 if(s.includes('Descompón'))return console.log(JSON.stringify({subtareas:[{title:'Sub A',prompt:'a',area:'Análisis'},{title:'Sub B',prompt:'b',area:'Desarrollo',depends_on:[0]}]}));
 if(s.includes('sesión anterior se perdió')){fs.writeFileSync('ctx-prompt.txt',s);return console.log('[[LISTO]] retomé');}
 if(s.includes('# RELEVO')){fs.writeFileSync('relevo-prompt.txt',s);return console.log('Continué.\\n[[LISTO]] Relevo completado');}
@@ -59,34 +60,36 @@ function gitRepo(name) {
 }
 
 (async () => {
-  const server = await startServer(PORT);
-  let step = '';
-  const ok = s => { step = s; console.log('✔', s); };
-  try {
-    // --- auth ---
-    assert.equal((await api('GET', '/api/setup')).needed, true);
-    await api('POST', '/api/setup', { username: 'vader', password: 'secreto1', name: 'Darth' });
-    await rejects(api('POST', '/api/setup', { username: 'x', password: 'secreto1' }), /Ya existe/);
-    cookie = '';
-    await rejects(api('GET', '/api/me'), /Inicia sesión/);
-    await rejects(api('POST', '/api/login', { username: 'vader', password: 'mal' }), /incorrectos/);
-    for (let i = 0; i < 4; i++) await rejects(api('POST', '/api/login', { username: 'vader', password: 'mal' }));
-    await rejects(api('POST', '/api/login', { username: 'vader', password: 'secreto1' }), /Demasiados intentos/);
-    ok('auth: setup único, login incorrecto, bloqueo tras 5 intentos');
-  } catch (e) { console.error('✘', step, e); }
-
-  // vader quedó bloqueado 5 min: seguimos con otro admin creado directo en BD
-  const { hashPw } = require('./server');
-  insert('users', { username: 'leia', name: 'Leia', pass_hash: hashPw('secreto1'), role: 'admin', created_at: new Date().toISOString() });
-  insert('users', { username: 'r2', name: 'R2', pass_hash: hashPw('secreto1'), role: 'observador', created_at: new Date().toISOString() });
+  let server = null;
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log('✔', name); } catch (e) { failed++; console.error('✘', name, '\n  ', e.stack || e); } };
+  try {
+    server = await startServer(PORT);
+    await t('auth: setup único, login incorrecto, bloqueo tras 5 intentos', async () => {
+      assert.equal((await api('GET', '/api/setup')).needed, true);
+      await api('POST', '/api/setup', { username: 'vader', password: 'secreto1', name: 'Darth' });
+      await rejects(api('POST', '/api/setup', { username: 'x', password: 'secreto1' }), /Ya existe/);
+      cookie = '';
+      await rejects(api('GET', '/api/me'), /Inicia sesión/);
+      await rejects(api('POST', '/api/login', { username: 'vader', password: 'mal' }), /incorrectos/);
+      for (let i = 0; i < 4; i++) await rejects(api('POST', '/api/login', { username: 'vader', password: 'mal' }));
+      await rejects(api('POST', '/api/login', { username: 'vader', password: 'secreto1' }), /Demasiados intentos/);
+    });
+
+    // vader queda bloqueado 5 min; la suite usa otro admin creado directo en BD.
+    const { hashPw } = require('./server');
+    insert('users', { username: 'leia', name: 'Leia', pass_hash: hashPw('secreto1'), role: 'admin', created_at: new Date().toISOString() });
+    insert('users', { username: 'r2', name: 'R2', pass_hash: hashPw('secreto1'), role: 'observador', created_at: new Date().toISOString() });
 
   // un error de sintaxis en un módulo del frontend deja la app en negro sin que ninguna API falle
   await t('frontend: los módulos de public/ compilan', async () => {
     for (const f of fs.readdirSync(path.join(__dirname, 'public')).filter(f => f.endsWith('.js')))
       execFileSync(process.execPath, ['--check', '--input-type=module'], { input: fs.readFileSync(path.join(__dirname, 'public', f)), stdio: ['pipe', 'ignore', 'pipe'] });
   });
+  for (const script of ['test-hostops.js', 'test-frontend.js']) {
+    const file = path.join(__dirname, script);
+    if (fs.existsSync(file)) await t(`regresión: ${script}`, async () => execFileSync(process.execPath, ['--no-warnings', file], { stdio: 'inherit' }));
+  }
   await t('codex: límites 5h/semanal leídos del rollout de la sesión', async () => {
     const home = path.join(TMP, 'codex-home'), day = path.join(home, 'sessions', '2026', '09', '26');
     fs.mkdirSync(day, { recursive: true });
@@ -214,6 +217,35 @@ function gitRepo(name) {
     await until(() => task(id2).status === 'fallida', 15000, 'timeout');
     assert.equal(one('select end_reason from runs where task_id=? order by id desc', id2).end_reason, 'timeout');
     update('agents', fake3, { timeout_min: 1 });
+  });
+
+  await t('máquina sin respuesta: tras el timeout libera el cupo y conserva el bloqueo de carpeta hasta reconciliar (también tras reiniciar)', async () => {
+    const H = require('./host');
+    const origCall = H.call, origRunOp = H.runOp;
+    const plain = path.join(TMP, 'plana'); fs.mkdirSync(plain);
+    const pp = (await api('POST', '/api/projects', { name: 'Plana', folders: [{ label: 'p', path: plain }] })).id;
+    const pf = (await api('GET', '/api/projects')).find(p => p.id === pp).folders[0].id;
+    H.runOp = async () => false; // la máquina no recibe el killRun
+    H.call = (mid, op, args) => op === 'killRun' ? Promise.reject(new Error('La máquina se desconectó')) : origCall(mid, op, args);
+    try {
+      update('agents', fake3, { timeout_min: 0.02 });
+      const a = (await api('POST', '/api/tasks', { project_id: pp, folder_id: pf, title: 'Colgada', prompt: 'LENTO', agent_id: fake3, run: true })).id;
+      await until(() => task(a).status === 'fallida', 15000, 'timeout sin exit');
+      const ra = one('select * from runs where task_id=? order by id desc', a);
+      assert.equal(ra.end_reason, 'timeout'); assert.equal(ra.ended_at, null, 'fin no confirmado');
+      assert.ok(![...R.active.values()].some(x => x.agentId === fake3), 'cupo del agente liberado');
+      const b = (await api('POST', '/api/tasks', { project_id: pp, folder_id: pf, title: 'Misma carpeta', prompt: 'x', agent_id: fake2, run: true })).id;
+      await new Promise(r => setTimeout(r, 500));
+      assert.equal(task(b).status, 'en_cola', 'la carpeta sigue bloqueada');
+      R.orphans.clear(); R.recover(); // reinicio del servidor: el bloqueo se reconstruye desde runs.ended_at null
+      R.pump(); await new Promise(r => setTimeout(r, 500));
+      assert.notEqual(task(b).status, 'revision', 'bloqueo persistente tras reiniciar');
+      assert.ok(R.orphans.has(ra.id));
+      H.call = origCall; H.runOp = origRunOp;
+      bus.emit('machine.online', one('select id from machines where is_local=1').id);
+      await until(() => task(b).status === 'revision', 15000, 'b corre tras reconciliar');
+      assert.ok(one('select ended_at from runs where id=?', ra.id).ended_at, 'fin confirmado al reconciliar');
+    } finally { H.call = origCall; H.runOp = origRunOp; update('agents', fake3, { timeout_min: 1 }); }
   });
 
   await t('cola respeta max_concurrent', async () => {
@@ -458,6 +490,20 @@ function gitRepo(name) {
     assert.match(ctx, /OBJETIVO-ORIGINAL/); assert.match(ctx, /continúa/);
   });
 
+  await t('eventos del worker: un lote reenviado se aplica una sola vez', async () => {
+    const H = require('./host');
+    const mid = one('select id from machines where is_local=1').id;
+    const seen = [];
+    await H.spawnRun(mid, { runId: 'dup-1', exe: process.execPath, args: ['-e', 'setTimeout(()=>{},10000)'], cwd: TMP }, ev => seen.push(ev));
+    const batch = [{ runId: 'dup-1', seq: 1, t: 'out', line: 'uno' }, { runId: 'dup-1', seq: 2, t: 'out', line: 'dos' }];
+    H.events({ id: mid }, batch);
+    H.events({ id: mid }, batch); // respuesta perdida → el worker reenvía
+    H.events({ id: mid }, [...batch, { runId: 'dup-1', seq: 3, t: 'out', line: 'tres' }]);
+    H.events({ id: mid }, [{ runId: 'dup-1', t: 'out', line: 'worker antiguo' }]); // sin seq: compatibilidad
+    assert.deepEqual(seen.filter(e => e.t === 'out').map(e => e.line), ['uno', 'dos', 'tres', 'worker antiguo']);
+    await H.runOp('dup-1', 'killRun');
+  });
+
   // ---------- agente de campo remoto (worker.js en otro proceso) ----------
   const { spawn } = require('node:child_process');
   let worker;
@@ -640,8 +686,13 @@ function gitRepo(name) {
     assert.ok(JSON.parse(updatedCodex.efforts).includes('max'));
   });
 
-  server.close();
-  for (const a of R.active.values()) if (a.runId) require('./host').runOp(a.runId, 'killRun');
-  console.log(failed ? `\n${failed} FALLARON` : '\nTODO OK');
-  process.exit(failed ? 1 : 0);
+  } catch (e) {
+    failed++;
+    console.error('✘ error fatal en la suite', e.stack || e);
+  } finally {
+    if (server) server.close();
+    for (const a of R.active.values()) if (a.runId) require('./host').runOp(a.runId, 'killRun');
+    console.log(failed ? `\n${failed} FALLARON` : '\nTODO OK');
+    process.exit(failed ? 1 : 0);
+  }
 })();
