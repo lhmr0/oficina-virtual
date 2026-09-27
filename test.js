@@ -137,6 +137,19 @@ function gitRepo(name) {
     assert.equal((await api('GET', '/api/me')).notif_prefs?.theme, 'blanco');
   });
 
+  await t('perfil: avatar por usuario (Darth Vader) se guarda y el sprite existe', async () => {
+    const { pathToFileURL } = require('node:url');
+    const SP = await import(pathToFileURL(path.join(__dirname, 'public', 'sprites.js')).href);
+    assert.match(SP.userSprite({ avatar: 'vader' }, 2), /^<svg/);
+    assert.notEqual(SP.userSprite({ avatar: 'vader' }), SP.userSprite({ avatar: 'rebel' }));
+    assert.equal(SP.userSprite({ role: 'admin' }), SP.sprite('imperial', '#ff8c42', 2, ''), 'sin avatar cae al rol');
+    await api('PUT', '/api/me', { avatar: 'vader' });
+    assert.equal((await api('GET', '/api/me')).avatar, 'vader');
+    const users = await api('GET', '/api/users');
+    assert.equal(users.find(u => u.username === 'leia').avatar, 'vader');
+    assert.equal(users.find(u => u.username === 'r2').avatar, 'rebel', 'los demás conservan su avatar');
+  });
+
   // agentes falsos
   const mk = (key, extra = {}) => insert('agents', { key, name: key, adapter: 'fake', exe: process.execPath, pre_args: JSON.stringify(['-e', FAKE]), models: '["m1"]', efforts: '["low"]',
     default_model: 'm1', default_effort: 'low', max_concurrent: 1, timeout_min: 1, quota_patterns: JSON.stringify(['usage limit', 'try again at']), color: '#fff', ...extra });

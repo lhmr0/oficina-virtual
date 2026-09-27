@@ -1,6 +1,6 @@
 // Arranque, login, shell, router, tiempo real (SSE) y bandeja de pendientes
 import { S, get, post, put, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme } from './core.js';
-import { sprite } from './sprites.js';
+import { userSprite } from './sprites.js';
 import { VIEWS, taskForm, missionForm, approveDialog } from './views.js';
 import { captureInputState, restoreInputState, captureReplyDrafts, restoreReplyDrafts } from './ui-state.js';
 
@@ -89,7 +89,7 @@ function shell() {
     <main id="view" tabindex="-1"></main>
   </aside>
   <nav class="dock" aria-label="Acciones">
-    <button class="dock-me" id="meBtn" aria-haspopup="menu" aria-expanded="false" aria-label="Menú de ${h(me.name)}">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 2.4)}<span>${h(me.name.split(' ')[0])}</span></button>
+    <button class="dock-me" id="meBtn" aria-haspopup="menu" aria-expanded="false" aria-label="Menú de ${h(me.name)}">${userSprite(me, 2.4)}<span>${h(me.name.split(' ')[0])}</span></button>
     <a href="#/kanban" data-nav="kanban">${ic('board')}<span>Kanban</span></a>
     <a href="#/cantina" data-nav="cantina">${ic('chat')}<span>Cantina</span></a>
     ${canEdit() ? `<button id="dNew" class="dock-y">${ic('plus')}<span>Tarea</span></button>` : ''}
@@ -97,7 +97,7 @@ function shell() {
     <button class="bell" id="bellBtn">${ic('bell')}<span>Bandeja</span><span class="n" id="bellN" hidden></span></button>
   </nav>
   <div class="menu" id="meMenu" role="menu" hidden>
-    <div class="menu-head">${sprite(me.role === 'admin' ? 'imperial' : 'rebel', '#ff8c42', 3)}<div><b>${h(me.name)}</b><small>${h(S.boot.users.find(u => u.id === me.id)?.rank || '')} · ${h(me.role)}</small></div></div>
+    <div class="menu-head">${userSprite(me, 3)}<div><b>${h(me.name)}</b><small>${h(S.boot.users.find(u => u.id === me.id)?.rank || '')} · ${h(me.role)}</small></div></div>
     <a role="menuitem" href="#/config/perfil">${ic('user')}Mi perfil</a>
     ${canEdit() ? `<button role="menuitem" id="mMission">${ic('rocket')}Nueva misión</button>` : ''}
     <div class="menu-sep">Secciones</div>
