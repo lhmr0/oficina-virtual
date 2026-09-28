@@ -88,6 +88,9 @@ addCol('conversations', 'machine_id', 'integer');
 addCol('users', 'email', 'text');
 addCol('agents', 'prices', "text default '{}'");
 addCol('agents', 'model_efforts', "text default '{}'");
+addCol('conversations', 'usage_cum', 'text'); // último uso acumulado que informó el CLI (Codex/Antigravity) para sacar el delta del turno
+addCol('runs', 'tokens_cache', 'integer default 0');
+addCol('runs', 'first_out_at', 'text'); // primera salida del CLI: arranque/autenticación vs trabajo
 addCol('areas', 'room', 'text'); // sala del mapa: doc | dev | ana | '' (solo en "Más salas"); antes se deducía del nombre
 db.exec(`update areas set room = case when lower(name) like '%doc%' then 'doc' when lower(name) like '%desarr%' then 'dev' when lower(name) like '%an_lisis%' then 'ana' else '' end where room is null`);
 fs.mkdirSync(path.join(DATA0, 'attachments'), { recursive: true });
@@ -189,5 +192,23 @@ if (cxInit) {
   if (pUp) update('agents', cxInit.id, { prices: JSON.stringify(curP) });
 }
 
+// Codex y Antigravity informan el uso acumulado de la sesión en cada turno; antes se guardaba tal cual → pasar a delta por turno (una vez)
+function migrateUsageDelta() {
+  const prev = {};
+  for (const r of all(`select r.id, r.conversation_id c, r.agent_id a, r.tokens_in i, r.tokens_out o, r.cost_usd usd from runs r join agents g on g.id=r.agent_id where g.adapter in ('codex','agy') order by r.id`)) {
+    if (!r.i) continue;
+    const k = r.c + '-' + r.a, p = prev[k];
+    prev[k] = r;
+    if (!p || r.i < p.i || r.o < p.o) continue; // bajó: sesión nueva, la cifra ya es del turno
+    // ponytail: costo prorrateado por tokens (no se guardó la caché de entonces)
+    update('runs', r.id, { tokens_in: r.i - p.i, tokens_out: r.o - p.o, cost_usd: r.usd * ((r.i - p.i) + (r.o - p.o)) / (r.i + r.o) });
+  }
+  // las sesiones abiertas siguen acumulando: su próximo turno resta desde aquí
+  for (const r of Object.values(prev)) {
+    const c = one('select agent_id, session_id from conversations where id=?', r.c);
+    if (c?.agent_id === r.a && c.session_id) update('conversations', r.c, { usage_cum: JSON.stringify({ sid: c.session_id, tin: r.i, tcache: 0, tout: r.o }) });
+  }
+}
+if (!setting('mig_usage_delta', false)) { migrateUsageDelta(); setSetting('mig_usage_delta', true); }
 
-module.exports = { db, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting };
+module.exports = { db, migrateUsageDelta, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting };

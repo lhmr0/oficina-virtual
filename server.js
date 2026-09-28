@@ -604,7 +604,7 @@ const HIST = {
       (select count(*) from runs where task_id=t.id) runs, (select count(*) from handoffs where task_id=t.id) relevos from tasks t where t.deleted_at is null${f.where} order by t.updated_at desc`, ...f.p); },
   ejecuciones: q => { const f = filters(q, { agent_id: 'r.agent_id', user_id: 'r.started_by', status: 'r.end_reason', from: 'r.started_at', to: 'r.started_at', project_id: 'c.project_id', q: 'r.command' });
     return all(`select r.id, r.conversation_id, r.task_id, r.agent_id, r.model, r.effort, r.turn, r.started_by, r.started_at, r.ended_at, r.exit_code, r.end_reason,
-      r.tokens_in, r.tokens_out, r.cost_usd, r.command from runs r left join conversations c on c.id=r.conversation_id where c.kind != 'prueba'${f.where} order by r.id desc`, ...f.p); },
+      r.tokens_in, r.tokens_out, r.tokens_cache, r.first_out_at, r.cost_usd, r.command from runs r left join conversations c on c.id=r.conversation_id where c.kind != 'prueba'${f.where} order by r.id desc`, ...f.p); },
   relevos: q => { const f = filters(q, { agent_id: 'h.from_agent_id', user_id: 'h.created_by', from: 'h.at', to: 'h.at', q: 'h.reason' });
     return all(`select h.id, h.task_id, h.from_agent_id, h.to_agent_id, h.to_user_id, h.reason, h.commit_sha, h.created_by, h.at from handoffs h where 1=1${f.where} order by h.id desc`, ...f.p); },
   notificaciones: q => { const f = filters(q, { status: 'kind', from: 'at', to: 'at', q: 'title|body' });
