@@ -1,6 +1,6 @@
 // Agente de campo: conecta ESTA PC con la oficina del VPS y ejecuta aquí agentes, git y archivos.
 // Conexión solo saliente (HTTPS): no hay que abrir puertos en la PC.
-// Config: worker.json junto a este archivo o variables OFICINA_URL / OFICINA_TOKEN / OFICINA_WORKER_ROOTS / OFICINA_WORKER_DATA.
+// Config: worker.json junto a este archivo o variables OFICINA_URL / OFICINA_TOKEN / OFICINA_WORKER_ROOTS / OFICINA_WORKER_DATA / OFICINA_CANTINA.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -12,10 +12,11 @@ const URL_ = (process.env.OFICINA_URL || file.url || '').replace(/\/$/, '');
 const TOKEN = process.env.OFICINA_TOKEN || file.token;
 const ROOTS = process.env.OFICINA_WORKER_ROOTS ? process.env.OFICINA_WORKER_ROOTS.split(';') : (file.roots || [os.homedir()]);
 const DATA = process.env.OFICINA_WORKER_DATA || file.dataDir || path.join(os.homedir(), '.oficina-worker');
+const CANTINA = process.env.OFICINA_CANTINA ?? file.cantina ?? 'D:/cantina'; // carpeta fija de la Cantina ('' = sandbox por chat)
 if (!URL_ || !TOKEN) { console.error('Falta url/token: crea worker.json con {"url": "https://…", "token": "…"} (el token se genera en Configuración → Máquinas)'); process.exit(1); }
 fs.mkdirSync(path.join(DATA, 'sandbox'), { recursive: true });
 
-const H = create({ dataDir: DATA, strict: true, roots: ROOTS });
+const H = create({ dataDir: DATA, strict: true, roots: ROOTS, cantina: CANTINA });
 const auth = { Authorization: 'Bearer ' + TOKEN };
 const say = (...a) => console.log(new Date().toLocaleTimeString(), ...a);
 const sleep = ms => new Promise(r => setTimeout(r, ms));

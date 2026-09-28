@@ -30,10 +30,18 @@ function machineOfConv(c) {
   if (c.task_id && c.kind === 'tarea') return machineOfTask(one('select * from tasks where id=?', c.task_id));
   return c.machine_id || host.defaultMachine();
 }
-// bloqueo por carpeta cuando no hay worktree (git sin worktrees o carpeta sin git)
+// bloqueo por carpeta cuando no hay worktree (git sin worktrees o carpeta sin git); por ruta, así tareas y chats se excluyen entre sí
+const dirLock = (mid, p) => `dir-${mid}-${String(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()}`;
 function staticLock(t) {
   const f = folderOf(t);
-  return f && !(f.is_git && f.use_worktrees) ? `folder-${f.id}` : null;
+  return f && !(f.is_git && f.use_worktrees) ? dirLock(machineOfTask(t), f.path) : null;
+}
+// chats en modo edición: su carpeta o la carpeta fija de la Cantina (compartida por todas las consultas rápidas de la máquina)
+function convLock(c) {
+  if (c.task_id && c.kind === 'tarea') { const t = one('select * from tasks where id=?', c.task_id); return t ? staticLock(t) : null; }
+  if (c.mode !== 'editar') return null;
+  const mid = machineOfConv(c);
+  return c.folder_path ? dirLock(mid, c.folder_path) : c.kind === 'consulta_rapida' ? `cantina-${mid}` : null;
 }
 async function workdir(t) {
   const mid = machineOfTask(t);
@@ -90,6 +98,7 @@ const ADAPTERS = {
     },
   },
   codex: {
+    cumulative: true, // turn.completed trae el uso acumulado del hilo, no el del turno
     args(c, { first, prompt }) {
       const a = ['exec'];
       if (!first) a.push('resume');
@@ -119,6 +128,7 @@ const ADAPTERS = {
     },
   },
   agy: {
+    cumulative: true, // result.usage acumula toda la conversación
     args(c, { first, prompt, cwd }) {
       // sin terminal agy no puede pedir permisos y los niega todos → auto-aprobar (como el skill antigravity-agents);
       // en plan se suma --sandbox (restringe la terminal). Editar corre en el worktree de la tarea.
@@ -219,15 +229,17 @@ function pump() {
 bus.on('machine.online', () => setTimeout(pump, 200));
 
 // Encola un turno. Devuelve promesa con el resultado del turno.
-function runTurn(convId, userText, { userId = null, prompt = null, supervised = false, lock = null, priority = 'media' } = {}) {
+// auto: reanudación automática en curso ('red' | 'marcador' | 'cuota' | 'reinicio'), para no repetirla en bucle
+function runTurn(convId, userText, { userId = null, prompt = null, supervised = false, lock = null, priority = 'media', auto = null } = {}) {
   if (queue.some(q => q.convId === convId) || [...active.values()].some(a => a.convId === convId)) throw new Error('Esta conversación ya está en ejecución');
   if (userText) insert('messages', { conversation_id: convId, role: 'usuario', user_id: userId, text: userText, kind: 'mensaje', at: now() });
   update('conversations', convId, { status: 'en_cola', updated_at: now() });
   emit('conv.updated', { id: convId });
   const c = conv(convId);
+  lock ||= convLock(c);
   if (!host.online(machineOfConv(c))) insert('messages', { conversation_id: convId, role: 'sistema', text: `La máquina "${host.machine(machineOfConv(c))?.name || '?'}" no está conectada: el turno queda en cola y arrancará cuando se conecte.`, kind: 'nota', at: now() });
   return new Promise(resolve => {
-    queue.push({ convId, prompt: prompt || userText, userId, supervised, lock, resolve, pri: PRI[priority] ?? 1, at: Date.now() });
+    queue.push({ convId, prompt: prompt || userText, userId, supervised, lock, auto, resolve, pri: PRI[priority] ?? 1, at: Date.now() });
     queue.sort((a, b) => a.pri - b.pri || a.at - b.at);
     pump();
   });
@@ -255,7 +267,7 @@ async function start(item, mid) {
   let cwd;
   try {
     cwd = task ? (await workdir(one('select * from tasks where id=?', task.id))).cwd
-      : cc.folder_path || (await host.call(mid, 'workdir', { sandbox: 'conv-' + c.id })).cwd;
+      : cc.folder_path || (await host.call(mid, 'workdir', { cantina: cc.kind === 'consulta_rapida', sandbox: 'conv-' + c.id })).cwd;
   } catch (e) { active.delete(key); throw e; }
   // El catálogo del agente puede quedar desactualizado; consulta la máquina que ejecutará Codex.
   if (ag.adapter === 'codex' && cc.model) {
@@ -282,11 +294,10 @@ async function start(item, mid) {
     prompt = [task ? taskPrompt(task) : RULES_CHAT, '# Conversación hasta ahora (la sesión anterior se perdió; retoma desde aquí)',
       hist.map(m => `**${m.role}:** ${m.text}`).join('\n\n'), '# Mensaje actual', item.prompt].join('\n\n');
   }
-  if (att.all.length) {
+  if (att.fresh.length) { // los ya anunciados siguen en la carpeta: solo se entregan los nuevos
     try {
-      const rel = await host.call(mid, 'putFiles', { cwd, files: att.all.map(a => ({ id: a.id, name: a.name, size: a.size })) });
-      const fresh = att.fresh.map(a => rel[att.all.indexOf(a)]);
-      if (fresh.length) prompt += `\n\n# Archivos adjuntos (ya están en tu carpeta de trabajo)\n${att.fresh.map((a, i) => `- ${fresh[i]} (${a.mime || 'archivo'}, ${Math.ceil(a.size / 1024)} KB)`).join('\n')}\nLéelos con tus herramientas si los necesitas.`;
+      const fresh = await host.call(mid, 'putFiles', { cwd, files: att.fresh.map(a => ({ id: a.id, name: a.name, size: a.size })) });
+      prompt += `\n\n# Archivos adjuntos (ya están en tu carpeta de trabajo)\n${att.fresh.map((a, i) => `- ${fresh[i]} (${a.mime || 'archivo'}, ${Math.ceil(a.size / 1024)} KB)`).join('\n')}\nLéelos con tus herramientas si los necesitas.`;
     } catch (e) { prompt += `\n\n(No se pudieron entregar los adjuntos: ${e.message})`; }
   }
   const supervised = item.supervised && ag.adapter === 'claude';
@@ -323,6 +334,7 @@ async function start(item, mid) {
   let exitRes;
   const exited = new Promise(r => { exitRes = r; });
   const onEvent = ev => {
+    if (!st.firstOut && (ev.t === 'out' || ev.t === 'err')) { st.firstOut = now(); update('runs', runId, { first_out_at: st.firstOut }); }
     if (ev.t === 'out') {
       let o = null; try { o = JSON.parse(ev.line); } catch {}
       try { ad.parse(ag.adapter === 'fake' ? ev.line : (o ?? null) || {}, st, out); } catch (e) { out('⚠ parser: ' + e.message); }
@@ -382,11 +394,17 @@ async function start(item, mid) {
   out(`■ fin: ${end_reason} (exit ${code})${errText ? ' · ' + errText.slice(0, 300) : ''}`);
   fs.closeSync(logf);
 
+  if (ad.cumulative && st.tin) {
+    const sid = st.sessionId || cc.session_id, prev = J(conv(c.id).usage_cum, {});
+    const raw = { sid, tin: st.tin, tcache: st.tcache || 0, tout: st.tout };
+    if (prev.sid === sid && raw.tin >= prev.tin) { st.tin -= prev.tin; st.tcache = Math.min(st.tin, Math.max(0, raw.tcache - (prev.tcache || 0))); st.tout = Math.max(0, raw.tout - prev.tout); }
+    update('conversations', c.id, { usage_cum: JSON.stringify(raw) });
+  }
   // costo: el que informa el CLI (Claude) o estimado con la tabla de precios del agente (caché al 10 % si no hay precio propio)
   const pr = J(ag.prices, {})[cc.model || ag.default_model];
   if (!st.cost && pr) st.cost = ((st.tin - (st.tcache || 0)) * pr[0] + (st.tcache || 0) * (pr[2] ?? pr[0] / 10) + st.tout * pr[1]) / 1e6;
   if (!retryModel && st.sessionId && st.sessionId !== cc.session_id) update('conversations', c.id, { session_id: st.sessionId });
-  update('runs', runId, { ended_at: act.unconfirmed ? null : now(), exit_code: code, end_reason, tokens_in: st.tin, tokens_out: st.tout, cost_usd: st.cost });
+  update('runs', runId, { ended_at: act.unconfirmed ? null : now(), exit_code: code, end_reason, tokens_in: st.tin, tokens_out: st.tout, tokens_cache: st.tcache || 0, cost_usd: st.cost });
   saveLimits(ag.id, st.limits);
   if (end_reason === 'cuota') markQuota(ag, errText || '', st.resetAt);
   else if (end_reason !== 'error') update('agents', ag.id, { last_error: null });
@@ -415,7 +433,10 @@ async function finishConv(item, res) {
     insert('messages', { conversation_id: c.id, role: 'sistema', text: `${res.end_reason.toUpperCase()}: ${(res.error || '').slice(0, 800)}`, kind: 'nota', at: now() });
   const task = taskOfConv(c);
   try {
-    if (task) await onTaskTurnEnd(task.id, res, item);
+    if (task) {
+      update('conversations', c.id, { status: ['consulta', 'sin_marcador'].includes(res.end_reason) ? 'esperando' : 'inactiva', updated_at: now() });
+      await onTaskTurnEnd(task.id, res, item);
+    }
     else {
       const status = { consulta: 'esperando', cuota: 'sin_cuota', error: 'error', timeout: 'error' }[res.end_reason] || 'inactiva';
       update('conversations', c.id, { status, updated_at: now() });
@@ -504,6 +525,8 @@ function quotaTick() {
     update('agents', ag.id, { status: 'disponible', quota_reset_at: null, last_error: null });
     notify('agente', `${ag.name} vuelve a estar disponible`, 'Su cuota se reinició.', '#/puente');
     emit('agent.status', { id: ag.id });
+    for (const t of all(`select id from tasks where status='pausada_cuota' and agent_id=? and deleted_at is null`, ag.id)) // nadie la relevó: sigue el mismo agente
+      runTaskBg(t.id, null, { text: 'Tu cuota se reinició; continúa donde quedaste.', auto: 'cuota' }).catch(() => {});
   }
   pump();
 }
@@ -594,7 +617,7 @@ function runTask(taskId, userId, opts = {}) {
   setStatus(t.id, 'en_cola', userId, {}, true);
   log(userId, 'tarea', t.id, 'ejecutar', { agente: ag.key, modelo: t.model, esfuerzo: t.effort });
   if (newConv) insert('messages', { conversation_id: c.id, role: 'sistema', user_id: userId, text: `Tarea asignada a ${ag.name} (${t.model || ag.default_model} · ${t.effort || ag.default_effort})`, kind: 'nota', at: now() });
-  return runTurn(c.id, newConv ? null : opts.text, { userId, prompt, supervised: t.mode === 'supervisado', lock: staticLock(t), priority: t.priority });
+  return runTurn(c.id, newConv ? null : opts.text, { userId, prompt, supervised: t.mode === 'supervisado', lock: staticLock(t), priority: t.priority, auto: opts.auto });
 }
 const runTaskBg = (...a) => Promise.resolve().then(() => runTask(...a));
 
@@ -620,7 +643,14 @@ async function onTaskTurnEnd(taskId, res, item) {
     case 'listo':
       changeTask(t.id, { summary: (res.final.split('[[LISTO]]')[1] || res.final).trim().slice(0, 4000), review_comment: null }, null);
       S('revision'); notify('revision', `Tarea #${t.id} lista para revisión`, `${ag.name}: ${t.title}`, link); break;
-    case 'consulta': case 'sin_marcador':
+    case 'sin_marcador':
+      if (item.auto !== 'marcador') { // un recordatorio automático antes de molestar al usuario
+        S('esperando');
+        setTimeout(() => runTaskBg(t.id, item.userId, { text: 'Tu turno terminó sin marcador.', auto: 'marcador' }).catch(() => {}), 10);
+        break;
+      }
+    // falls through
+    case 'consulta':
       S('esperando'); notify('consulta', `${ag.name} consulta en tarea #${t.id}`, question(res.final) || 'Terminó el turno sin marcador; revisa y responde.', link); break;
     case 'cuota': {
       const h = await createHandoff(t.id, 'cuota', null);
@@ -637,9 +667,9 @@ async function onTaskTurnEnd(taskId, res, item) {
     case 'timeout': await createHandoff(t.id, 'timeout', null); S('fallida', { motivo: 'timeout' }); notify('fallo', `Tarea #${t.id} excedió el tiempo`, t.title, link); break;
     default: {
       const transient = /ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up|\b50[0-9]\b|overloaded|network|se desconectó|se reinició/i.test(res.error || '');
-      if (transient && !item.retried) {
+      if (transient && item.auto !== 'red') {
         S('pendiente');
-        setTimeout(() => runTaskBg(t.id, item.userId, { text: 'Hubo un error de red o de la máquina; continúa donde quedaste.' }).catch(() => {}), 5000);
+        setTimeout(() => runTaskBg(t.id, item.userId, { text: 'Hubo un error de red o de la máquina; continúa donde quedaste.', auto: 'red' }).catch(() => {}), 5000);
         notify('fallo', `Tarea #${t.id}: error transitorio, reintentando`, (res.error || '').slice(0, 200), link);
         break;
       }
@@ -777,14 +807,20 @@ function recover() {
     const c = conv(r.conversation_id);
     if (!c) { update('runs', r.id, { ended_at: now() }); continue; }
     const t = taskOfConv(c);
-    hold(r.id, { mid: machineOfConv(c), lock: t ? staticLock(t) : null, convId: c.id, taskId: t?.id ?? null });
+    hold(r.id, { mid: machineOfConv(c), lock: convLock(c), convId: c.id, taskId: t?.id ?? null });
   }
+  // tareas cortadas: se reanudan solas (la cola espera a que la máquina confirme el fin del proceso anterior); 2 cortes seguidos → decide el usuario
+  const tasks = all(`select * from tasks where status in ('en_curso','en_cola') and deleted_at is null`);
+  const resume = tasks.filter(t => t.executor === 'agente' && t.conversation_id &&
+    all('select end_reason from runs where task_id=? order by id desc limit 2', t.id).filter(r => r.end_reason === 'interrumpido').length < 2);
   for (const c of all(`select * from conversations where status in ('en_curso','en_cola')`)) {
     update('conversations', c.id, { status: 'esperando' });
-    insert('messages', { conversation_id: c.id, role: 'sistema', text: 'El servidor se reinició y la ejecución se interrumpió. Responde (ej. "continúa") para reanudar la sesión.', kind: 'nota', at: now() });
+    if (!resume.some(t => t.conversation_id === c.id))
+      insert('messages', { conversation_id: c.id, role: 'sistema', text: 'El servidor se reinició y la ejecución se interrumpió. Responde (ej. "continúa") para reanudar la sesión.', kind: 'nota', at: now() });
   }
-  for (const t of all(`select * from tasks where status in ('en_curso','en_cola') and deleted_at is null`)) update('tasks', t.id, { status: 'esperando' });
+  for (const t of tasks) update('tasks', t.id, { status: 'esperando' });
   for (const a of all(`select * from agents where status in ('ocupado')`)) update('agents', a.id, { status: 'disponible' });
+  for (const t of resume) runTaskBg(t.id, null, { text: 'El servidor se reinició a mitad del turno; revisa el estado real de los archivos y continúa donde quedaste.', auto: 'reinicio' }).catch(() => {});
 }
 function order66(userId) {
   setSetting('queue_paused', true);

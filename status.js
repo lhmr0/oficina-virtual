@@ -72,7 +72,7 @@ function usage(agentId, win) {
 function agentCard(ag) {
   const v = versions[ag.id] || {};
   const runs = all('select end_reason, started_at, ended_at from runs where agent_id=? and ended_at is not null order by id desc limit 200', ag.id);
-  const ok = runs.filter(r => ['listo', 'consulta', 'sin_marcador'].includes(r.end_reason)).length;
+  const ok = runs.filter(r => ['listo', 'consulta'].includes(r.end_reason)).length; // sin marcador no es éxito: requirió intervención
   const dur = runs.filter(r => r.ended_at).map(r => Date.parse(r.ended_at) - Date.parse(r.started_at));
   const cli = all(`select * from agent_limits where agent_id=? and source='cli' order by win`, ag.id);
   const manual = all(`select * from agent_limits where agent_id=? and source='manual'`, ag.id).map(l => {

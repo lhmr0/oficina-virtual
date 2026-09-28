@@ -19,7 +19,7 @@ Requisitos: Node 22+, git, y los CLIs de los agentes instalados y con sesión in
 | **Proyectos** | Con carpetas locales (una o varias, git opcional) o solo de registro. Estado, avance, métricas. |
 | **Kanban** | Por proyecto o de todos los proyectos. Arrastra a "En curso" para ejecutar. |
 | **Tarea** | Agente + modelo + esfuerzo + modo, consola en vivo, chat con el agente, diff, ejecuciones, relevos, historial de cambios. |
-| **Cantina** | Consultas rápidas sin proyecto; multi-turno, cambio de agente a mitad, convertir en tarea/proyecto. |
+| **Cantina** | Consultas rápidas sin proyecto; multi-turno, cambio de agente a mitad, convertir en tarea/proyecto. Sin carpeta elegida trabajan en la carpeta fija `D:\cantina` de la máquina (`OFICINA_CANTINA` o `"cantina"` en `worker.json`; vacío = sandbox por chat); los chats en modo *Editar* sobre la misma carpeta van de a uno. |
 | **Consejo Jedi** | Informe de lo hecho → uno o varios agentes proponen mejoras por "lentes" → tablero de propuestas → tareas. |
 | **Archivos Jedi** | Historial de chats, tareas, ejecuciones, relevos, notificaciones, bitácora, consejos, papelera. Búsqueda global y CSV. |
 | **Puente de Mando** | Estado de todo: versión y salud de cada agente, límites (los que informa el CLI + medidos + manuales), procesos, carpetas git, sistema. Orden 66. |
@@ -105,7 +105,7 @@ Para mantener actualizados automáticamente los 4 CLIs (`claude`, `codex`, `agy`
 
 ## Datos
 
-Todo vive en `data/` (SQLite `oficina.db`, logs de ejecución, sandbox, respaldos diarios). Variables: `OFICINA_PORT` (4242), `OFICINA_DATA`, `OFICINA_BIND`, `OFICINA_LOCAL_EXEC` (0 = no ejecutar agentes en el servidor), `OFICINA_AUTH` (password|google), `OFICINA_PUBLIC_URL`, `OFICINA_ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OFICINA_NO_TOAST`.
+Todo vive en `data/` (SQLite `oficina.db`, logs de ejecución, sandbox, respaldos diarios). Variables: `OFICINA_PORT` (4242), `OFICINA_DATA`, `OFICINA_BIND`, `OFICINA_LOCAL_EXEC` (0 = no ejecutar agentes en el servidor), `OFICINA_AUTH` (password|google), `OFICINA_PUBLIC_URL`, `OFICINA_ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OFICINA_NO_TOAST`, `OFICINA_CANTINA`.
 
 ## Pruebas
 

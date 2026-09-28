@@ -8,12 +8,13 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const https = require('node:https');
 
-// cfg: { dataDir, strict, roots[] } — strict = agente de campo: solo CLIs conocidos y rutas bajo roots
+// cfg: { dataDir, strict, roots[], cantina } — strict = agente de campo: solo CLIs conocidos y rutas bajo roots (más la carpeta de la Cantina)
 function create(cfg) {
   const dataDir = cfg.dataDir;
   const strict = !!cfg.strict;
   const roots = (cfg.roots?.length ? cfg.roots : [os.homedir()]).map(r => canon(r));
   const runs = new Map(); // runId → proc
+  const cantinaDir = cfg.cantina ? path.resolve(cfg.cantina) : null; // carpeta fija de las consultas rápidas en esta máquina
 
   // ---------- rutas ----------
   function canon(p) { try { return fs.realpathSync.native(path.resolve(p)); } catch { return path.resolve(p); } }
@@ -100,7 +101,7 @@ function create(cfg) {
     if (path.dirname(r) === r) throw new Error('No se permite la raíz de un disco');
     const bad = [process.env.SystemRoot, process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramData, '/etc', '/usr', '/bin', '/proc'].filter(Boolean).map(x => path.resolve(x));
     if (bad.some(b => under(r, b))) throw new Error('No se permiten carpetas del sistema');
-    if (strict && !under(r, dataDir) && !roots.some(x => under(r, x))) throw new Error('Carpeta fuera de las raíces permitidas del agente de campo');
+    if (strict && !under(r, dataDir) && !roots.some(x => under(r, x)) && !(cantinaDir && under(r, canon(cantinaDir)))) throw new Error('Carpeta fuera de las raíces permitidas del agente de campo');
     return r;
   }
 
@@ -148,7 +149,8 @@ function create(cfg) {
       return { path: r, is_git: isGit(r), parent: parent !== r && (!strict || roots.some(x => under(parent, x))) ? parent : null, dirs: dirs.slice(0, 500) };
     },
     // prepara la carpeta de trabajo: sandbox, carpeta directa o worktree git por tarea
-    workdir: ({ sandbox, folder, task, exclude: ex = [] }) => {
+    workdir: ({ sandbox, cantina, folder, task, exclude: ex = [] }) => {
+      if (cantina && cantinaDir) try { fs.mkdirSync(cantinaDir, { recursive: true }); return { cwd: canon(cantinaDir), git: false }; } catch {} // sin ese disco: sandbox del chat
       if (sandbox != null) { const d = sandboxBase(sandbox, true); return { cwd: d, git: false }; }
       const base = checkPath(folder.path);
       const g = isGit(base);

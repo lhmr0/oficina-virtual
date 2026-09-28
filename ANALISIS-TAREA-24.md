@@ -1,6 +1,8 @@
 # Oficina Virtual — mejoras de rendimiento, reanudación y Cantina
 
 Fecha: 27 de septiembre de 2026 · Tarea #24 · Área: Análisis
+**Estado: los 8 hallazgos están implementados** (Cantina = opción A, carpeta fija `D:\cantina`). Ver «Implementación» al final.
+
 Complementa `ANALISIS-MEJORAS.md` (tarea #17). De aquel informe ya están resueltos: rutas reales en descargas (`sandboxEntry`), adjuntos por ID, `seq` en eventos del worker, `orphans` para máquinas sin respuesta, borradores de la bandeja y contador de fallos de `test.js`.
 
 ## Evidencia
@@ -79,3 +81,18 @@ No hace falta añadir índices por ahora: con este volumen, las consultas de `st
 5. Hallazgo 8.
 
 Cada cambio de lógica debe llevar su prueba en `test.js` y terminar con `node --no-warnings test.js` → `TODO OK`. Ninguna propuesta requiere dependencias npm.
+
+## Implementación
+
+| # | Cambio | Dónde |
+|---|---|---|
+| 1 | La conversación de tarea pasa a `inactiva`/`esperando` al terminar el turno | `runner.js` `finishConv` |
+| 2 | `cumulative` en Codex/Antigravity: se guarda el delta usando `conversations.usage_cum`; migración única de datos históricos (`mig_usage_delta`, costo prorrateado) que siembra las sesiones abiertas | `runner.js`, `db.js` |
+| 3 | `recover()` reanuda sola cada tarea cortada (la cola espera a que la máquina confirme el fin del proceso anterior); con 2 cortes seguidos pide al usuario | `runner.js` |
+| 4 | `quotaTick` reanuda las tareas `pausada_cuota` del agente que vuelve | `runner.js` |
+| 5 | `sin_marcador`: un turno automático de recordatorio; el reintento por error de red ya no se repite en bucle (`item.retried` nunca se asignaba) | `runner.js` |
+| 6 | Solo se entregan los adjuntos nuevos del turno (si la sesión se pierde, se reenvían todos) | `runner.js` |
+| 7 | Carpeta fija de la Cantina por máquina (`D:\cantina`, `OFICINA_CANTINA` / `worker.json` `cantina`; si no existe el disco, sandbox). Bloqueo por ruta compartido entre tareas sin worktree y chats en modo edición (`dir-…`, `cantina-…`) | `hostops.js`, `host.js`, `worker.js`, `runner.js` |
+| 8 | `runs.tokens_cache` y `runs.first_out_at`; columnas «Arranque» y «Caché» en Historial → Ejecuciones; la tasa de éxito ya no cuenta `sin_marcador` | `runner.js`, `server.js`, `status.js`, `public/views.js` |
+
+Pruebas nuevas en `test.js`: cuota reiniciada, recordatorio sin marcador, delta y migración, Cantina fija con bloqueo, estado de la conversación de tarea y reanudación tras reinicio (incluido el tope de 2 cortes).

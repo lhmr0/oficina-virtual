@@ -9,6 +9,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-test-'));
 process.env.OFICINA_DATA = path.join(TMP, 'data');
 process.env.OFICINA_NO_TOAST = '1';
 process.env.OFICINA_KILL_GRACE_MS = '400';
+process.env.OFICINA_CANTINA = path.join(TMP, 'cantina');
 const PORT = 4300 + Math.floor(Math.random() * 500);
 process.env.OFICINA_PORT = String(PORT);
 
@@ -25,6 +26,7 @@ if(s.includes('ADJUNTO')&&!s.includes('# RELEVO')){const rel=(s.match(/- (\\.ofi
 if(s.includes('Descompón'))return console.log(JSON.stringify({subtareas:[{title:'Sub A',prompt:'a',area:'Análisis'},{title:'Sub B',prompt:'b',area:'Desarrollo',depends_on:[0]}]}));
 if(s.includes('sesión anterior se perdió')){fs.writeFileSync('ctx-prompt.txt',s);return console.log('[[LISTO]] retomé');}
 if(s.includes('# RELEVO')){fs.writeFileSync('relevo-prompt.txt',s);return console.log('Continué.\\n[[LISTO]] Relevo completado');}
+if(s.includes('SINMARCA'))return console.log('olvidé el marcador');
 if(s.includes('PREGUNTA'))return console.log('Necesito saber algo.\\n[[CONSULTA]] ¿Cómo se llama el archivo?');
 if(s.includes('CUOTA')){console.error("You've hit your usage limit. try again at 3:00 PM");process.exit(1)}
 if(s.includes('FALLA')){console.error('boom');process.exit(1)}
@@ -188,6 +190,7 @@ function gitRepo(name) {
     await until(() => task(id).status === 'revision', 15000, 'revision');
     assert.ok(fs.existsSync(path.join(process.env.OFICINA_DATA, 'sandbox', 'task-' + id, 'salida.txt')));
     assert.match(task(id).summary, /Creé salida/);
+    assert.equal(one('select status from conversations where id=?', task(id).conversation_id).status, 'inactiva', 'la conversación de la tarea no queda en_curso');
     const d = await api('GET', `/api/tasks/${id}`);
     assert.ok(d.files.some(f => f.name === 'salida.txt'));
     assert.ok(events.some(e => e.type === 'run.log' && e.data.task_id === id));
@@ -293,6 +296,42 @@ function gitRepo(name) {
     update('agents', fake, { status: 'disponible', quota_reset_at: null, last_error: null });
   });
 
+  await t('cuota reiniciada: la tarea pausada sigue sola con el mismo agente', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Cuota2', prompt: 'CUOTA', agent_id: fake, run: true })).id;
+    await until(() => task(id).status === 'pausada_cuota', 15000, 'pausada');
+    update('agents', fake, { quota_reset_at: new Date(Date.now() - 1000).toISOString() });
+    R.quotaTick();
+    await until(() => task(id).status === 'revision', 15000, 'reanudada');
+    assert.equal(task(id).agent_id, fake);
+    assert.equal(one('select count(*) n from runs where task_id=?', id).n, 2);
+  });
+
+  await t('turno sin marcador: un recordatorio automático y luego sí consulta', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Sin marca', prompt: 'SINMARCA', agent_id: fake, run: true })).id;
+    await until(() => task(id).status === 'revision', 15000, 'revisión tras recordatorio');
+    assert.deepEqual(all('select end_reason from runs where task_id=? order by id', id).map(r => r.end_reason), ['sin_marcador', 'listo']);
+  });
+
+  await t('Codex/Antigravity: el uso acumulado de la sesión se guarda como delta por turno (y migración)', async () => {
+    const orig = R.ADAPTERS.fake.parse;
+    let n = 0;
+    R.ADAPTERS.fake.cumulative = true;
+    R.ADAPTERS.fake.parse = (l, st, out) => { orig(l, st, out); st.tin = n * 100; st.tout = n * 10; };
+    try {
+      n = 1; const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Acumula', prompt: 'PREGUNTA', agent_id: fake, run: true })).id;
+      await until(() => task(id).status === 'esperando', 15000, 'turno 1');
+      n = 3; await api('POST', `/api/tasks/${id}/reply`, { text: 'sigue' });
+      await until(() => task(id).status === 'revision', 15000, 'turno 2');
+      assert.deepEqual(all('select tokens_in i, tokens_out o from runs where task_id=? order by id', id).map(r => [r.i, r.o]), [[100, 10], [200, 20]]);
+    } finally { R.ADAPTERS.fake.parse = orig; delete R.ADAPTERS.fake.cumulative; }
+    const cx = one("select id from agents where key='codex'").id;
+    const c = insert('conversations', { kind: 'prueba', agent_id: cx });
+    const r = [[500, 50, 5], [800, 80, 8], [0, 0, 0], [300, 30, 3]].map(([i, o, usd]) => insert('runs', { conversation_id: c, agent_id: cx, tokens_in: i, tokens_out: o, cost_usd: usd }));
+    require('./db').migrateUsageDelta();
+    assert.deepEqual(r.map(id => one('select tokens_in i, tokens_out o, cost_usd u from runs where id=?', id)).map(x => [x.i, x.o, +x.u.toFixed(2)]),
+      [[500, 50, 5], [300, 30, 3], [0, 0, 0], [300, 30, 3]], 'delta; si baja es sesión nueva');
+  });
+
   await t('relevo manual a otro agente y a una persona', async () => {
     const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Manual', prompt: 'PREGUNTA', agent_id: fake, run: true })).id;
     await until(() => task(id).status === 'esperando');
@@ -329,6 +368,20 @@ function gitRepo(name) {
     assert.ok(s.some(x => x.kind === 'tarea'));
     const h = await api('GET', '/api/history/chats');
     assert.ok(h.rows.some(x => x.id === cid));
+  });
+
+  await t('Cantina: carpeta fija compartida; los chats en modo edición no escriben a la vez', async () => {
+    const dir = process.env.OFICINA_CANTINA;
+    const a = (await api('POST', '/api/conversations', { agent_id: fake3, text: 'LENTO', mode: 'editar' })).id;
+    await until(() => one('select status from conversations where id=?', a).status === 'en_curso', 15000, 'a corre');
+    const b = (await api('POST', '/api/conversations', { agent_id: fake2, text: 'escribe', mode: 'editar' })).id;
+    await new Promise(r => setTimeout(r, 500));
+    assert.equal(one('select status from conversations where id=?', b).status, 'en_cola', 'b espera la carpeta');
+    await api('POST', `/api/conversations/${a}/abort`, {});
+    await until(() => one('select status from conversations where id=?', b).status === 'inactiva', 15000, 'b corre tras a');
+    assert.ok(fs.existsSync(path.join(dir, 'salida.txt')), 'escribe en la carpeta fija de la Cantina');
+    const pl = (await api('POST', '/api/conversations', { agent_id: fake, text: 'PREGUNTA en lectura' })).id; // modo lectura: sin bloqueo
+    await until(() => one('select status from conversations where id=?', pl).status === 'esperando', 15000, 'lectura');
   });
 
   await t('papelera: soft-delete y restaurar', async () => {
@@ -500,11 +553,20 @@ function gitRepo(name) {
     const c3 = insert('conversations', { kind: 'tarea', task_id: id3, status: 'en_curso', agent_id: fake, model: 'm1', effort: 'low', mode: 'editar' });
     update('tasks', id3, { status: 'en_curso', conversation_id: c3 });
     insert('runs', { conversation_id: c3, task_id: id3, agent_id: fake, started_at: new Date().toISOString() });
-    R.recover();
-    await api('POST', `/api/tasks/${id3}/reply`, { text: 'continúa' });
+    R.recover(); // se reanuda sola, sin que el usuario responda
     await until(() => task(id3).status === 'revision', 15000, 'revisión tras retomar');
     const ctx = fs.readFileSync(path.join(process.env.OFICINA_DATA, 'sandbox', 'task-' + id3, 'ctx-prompt.txt'), 'utf8');
-    assert.match(ctx, /OBJETIVO-ORIGINAL/); assert.match(ctx, /continúa/);
+    assert.match(ctx, /OBJETIVO-ORIGINAL/); assert.match(ctx, /servidor se reinició/);
+    // dos cortes seguidos: no insiste, decide el usuario
+    const id4 = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Cortes', prompt: 'x', agent_id: fake })).id;
+    const c4 = insert('conversations', { kind: 'tarea', task_id: id4, status: 'en_curso', agent_id: fake, mode: 'editar' });
+    update('tasks', id4, { status: 'en_curso', conversation_id: c4 });
+    insert('runs', { conversation_id: c4, task_id: id4, agent_id: fake, end_reason: 'interrumpido', started_at: new Date().toISOString(), ended_at: new Date().toISOString() });
+    insert('runs', { conversation_id: c4, task_id: id4, agent_id: fake, started_at: new Date().toISOString() });
+    R.recover();
+    await new Promise(r => setTimeout(r, 500));
+    assert.equal(task(id4).status, 'esperando');
+    assert.match(one("select text from messages where conversation_id=? order by id desc", c4).text, /Responde/);
   });
 
   await t('eventos del worker: un lote reenviado se aplica una sola vez', async () => {
