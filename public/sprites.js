@@ -1,5 +1,9 @@
 // Sprites pixel-art generados como SVG desde matrices de caracteres
-const PAL = { K: '#0b0d1a', W: '#e8ecff', G: '#8b93b8', R: '#ff3b3b', Y: '#ffe81f', S: '#f2c29b', O: '#ff8c42', D: '#3a4270', H: '#4fc3f7', N: '#5a3a1a', L: '#3ddc84', M: '#a355dd', P: '#e06666', C: '#382212', T: '#1f6f8b', F: '#ffeaa7', A: '#5f6680' };
+const PAL = { K: '#0b0d1a', W: '#e8ecff', G: '#8b93b8', R: '#ff3b3b', Y: '#ffe81f', S: '#f2c29b', O: '#ff8c42', D: '#3a4270', H: '#4fc3f7', N: '#5a3a1a', L: '#3ddc84', M: '#a355dd', P: '#e06666', C: '#382212', T: '#1f6f8b', F: '#ffeaa7', A: '#5f6680',
+  // tonos extra de los sprites detallados (vader, mono, cr7)
+  v: '#1d2130', g: '#363d54', h: '#66708f', s: '#b9c1d6', r: '#c0262f', a: '#262b3d',
+  f: '#7a4a24', e: '#4e2c12', u: '#a86a38', k: '#f2c9a0', q: '#d9a07a', i: '#fff0d6', p: '#ff9ab8', n: '#e0457b', x: '#9c2350', m: '#c0392b',
+  c: '#1c1510', d: '#4a3524', t: '#e3a878', o: '#b77a4e', z: '#e0202f', j: '#a3131f', l: '#1f9a52', w: '#ffd23f' };
 
 const SHAPES = {
   // astromech (agentes). B = color del agente
@@ -73,20 +77,30 @@ const SHAPES = {
   ],
   // mona con moño (Claude)
   mono: [
-    '.......PP.......',
-    '.....PPKKPP.....',
-    '......PKKP......',
-    '...NNNNNNNNNN...',
-    '..NNNNNNNNNNNN..',
-    '.NNNSSSSSSSSNNN.',
-    '.NSSSWKSSKWSSSN.',
-    '.NSSSWKSSKWSSSN.',
-    '.NSSSSSSSSSSSSN.',
-    '..NSSKSSSSKSSN..',
-    '..NSSPPPPPPSSN..',
-    '...NNSSSSSSNN...',
-    '..NNNSSSSSSNNN..',
-    '.....KK..KK.....',
+    '...............KK..KK...',
+    '.........KKKKKKpnKKnpK..',
+    '.......KKfffffKnnxxnnK..',
+    '......KffuuffuKnxxxxnK..',
+    '.....KffuuffffuKKnnKK...',
+    '....KfffffffffffKKKK....',
+    '..KKfffffkkffkkfffffKK..',
+    '.KeeKffkkkkkkkkkkffKeeK.',
+    'KeqqKKKkkkkkkkkkkKKKqqeK',
+    'KeqqKfkKKkkkkkkKKkfKqqeK',
+    'KeqqKfKKWKkkkkKWKKfKqqeK',
+    'KeqqKfKKKKkkkkKKKKfKqqeK',
+    '.KeeKfkKKkkkkkkKKkfKeeK.',
+    '..KKfkppkkkkkkkkppkfKK..',
+    '...KfkkiiiiiiiiiikkfK...',
+    '...KfkiiiiiiiiiiiikfK...',
+    '...KfiiiiiKiiKiiiiifK...',
+    '...KfiiiiiiiiiiiiiifK...',
+    '...KfiKiiiiiiiiiiKifK...',
+    '....KfiKiiiiiiiiKifK....',
+    '....KfiiKmmmmmmKiifK....',
+    '.....KKiiKKKKKKiiKK.....',
+    '......KnffffffffnK......',
+    '.....KnnnnnnnnnnnnK.....',
   ],
   // elefante (Codex)
   elefante: [
@@ -103,24 +117,32 @@ const SHAPES = {
     '.....GG.....',
     '......GG....',
   ],
-  // CR7 (Antigravity): camiseta roja con el 7
+  // CR7 (Antigravity): busto con camiseta de Portugal y el 7
   cr7: [
-    '.....CCCC.......',
-    '....CCCCCC......',
-    '....CSSSSC......',
-    '....SKSSKS......',
-    '....SSOOSS......',
-    '.....SSSS.......',
-    '...WRRRRRRW.....',
-    '..WRRRWWWRRW....',
-    '.WRRRRWRRRRW....',
-    'WRRRRRWRRRRRW...',
-    'WRRRRRWRRRRRW...',
-    '.WRRRRWRRRRW....',
-    '..WWRRRRRWW.....',
-    '...LLL.LLL......',
-    '...LLL.LLL......',
-    '...SS...SS......',
+    '........KKKKKKKK........',
+    '......KKccccccccKK......',
+    '.....KccddccccccccK.....',
+    '....KcccddcccccccccK....',
+    '....KccccdcccccccccK....',
+    '....KdccttttttttccdK....',
+    '...KKdcttttttttttcdKK...',
+    '...KdtccccttttcccctdK...',
+    '..KKttWKKttttttKKWttKK..',
+    '..KotttttttootttttttoK..',
+    '...KttttttoooottttttK...',
+    '...KtttKWWWWWWWWKtttK...',
+    '...KotttKKKKKKKKtttoK...',
+    '....KottttttttttttoK....',
+    '.....KoottttttttooK.....',
+    '......KKooooooooKK......',
+    '....KKzzloooooolzzKK....',
+    '..KKzzzzzllllllzzzzzKK..',
+    '.KzzzzzzzzzzzzzzzzzzzzK.',
+    'KzzjzzlzzzwwwwwzzzzzjzzK',
+    'KzjzzzwzzzzzzwwzzzzzzjzK',
+    'KzjzzzzzzzzzwwzzzzzzzjzK',
+    'KzjzzzzzzzzwwzzzzzzzzjzK',
+    'KzjzzzzzzzzwwzzzzzzzzjzK',
   ],
   // dispensador de agua Gather (water cooler)
   // Maestro Yoda
@@ -386,30 +408,39 @@ const SHAPES = {
     'KGKKGGGGKKGK',
     'KKK......KKK',
   ],
-  // Darth Vader (avatar del jefe)
+  // Darth Vader (avatar del jefe): casco, rejilla y panel de pecho
   vader: [
-    '.....KKKKKK.....',
-    '....KDDDDDDK....',
-    '...KDDDDDDDDK...',
-    '..KDDDDDDDDDDK..',
-    '.KDDDDDDDDDDDDK.',
-    '.KDDGGGKGGGDDDK.',
-    '.KDGGKKKKKGGDDK.',
-    '.KDGGKKKKKGGDDK.',
-    '.KDDGGGKGGGDDDK.',
-    '.KDDDDDDDDDDDDK.',
-    '..KDDGGGGGGDDK..',
-    '...KDGKGKGKDK...',
-    '...KDGGGGGGDK...',
-    '....KKDDDDKK....',
-    '.....KDDDDK.....',
-    '.KKKK......KKKK.',
+    '.........KKKKKK.........',
+    '.......KKvvvvvvKK.......',
+    '......KvvhhvvvvvvK......',
+    '.....KvvhhvvvvvvvvK.....',
+    '....KvvhhvvvvvvvvvvK....',
+    '....KvhhvvvvvvvvvvvK....',
+    '...KvvhvvvvvvvvvvvvvK...',
+    '...KvvvvvvvvvvvvvvvvK...',
+    '...KggggggggggggggggK...',
+    '..KvKKKKKKgvvgKKKKKKvK..',
+    '..KvKKKrKKKggKKKrKKKvK..',
+    '..KvvKKKKKKggKKKKKKvvK..',
+    '..KvvvKKKKvssvKKKKvvvK..',
+    '..KvvvvvvvKssKvvvvvvvK..',
+    '.KvgvvvvvKsKKsKvvvvvgvK.',
+    '.KvvgvvvKsKssKsKvvvgvvK.',
+    'KvvvvgvKsKsKKsKsKvgvvvvK',
+    'KvvvvvgKsKsKKsKsKgvvvvvK',
+    'KaKvvvvgKKKKKKKKgvvvvKaK',
+    'KaaKKvvvggggggggvvvKKaaK',
+    'KaaaaKKKKKKKKKKKKKKaaaaK',
+    'KaaaaaKGGGGGGGGGGKaaaaaK',
+    'KaaaaaKGRRKLHKYWGKaaaaaK',
+    'KaaaaaKGGGGGGGGGGKaaaaaK',
   ],
 };
 
 export function sprite(kind = 'droid', color = '#4fc3f7', px = 4, extra = '') {
   const m = SHAPES[kind] || SHAPES.droid;
   const w = m[0].length, h = m.length;
+  px *= Math.min(1, 16 / Math.max(w, h)); // los sprites detallados (24×24) ocupan lo mismo que uno de 16
   let r = '';
   m.forEach((row, y) => [...row].forEach((c, x) => {
     if (c === '.') return;

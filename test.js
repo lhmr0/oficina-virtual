@@ -145,6 +145,11 @@ function gitRepo(name) {
     assert.match(SP.userSprite({ avatar: 'vader' }, 2), /^<svg/);
     assert.notEqual(SP.userSprite({ avatar: 'vader' }), SP.userSprite({ avatar: 'rebel' }));
     assert.equal(SP.userSprite({ role: 'admin' }), SP.sprite('imperial', '#ff8c42', 2, ''), 'sin avatar cae al rol');
+    for (const k of ['vader', 'mono', 'cr7']) {
+      const svg = SP.sprite(k, '#fff', 2);
+      assert.doesNotMatch(svg, /fill="undefined"/, `${k}: todos los colores están en la paleta`);
+      assert.match(svg, /viewBox="0 0 24 24" width="32" height="32"/, `${k}: 24×24 escalado al tamaño de uno de 16`);
+    }
     await api('PUT', '/api/me', { avatar: 'vader' });
     assert.equal((await api('GET', '/api/me')).avatar, 'vader');
     const users = await api('GET', '/api/users');
