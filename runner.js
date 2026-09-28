@@ -9,7 +9,7 @@ const host = require('./host');
 // ---------- estados ----------
 const STATUS = ['pendiente', 'bloqueada', 'en_cola', 'en_curso', 'esperando', 'revision', 'completada', 'pausada_cuota', 'fallida'];
 const RUNNING = ['en_cola', 'en_curso'];
-const DELIVER = 'Si generas un documento o archivo para el usuario (Excel, Word, PDF, imagen…), guárdalo (o cópialo) en .oficina/entregables/ de tu carpeta de trabajo: la oficina se lo entrega como adjunto descargable.';
+const DELIVER = 'Entrega de archivos: si generas o ya generaste un documento para el usuario (Excel, Word, PDF, imagen…), guárdalo o cópialo en .oficina/entregables/ de tu carpeta de trabajo. Ese es el canal de envío: al terminar tu turno la oficina se lo entrega como adjunto descargable.';
 const RULES = `## Reglas de la oficina (obligatorias)
 1. Mantén el archivo .oficina/progreso.md en tu carpeta de trabajo: objetivo, checklist de pasos hechos y pendientes, decisiones y archivos tocados. Actualízalo después de cada paso importante (así otro agente puede continuar si te detienes).
 2. Si necesitas una decisión del usuario, termina tu respuesta con la línea [[CONSULTA]] seguida de la pregunta (y opciones si aplica). No inventes la decisión.
@@ -311,6 +311,7 @@ async function start(item, mid) {
     prompt = [task ? taskPrompt(task) : RULES_CHAT, '# Conversación hasta ahora (la sesión anterior se perdió; retoma desde aquí)',
       hist.map(m => `**${m.role}:** ${m.text}`).join('\n\n'), '# Mensaje actual', item.prompt].join('\n\n');
   }
+  if (!prompt.includes(DELIVER)) prompt += '\n\n' + DELIVER; // sesiones reanudadas no vuelven a recibir las reglas
   if (att.fresh.length) { // los ya anunciados siguen en la carpeta: solo se entregan los nuevos
     try {
       const fresh = await host.call(mid, 'putFiles', { cwd, files: att.fresh.map(a => ({ id: a.id, name: a.name, size: a.size })) });
