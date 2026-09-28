@@ -246,6 +246,21 @@ function create(cfg) {
       try { root = fs.realpathSync.native(cwd); } catch { throw new Error('Archivo no encontrado'); }
       return readEntryB64(root, name);
     },
+    // entregables que el agente dejó en <cwd>/.oficina/entregables; `known` = sha256 ya recibidos (no se reenvían)
+    // ponytail: solo el primer nivel de la carpeta, subcarpetas se ignoran
+    takeOutputs: ({ cwd, known = [] }) => {
+      let root;
+      try { root = fs.realpathSync.native(cwd); } catch { return []; }
+      const dir = path.join(root, '.oficina', 'entregables');
+      if (!fs.existsSync(dir)) return [];
+      return fs.readdirSync(dir).flatMap(n => {
+        try {
+          const b64 = readEntryB64(root, '.oficina/entregables/' + n);
+          const sha = crypto.createHash('sha256').update(Buffer.from(b64, 'base64')).digest('hex').slice(0, 16);
+          return known.includes(sha) ? [] : [{ name: n, sha, b64 }];
+        } catch { return []; } // directorios, enlaces o >25 MB
+      });
+    },
     // adjuntos: files = [{id, name, size, url?|src?}] → .oficina/adjuntos/<name>; fetcher lo aporta quien llama
     probe: async ({ exe, pre_args = [] }) => {
       const r = await sh(resolveExe(exe), [...pre_args.map(expand), '--version']);

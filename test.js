@@ -21,6 +21,7 @@ const C = require('./council');
 // agente falso: decide su respuesta según palabras clave del prompt (stdin)
 const FAKE = `let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const fs=require('fs');
 if(s.includes('Consejo Jedi')||s.includes('moderador'))return console.log('Aquí va:\\n\`\`\`json\\n'+JSON.stringify({propuestas:[{title:'Agregar pruebas',description:'Cubrir salida.txt',impact:'alto',effort:'bajo',area:'Desarrollo',agent:'fake'},{title:'Documentar API',description:'README',impact:'medio',effort:'bajo',area:'Documentación'}]})+'\\n\`\`\`');
+if(s.includes('ENTREGABLE')){fs.mkdirSync('.oficina/entregables',{recursive:true});fs.writeFileSync('.oficina/entregables/reporte.xlsx','XLSX');return console.log('[[LISTO]] generé reporte.xlsx');}
 if(s.includes('JSONMALO'))return console.log('no hay json aquí');
 if(s.includes('ADJUNTO')&&!s.includes('# RELEVO')){const rel=(s.match(/- (\\.oficina\\/adjuntos\\/[^\\s]+)/)||[])[1];if(!rel)throw Error('No encontré la ruta anunciada del adjunto');const t=fs.readFileSync(rel,'utf8');fs.writeFileSync('salida.txt',t);return console.log('Leí: '+t+'\\n[[LISTO]] Leí: '+t);}
 if(s.includes('Descompón'))return console.log(JSON.stringify({subtareas:[{title:'Sub A',prompt:'a',area:'Análisis'},{title:'Sub B',prompt:'b',area:'Desarrollo',depends_on:[0]}]}));
@@ -199,6 +200,19 @@ function gitRepo(name) {
     const d = await api('GET', `/api/tasks/${id}`);
     assert.ok(d.files.some(f => f.name === 'salida.txt'));
     assert.ok(events.some(e => e.type === 'run.log' && e.data.task_id === id));
+  });
+
+  await t('los entregables (.oficina/entregables) llegan como adjunto descargable una sola vez', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Excel', prompt: 'genera ENTREGABLE', agent_id: fake, run: true })).id;
+    await until(() => task(id).status === 'revision', 15000, 'revision');
+    const d = await api('GET', `/api/tasks/${id}`);
+    const a = d.attachments.filter(x => x.name === 'reporte.xlsx');
+    assert.equal(a.length, 1);
+    assert.equal(await (await api('GET', `/api/attachments/${a[0].id}`, null, true)).text(), 'XLSX');
+    const c = one('select * from conversations where id=?', task(id).conversation_id);
+    await R.runTurn(c.id, 'otra vez ENTREGABLE', { prompt: 'otra vez ENTREGABLE' });
+    await until(() => !R.active.size && !R.queue.length, 15000, 'segundo turno');
+    assert.equal(one("select count(*) n from attachments where conversation_id=? and name='reporte.xlsx'", c.id).n, 1, 'sin duplicar');
   });
 
   let qid;

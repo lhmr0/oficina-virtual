@@ -9,11 +9,13 @@ const host = require('./host');
 // ---------- estados ----------
 const STATUS = ['pendiente', 'bloqueada', 'en_cola', 'en_curso', 'esperando', 'revision', 'completada', 'pausada_cuota', 'fallida'];
 const RUNNING = ['en_cola', 'en_curso'];
+const DELIVER = 'Si generas un documento o archivo para el usuario (Excel, Word, PDF, imagen…), guárdalo (o cópialo) en .oficina/entregables/ de tu carpeta de trabajo: la oficina se lo entrega como adjunto descargable.';
 const RULES = `## Reglas de la oficina (obligatorias)
 1. Mantén el archivo .oficina/progreso.md en tu carpeta de trabajo: objetivo, checklist de pasos hechos y pendientes, decisiones y archivos tocados. Actualízalo después de cada paso importante (así otro agente puede continuar si te detienes).
 2. Si necesitas una decisión del usuario, termina tu respuesta con la línea [[CONSULTA]] seguida de la pregunta (y opciones si aplica). No inventes la decisión.
-3. Cuando termines, termina tu respuesta con la línea [[LISTO]] seguida de un resumen breve de lo hecho.`;
-const RULES_CHAT = 'Si necesitas que el usuario decida algo antes de seguir, termina con la línea [[CONSULTA]] y la pregunta.';
+3. Cuando termines, termina tu respuesta con la línea [[LISTO]] seguida de un resumen breve de lo hecho.
+4. ${DELIVER}`;
+const RULES_CHAT = 'Si necesitas que el usuario decida algo antes de seguir, termina con la línea [[CONSULTA]] y la pregunta. ' + DELIVER;
 const REMINDER = '(Recuerda: termina con [[LISTO]] y un resumen si terminaste, o con [[CONSULTA]] y la pregunta si necesitas una decisión.)';
 // estado que hooks/herramientas del usuario dejan en cada carpeta (solo afecta archivos sin versionar)
 const DEFAULT_EXCLUDE = ['.ijfw/', '.serena/', '/AGENTS.md', '/CLAUDE.md'];
@@ -248,8 +250,23 @@ function runTurn(convId, userText, { userId = null, prompt = null, supervised = 
 // adjuntos de la conversación (y de su tarea) aún no anunciados al agente
 function attachmentsFor(c, sinceRun) {
   const since = sinceRun?.started_at || '';
-  const list = all(`select * from attachments where (conversation_id=? ${c.task_id ? 'or task_id=?' : ''}) order by id`, c.id, ...(c.task_id ? [c.task_id] : []));
+  const list = all(`select * from attachments where (conversation_id=? ${c.task_id ? 'or task_id=?' : ''}) and stored not like 'ent-%' order by id`, c.id, ...(c.task_id ? [c.task_id] : []));
   return { all: list, fresh: list.filter(a => a.at > since) };
+}
+
+// entregables del agente (.oficina/entregables) → adjuntos de la conversación; stored = ent-c<conv>-<sha>-<nombre>
+async function collectOutputs(mid, cwd, convId, task, out) {
+  const known = all("select stored from attachments where conversation_id=? and stored like 'ent-%'", convId).map(a => a.stored.split('-')[2]);
+  let files;
+  try { files = await host.call(mid, 'takeOutputs', { cwd, known }); } catch { return; } // agente de campo sin actualizar
+  for (const f of files) {
+    const name = f.name.replace(/[\\/<>:"|?*\x00-\x1f]/g, '_').slice(0, 120), body = Buffer.from(f.b64, 'base64');
+    const stored = `ent-c${convId}-${f.sha}-${name}`;
+    fs.writeFileSync(path.join(DATA, 'attachments', stored), body);
+    insert('attachments', { conversation_id: convId, name, mime: 'application/octet-stream', size: body.length, stored, uploaded_by: null, at: now() });
+    out(`📎 entregable: ${name} (${Math.ceil(body.length / 1024)} KB)`);
+  }
+  if (files.length) { emit('conv.updated', { id: convId }); if (task) emit('task.updated', { id: task.id, project_id: task.project_id }); }
 }
 
 async function start(item, mid) {
@@ -391,6 +408,7 @@ async function start(item, mid) {
     }
   }
   if (act.aborted) { retryModel = null; end_reason = 'abortado'; }
+  if (!act.unconfirmed) await collectOutputs(mid, cwd, c.id, task, out);
   out(`■ fin: ${end_reason} (exit ${code})${errText ? ' · ' + errText.slice(0, 300) : ''}`);
   fs.closeSync(logf);
 
