@@ -1,6 +1,6 @@
 // Sprites pixel-art generados como SVG desde matrices de caracteres
 const PAL = { K: '#0b0d1a', W: '#e8ecff', G: '#8b93b8', R: '#ff3b3b', Y: '#ffe81f', S: '#f2c29b', O: '#ff8c42', D: '#3a4270', H: '#4fc3f7', N: '#5a3a1a', L: '#3ddc84', M: '#a355dd', P: '#e06666', C: '#382212', T: '#1f6f8b', F: '#ffeaa7', A: '#5f6680',
-  // tonos extra de los sprites detallados (vader, mono, cr7)
+  // tonos extra de los sprites detallados (vader, mono, cr7, bebe)
   v: '#1d2130', g: '#363d54', h: '#66708f', s: '#b9c1d6', r: '#c0262f', a: '#262b3d',
   f: '#7a4a24', e: '#4e2c12', u: '#a86a38', k: '#f2c9a0', q: '#d9a07a', i: '#fff0d6', p: '#ff9ab8', n: '#e0457b', x: '#9c2350', m: '#c0392b',
   c: '#1c1510', d: '#4a3524', t: '#e3a878', o: '#b77a4e', z: '#e0202f', j: '#a3131f', l: '#1f9a52', w: '#ffd23f' };
@@ -393,20 +393,32 @@ const SHAPES = {
     'KDDDDKK',
     'KKKKK..',
   ],
-  // Chopper C1-10P (astromech naranja de CommandCode)
-  chopper: [
-    '.....KK.....',
-    '....KGGK....',
-    '..KKYYYYKK..',
-    '.KOOOOOOOOK.',
-    '.KOWWKWWOOK.',
-    '.KKKKKKKKKK.',
-    '..KGGGGGGK..',
-    'KGKGGGGGGKGK',
-    'KGKGOOOGGKGK',
-    'KGKGGGGGGKGK',
-    'KGKKGGGGKKGK',
-    'KKK......KKK',
+  // bebé con chupón (CommandCode). B = color del agente (pijama)
+  bebe: [
+    '..........KKddK.........',
+    '.........KKdKKK.........',
+    '.......KKkkdkkkKK.......',
+    '......KkkkkkkkkkkK......',
+    '.....KkkkkkkkkkkkkK.....',
+    '....KkkkkkkkkkkkkkkK....',
+    '...KkkkkkkkkkkkkkkkkK...',
+    '...KkkkkkkkkkkkkkkkkK...',
+    '..KkkkkKKkkkkkkKKkkkkK..',
+    '.KqkkkkWKkkkkkkKWkkkkqK.',
+    '.KqkkkkKKkkkkkkKKkkkkqK.',
+    '..KkkkkkkkkkkkkkkkkkkK..',
+    '..KkppkkkkKKKKkkkkppkK..',
+    '...KppkkKHHHHHHKkkppK...',
+    '...KkkkkKHTTTTHKkkkkK...',
+    '...KqkkkKHTWWTHKkkkqK...',
+    '....KqkkkKHHHHKkkkqK....',
+    '.....KqqkkKKKKkkqqK.....',
+    '......KKqqqqqqqqKK......',
+    '....KKBBBBWWWWBBBBKK....',
+    '..KKBBBBBWWWWWWBBBBBKK..',
+    '.KBBBBBBWWWWWWWWBBBBBBK.',
+    'KBBBBBBBWWWWWWWWBBBBBBBK',
+    'KBBBBBBBWWWWWWWWBBBBBBBK',
   ],
   // Darth Vader (avatar del jefe): casco, rejilla y panel de pecho
   vader: [
@@ -454,7 +466,7 @@ export function agentSprite(a, px = 4, extra = '') {
   if (k.includes('antigrav') || k === 'r2d2') return sprite('cr7', a?.color || '#4fc3f7', px, extra);
   if (k.includes('claude') || k === 'c3po') return sprite('mono', a?.color || '#ffe81f', px, extra);
   if (k.includes('codex') || k === 'bb8') return sprite('elefante', a?.color || '#3ddc84', px, extra);
-  if (k.includes('command') || k.includes('chopper') || k === 'c1-10p') return sprite('chopper', a?.color || '#ff4d4d', px, extra);
+  if (k.includes('command') || k.includes('chopper') || k === 'c1-10p') return sprite('bebe', a?.color || '#ff4d4d', px, extra);
   return sprite('droid', a?.color || '#4fc3f7', px, extra);
 }
 
