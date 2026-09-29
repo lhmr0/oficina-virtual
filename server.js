@@ -678,7 +678,8 @@ r('GET', '/api/repos', 'observador', async ({ query }) => {
     where f.is_git=1 and p.deleted_at is null ${query.project_id ? 'and p.id=?' : ''} order by p.name, f.id`, ...(query.project_id ? [+query.project_id] : []));
   return Promise.all(folders.map(async f => {
     const branches = all(`select id task_id, title, status, branch, base_branch base from tasks where folder_id=? and worktree_path is not null and branch is not null and deleted_at is null`, f.id);
-    try { return { folder: f, ...(await host.call(f.machine_id || host.defaultMachine(), 'repoStatus', { repo: f.path, fetch: query.fetch === '1', branches })) }; }
+    const last_deploy = one(`select at, detail from activity where entity='git' and entity_id=? and action='desplegar' order by id desc limit 1`, f.id) || null;
+    try { return { folder: f, last_deploy, ...(await host.call(f.machine_id || host.defaultMachine(), 'repoStatus', { repo: f.path, fetch: query.fetch === '1', branches })) }; }
     catch (e) { return { folder: f, error: e.message }; }
   }));
 });

@@ -70,9 +70,10 @@ const ICONS = {
   sound: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/>',
   mic: '<rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 17.5V21M8 21h8"/>',
   logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l-5-5 5-5M5 12h11"/>',
+  branch: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9c0 5-7 4-11 8"/>',
 };
 const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
-const MENU = [['proyectos', 'Proyectos', 'folder'], ['kanban', 'Kanban', 'board'], ['cantina', 'Cantina', 'chat'], ['consejo', 'Consejo Jedi', 'council'], ['archivos', 'Archivos Jedi', 'archive'], ['puente', 'Puente de Mando', 'gauge'], ['config', 'Configuración', 'gear']];
+const MENU = [['proyectos', 'Proyectos', 'folder'], ['kanban', 'Kanban', 'board'], ['repos', 'Repositorios', 'branch'],['cantina', 'Cantina', 'chat'], ['consejo', 'Consejo Jedi', 'council'], ['archivos', 'Archivos Jedi', 'archive'], ['puente', 'Puente de Mando', 'gauge'], ['config', 'Configuración', 'gear']];
 const WIDE = ['proyectos', 'kanban', 'consejo', 'archivos', 'puente', 'config'];
 function shell() {
   const me = S.boot.me;
@@ -83,6 +84,7 @@ function shell() {
     <select id="stSel" aria-label="Filtrar la estación por agente o área"><option value="">Todos los agentes y áreas</option>
       <optgroup label="Agente">${opts(S.boot.agents.map(a => ['a:' + a.id, a.name]), S.stationFilter)}</optgroup>
       <optgroup label="Área">${opts(S.boot.areas.map(a => ['r:' + a.id, a.name]), S.stationFilter)}</optgroup></select>
+    <div class="hud-att" id="hudAtt"></div>
   </div>
   <div id="qpaused" class="queue-paused" ${S.boot.queue_paused ? '' : 'hidden'}>⚠ Cola en pausa (Orden 66) ${isAdmin() ? '<button class="btn sm y" id="resumeQ">Reanudar cola</button>' : ''}</div>
   <div id="map" class="map"></div>
@@ -230,10 +232,18 @@ export async function route(soft = false) {
 }
 // el mapa se dibuja aparte y se refresca con sus propios eventos, esté o no abierto el panel
 let mapBusy = false, mapT;
+// el mapa se redibuja entero con cada evento: se conserva el scroll del mapa y de sus listas (misma estructura en cada render)
+const mapScrollers = m => [m, ...$$('.kcol-body, .station-aside-body, .repo-body', m)];
+// y el foco del teclado: se busca el mismo elemento por su data-* o id
+const focusKey = e => ['id', 'task', 'agent', 'chat'].map(k => e.dataset[k] && `[data-${k}="${CSS.escape(e.dataset[k])}"]`).find(Boolean) || (e.id ? '#' + CSS.escape(e.id) : null);
 async function renderMap() {
   if (mapBusy) return mapSoon();
   mapBusy = true;
-  try { await VIEWS.estacion.render($('#map')); } catch (e) { $('#map').innerHTML = `<div class="panel r" style="margin:80px 16px">${h(e.message)}</div>`; }
+  const m = $('#map'), keep = mapScrollers(m).map(e => e.scrollTop);
+  const fk = m.contains(document.activeElement) && document.activeElement !== m ? focusKey(document.activeElement) : null;
+  try { await VIEWS.estacion.render(m); } catch (e) { m.innerHTML = `<div class="panel r" style="margin:80px 16px">${h(e.message)}</div>`; }
+  mapScrollers(m).forEach((e, i) => { if (keep[i]) e.scrollTop = keep[i]; });
+  if (fk && !m.contains(document.activeElement)) m.querySelector(fk)?.focus({ preventScroll: true });
   mapBusy = false;
 }
 function mapSoon(ms = 400) { clearTimeout(mapT); mapT = setTimeout(renderMap, ms); }
@@ -270,7 +280,7 @@ function connectSSE() {
   on('permiso', p => {
     beep('consulta');
     if (voicePrefs().read) speak(`Permiso solicitado: ${p.desc}. ¿Lo apruebas?`);
-    holo('🔐 Permiso solicitado', p.desc, { ms: 0, link: p.task_id ? `#/tarea/${p.task_id}` : `#/cantina/${p.conv_id}`,
+    holo('🔐 Permiso solicitado', p.desc, { ms: 0, alert: true, link: p.task_id ? `#/tarea/${p.task_id}` : `#/cantina/${p.conv_id}`,
       actions: `<button class="btn sm g" data-perm="${h(p.request_id)}" data-allow="1">Aprobar</button><button class="btn sm r" data-perm="${h(p.request_id)}" data-allow="0">Denegar</button>` });
     desktop('Permiso solicitado', p.desc, p.task_id ? `#/tarea/${p.task_id}` : `#/cantina/${p.conv_id}`);
     pass('permiso', p);
@@ -303,9 +313,9 @@ async function inboxCount() {
     const pend = x.tasks.filter(t => ['esperando', 'pausada_cuota'].includes(t.status)).length + x.chats.length + x.permissions.length;
     const n = pend + x.tasks.filter(t => t.status === 'revision').length;
     const b = $('#bellN'); if (b) { b.hidden = !n; b.textContent = n; }
-    document.title = (pend ? `(${pend}) ` : '') + baseTitle;
+    document.title = (n ? `(${n}) ` : '') + baseTitle; // el mismo número que la campana
     const fav = $('#favicon');
-    fav.href = fav.href.replace(/%3Crect x='6' y='0'[^%]*%2Fff3b3b'%2F%3E/, '').replace('%3C/svg%3E', pend ? "%3Crect x='6' y='0' width='2' height='2' fill='%23ff3b3b'/%3E%3C/svg%3E" : '%3C/svg%3E');
+    fav.href = fav.href.replace(/%3Crect x='6' y='0'[^%]*%2Fff3b3b'%2F%3E/, '').replace('%3C/svg%3E', n ?"%3Crect x='6' y='0' width='2' height='2' fill='%23ff3b3b'/%3E%3C/svg%3E" : '%3C/svg%3E');
     if (!$('#inbox').hidden) renderInbox(x);
   } catch {}
 }

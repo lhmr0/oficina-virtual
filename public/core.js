@@ -330,12 +330,15 @@ document.addEventListener('click', e => {
 });
 
 // ---------- hologramas (toasts) ----------
-export function holo(title, body = '', { link, err, ms = 7000, actions } = {}) {
+export function holo(title, body = '', { link, err, ms = 7000, actions, alert } = {}) {
   const el = document.createElement('div');
   el.className = 'holo' + (err ? ' err' : '');
+  if (alert) el.setAttribute('role', 'alert'); // permisos: el lector de pantalla los anuncia de inmediato
   el.innerHTML = `<b>${h(title)}</b><div>${h(body).slice(0, 300)}</div>${actions ? `<div class="row" style="margin-top:6px">${actions}</div>` : ''}`;
   if (link) { el.style.cursor = 'pointer'; el.addEventListener('click', e => { if (!e.target.closest('button')) { location.hash = link; el.remove(); } }); }
-  document.getElementById('holo').append(el);
+  const wrap = document.getElementById('holo');
+  wrap.append(el);
+  while (wrap.children.length > 3) wrap.firstElementChild.remove(); // tope de 3 a la vista: lo pendiente sigue en Bandeja y en la barra de arriba
   if (ms) setTimeout(() => el.remove(), ms);
   return el;
 }

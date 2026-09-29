@@ -9,6 +9,7 @@ import { parseVoz } from './ordenes.js';
 const go = hash => { location.hash = hash; };
 const ACTIVE = ['en_curso', 'en_cola', 'esperando'];
 const PRI = { alta: '▲ alta', media: '■ media', baja: '▼ baja' };
+const kTok = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' M' : n >= 1e3 ? Math.round(n / 1e3) + ' k' : String(n);
 const AVATARS = [['rebel', 'Piloto rebelde'], ['imperial', 'Oficial imperial'], ['vader', 'Darth Vader']];
 const agentsOn = () => S.boot.agents.filter(a => a.enabled);
 
@@ -88,21 +89,22 @@ export async function taskForm(t = {}, preset = {}) {
     <div class="field-row">
       <div><label class="l">Proyecto</label><select name="project_id" id="tfProj" ${t.id ? 'disabled' : ''}>${opts(S.boot.projects.map(x => [x.id, x.name]), p.id)}</select></div>
       <div><label class="l">Área</label><select name="area_id" id="tfArea">${opts(S.boot.areas.map(a => [a.id, `${a.name} · ${a.alias}`]), t.area_id || preset.area_id, '—')}</select></div>
-      <div><label class="l">Plantilla</label><select id="tfTpl">${opts(S.boot.templates.map(x => [x.id, x.title]), '', '—')}</select></div>
     </div>
     <label class="l">Título</label><input name="title" required value="${h(t.title || preset.title || '')}">
     <label class="l">Instrucciones para el agente ${micBtn('#tfPrompt')}</label><textarea name="prompt" id="tfPrompt" rows="6">${h(t.prompt || preset.prompt || '')}</textarea>
+    <div id="tfAgentBox">${agentPicker('tf', t.agent_id ? t : { agent_id: area(t.area_id || preset.area_id)?.default_agent_id }, { blank: false })}</div>
+    <div id="tfHumanBox"><label class="l">Responsable</label><select name="assignee_user_id">${opts(S.boot.users.map(u => [u.id, u.name]), t.assignee_user_id || S.boot.me.id, '—')}</select></div>
+    <details class="opts" ${t.id || deps.length ? 'open' : ''}><summary>Más opciones: plantilla, quién ejecuta, carpeta, prioridad, fecha, dependencias, adjuntos</summary>
     <div class="field-row">
+      <div><label class="l">Plantilla</label><select id="tfTpl">${opts(S.boot.templates.map(x => [x.id, x.title]), '', '—')}</select></div>
       <div><label class="l">Ejecuta</label><select name="executor" id="tfExec">${opts([['agente', 'Agente IA'], ['humano', 'Persona']], t.executor || 'agente')}</select></div>
       <div><label class="l">Carpeta</label><select name="folder_id" id="tfFolder">${opts(p.folders.map(f => [f.id, `${f.label}${f.is_git ? ' (git)' : ''}`]), t.id ? t.folder_id : (p.folders.find(f => f.is_default)?.id), 'Sin carpeta (sandbox)')}</select></div>
       <div><label class="l">Prioridad</label><select name="priority">${opts([['alta', 'Alta'], ['media', 'Media'], ['baja', 'Baja']], t.priority || 'media')}</select></div>
       <div><label class="l">Fecha límite</label><input type="date" name="due_date" value="${h(t.due_date || '')}"></div>
     </div>
-    <div id="tfAgentBox">${agentPicker('tf', t.agent_id ? t : { agent_id: area(t.area_id || preset.area_id)?.default_agent_id }, { blank: false })}</div>
-    <div id="tfHumanBox"><label class="l">Responsable</label><select name="assignee_user_id">${opts(S.boot.users.map(u => [u.id, u.name]), t.assignee_user_id || S.boot.me.id, '—')}</select></div>
-    <label class="l">Depende de (se ejecuta al completarse éstas)</label>
-    <select name="depends_on" id="tfDeps" multiple size="4">${projTasks.filter(x => x.id !== t.id).map(x => `<option value="${x.id}" ${deps.includes(x.id) ? 'selected' : ''}>#${x.id} ${h(x.title)} (${STATUS[x.status]})</option>`).join('')}</select>
-    <label class="l">Adjuntos (imágenes, PDF, documentos: el agente los recibe en .oficina/adjuntos)</label><input type="file" id="tfFiles" multiple>
+    <div class="l">Depende de (se ejecuta al completarse éstas)</div>
+    <div class="check-list">${projTasks.filter(x => x.id !== t.id).map(x => `<label class="row"><input type="checkbox" name="dep" value="${x.id}" ${deps.includes(x.id) ? 'checked' : ''}> #${x.id} ${h(x.title)} <small>${STATUS[x.status]}</small></label>`).join('') || '<small class="muted">No hay otras tareas en este proyecto</small>'}</div>
+    <label class="l">Adjuntos (imágenes, PDF, documentos: el agente los recibe en .oficina/adjuntos)</label><input type="file" id="tfFiles" multiple></details>
     ${preset.voz ? '<input type="hidden" name="voz" value="1">' : ''}
     ${t.id ? '' : '<label class="row" style="margin-top:10px"><input type="checkbox" name="run" id="tfRun"> Ejecutar al crear</label>'}
     <div class="row" style="margin-top:12px"><button class="btn y" value="ok" id="tfSave">${t.id ? 'Guardar' : 'Crear tarea'}</button><button class="btn ghost" value="cancel" formnovalidate>Cancelar</button></div>`);
@@ -116,7 +118,7 @@ export async function taskForm(t = {}, preset = {}) {
     e.preventDefault();
     const f = formData(d);
     if (!f.title.trim()) return fail('Falta el título');
-    f.depends_on = [...$('#tfDeps', d).selectedOptions].map(o => +o.value);
+    f.depends_on = $$('[name=dep]:checked', d).map(c => +c.value); delete f.dep;
     for (const k of ['area_id', 'folder_id', 'agent_id', 'assignee_user_id']) f[k] = f[k] ? +f[k] : null;
     if (f.executor === 'humano') { f.agent_id = null; }
     try {
@@ -160,17 +162,25 @@ export async function missionForm() {
 const COLS = [['pendiente', 'Pendiente'], ['en_cola', 'En cola'], ['en_curso', 'En curso'], ['esperando', 'Esperando'], ['revision', 'Revisión'], ['completada', 'Completada'], ['atascadas', 'Atascadas']];
 const STUCK = ['bloqueada', 'pausada_cuota', 'fallida'];
 
+// borde de la tarjeta = una sola señal: lo que pide atención (el área va como chip)
+const CARD_C = { esperando: 'var(--yellow)', revision: 'var(--orange)', fallida: 'var(--red)', pausada_cuota: 'var(--purple)', bloqueada: 'var(--muted)', en_curso: 'var(--green)' };
+const WAIT = { en_curso: '⏱', esperando: '?', revision: '!' }; // cuánto lleva en ese estado; en rojo si espera al humano más de un día
 const kanbanCard = (t, showProject = true) => {
   const a = agent(t.agent_id), ar = area(t.area_id);
   const tp = showProject ? project(t.project_id) : null;
-  return `<div class="kcard" draggable="${canEdit()}" data-id="${t.id}" style="--c:${ar?.color || '#46529a'}" tabindex="0" title="#${t.id} ${h(t.title)}">
-    <div class="row" style="gap:4px;font-size:10px;line-height:1"><small>#${t.id}</small>${tp ? `<span class="chip" style="border-color:${h(tp.color)}">${h(tp.name)}</span>` : ''}${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
-    <div class="t">${h(t.title)}</div>
+  const stale = t.status !== 'en_curso' && Date.now() - Date.parse(t.updated_at) > 864e5;
+  return `<div class="kcard" draggable="${canEdit()}" data-id="${t.id}" ${CARD_C[t.status] ? `style="--c:${CARD_C[t.status]}"` : ''} tabindex="0" title="#${t.id} ${h(t.title)}">
+    <div class="row" style="gap:4px;line-height:1"><small>#${t.id}</small>${tp ? `<span class="chip" style="border-color:${h(tp.color)}">${h(tp.name)}</span>` : ''}${ar ? `<span class="chip">${h(ar.alias)}</span>` : ''}${STUCK.includes(t.status) ? chip(t.status) : ''}<small class="pri-${t.priority} right">${PRI[t.priority]}</small></div>
+    <a class="t" href="#/tarea/${t.id}" draggable="false">${h(t.title)}</a>
     <div class="meta">${t.executor === 'humano' ? `${userSprite(user(t.assignee_user_id), 1)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${agentSprite(a, 1)}${h(a?.name || '—')} <span>${h(t.model || '')}</span>`}
-    ${t.status === 'en_curso' ? `<span class="chip st-en_curso">⏱ ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}${t.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : ''}
+    ${WAIT[t.status] ? `<span class="chip ${stale ? 'st-fallida' : 'st-' + t.status}" title="${STATUS[t.status]} desde ${fmtDate(t.updated_at)}">${WAIT[t.status]} ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}
     ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div>
     ${canEdit() ? `<select class="kmove" aria-label="Mover #${t.id} a">${opts(COLS.filter(([k]) => k !== 'atascadas' && k !== t.status), '', 'Mover a…')}</select>` : ''}</div>`;
 };
+
+// columna: vacía se pliega a una tira (sigue aceptando tarjetas); Esperando y Revisión con tareas se destacan: son la cola del humano
+const kcolHTML = (k, l, n, cards) => `<div class="kcol ${n ? '' : 'empty'} ${n && ['esperando', 'revision'].includes(k) ? 'att' : ''}" data-col="${k}" ${n ? '' : `title="${l}: sin tareas"`}>
+  <div class="kcol-head"><span>${l}</span><span>${n}</span></div><div class="kcol-body">${cards}</div></div>`;
 
 // mover una tarea (arrastrar en escritorio, "Mover a…" en pantallas táctiles, donde el arrastre HTML5 no funciona)
 async function moveTask(t, status, kanban_order) {
@@ -194,7 +204,7 @@ function bindKanbanDrag(root, getTasks) {
     e.target.closest?.('.kcard')?.classList.remove('dragging');
     $$('.kcol', root).forEach(x => x.classList.remove('over'));
   };
-  $$('.kcol', root).forEach(col => {
+  $$('.kcol:not([data-col=atascadas])', root).forEach(col => { // «Atascadas» agrupa estados: soltar ahí no cambiaría nada
     col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
     col.addEventListener('dragleave', () => col.classList.remove('over'));
     col.addEventListener('drop', async e => {
@@ -209,7 +219,7 @@ function bindKanbanDrag(root, getTasks) {
       const prev = i > 0 ? ord(cards[i - 1].dataset.id) : (cards[0] ? ord(cards[0].dataset.id) - 1000 : Date.now());
       const next = after ? ord(after.dataset.id) : prev + 2000;
       const t = all().find(x => x.id === dragId);
-      if (t) moveTask(t, k === 'atascadas' ? t.status : k, (prev + next) / 2);
+      if (t) moveTask(t, k, (prev + next) / 2);
     });
   });
 }
@@ -218,7 +228,7 @@ function bindKanbanDrag(root, getTasks) {
 const AT_DESK = ['en_curso', 'en_cola', 'esperando', 'revision'];
 const LIVE = ['en_curso', 'en_cola', 'esperando'];
 const MON = { en_curso: '#3ddc84', en_cola: '#b98cff', esperando: '#ffe81f', revision: '#ff8c42' };
-const BUB = { esperando: '<span class="bubble">?</span>', en_cola: '<span class="bubble z">…</span>', revision: '<span class="bubble o">!</span>' };
+const BUB = { esperando: '<span class="bubble" title="Espera tu respuesta">?</span>', en_cola: '<span class="bubble z" title="En cola">…</span>', revision: '<span class="bubble o" title="Lista para tu revisión">!</span>' };
 
 // Diálogos y sonidos temáticos estilo Gather para interactuar con adornos
 const LORE_MESSAGES = {
@@ -264,7 +274,6 @@ const ROOM_DECO = {
   cantina: [['coffee', 'coffee', 'Estación de caf'], ['vending', 'vending', 'Expendedora de leche azul'], ['arcade', 'arcade', 'Arcade: Trench Run', 'deco-arcade'], ['dejarik', 'dejarik', 'Mesa de Dejarik', 'deco-dejarik']],
 };
 const ROOMS = [['doc', 'Archivo (biblioteca)'], ['dev', 'Hangar (taller)'], ['ana', 'Sala de mando (radar)']];
-const ROOM_CODE = { doc: 'DOC-01', dev: 'DEV-02', ana: 'CMD-01' };
 const NEEDS = ['esperando', 'revision', 'fallida', 'pausada_cuota'];
 const agentState = (a, busy) => {
   const sleeping = a.status === 'sin_cuota' || !a.enabled;
@@ -274,11 +283,12 @@ const agentState = (a, busy) => {
 const estacion = {
   refreshOn: ['task.updated', 'task.created', 'conv.updated', 'run.started', 'agent.status', 'council.updated'],
   async render(el) {
-    let [tasks, chats, execs, council] = await Promise.all([
+    let [tasks, chats, execs, council, perms] = await Promise.all([
       get('/api/tasks'),
       get('/api/conversations'),
       get('/api/history/ejecuciones?page=1').catch(() => ({ rows: [] })),
       get('/api/council').catch(() => []),
+      get('/api/inbox').then(x => x.permissions).catch(() => []),
     ]);
     const busy = new Set([...tasks.filter(t => ACTIVE.includes(t.status)).map(t => t.agent_id), ...chats.filter(c => LIVE.includes(c.status)).map(c => c.agent_id)]);
     // filtro de la estación (selector del HUD): "a:<agente>" o "r:<área>"
@@ -297,14 +307,14 @@ const estacion = {
     };
     const free = `<span class="desk free" aria-hidden="true"><span class="who"></span>${sprite('desk', '#1d2447', 3.2)}<span class="lbl"></span></span>`;
     // la placa es el botón de la sala (teclado); el resto de la sala también abre al hacer clic
-    const plaque = (ic, title, sub, code, label, extra = '') => `<div class="plaque"><button type="button" class="plaque-btn" aria-label="${h(label)}">${icon(ic, 2.5)}<b>${h(title)}</b></button><small>${h(sub)}</small><span class="room-code">[${code}]</span>${extra}</div>`;
+    const plaque = (ic, title, sub, label, extra = '') => `<div class="plaque"><button type="button" class="plaque-btn" aria-label="${h(label)}">${icon(ic, 2.5)}<b>${h(title)}</b></button><small>${h(sub)}</small>${extra}</div>`;
     const room = a => {
       const kind = a.room;
       const at = vis.filter(t => t.area_id === a.id && AT_DESK.includes(t.status));
       const shown = at.slice(0, 6), pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
       return `<section class="room2 room-${kind}" data-area="${a.id}" style="--c:${a.color}">
         <div class="room-rug rug-${kind}"></div>
-        ${plaque(a.icon, a.alias, a.name, ROOM_CODE[kind], `${a.alias}: ${at.length} en actividad, ${pend} pendientes`, pend ? `<small class="right pend" title="Tareas pendientes">${pend} pend.</small>` : '')}
+        ${plaque(a.icon, a.alias, a.name, `${a.alias}: ${at.length} en actividad, ${pend} pendientes`, pend ? `<small class="right pend" title="Tareas pendientes">${pend} pend.</small>` : '')}
         <div class="wall">${ROOM_DECO[kind].map(deco).join('')}</div>
         <div class="desks2">${shown.map(desk).join('')}${Array(Math.max(0, 3 - shown.length)).fill(free).join('')}${at.length > 6 ? `<span class="more">+${at.length - 6}</span>` : ''}</div>
       </section>`;
@@ -313,7 +323,7 @@ const estacion = {
     const recent = chats.filter(c => !LIVE.includes(c.status)).slice(0, 3);
     const cantina = `<section class="room2 cantina2" data-go="#/cantina" style="--c:#ffe81f">
       <div class="room-rug rug-cantina"></div>
-      ${plaque('cantina', 'Cantina', 'Consultas rápidas', 'REC-01', `Cantina: ${live.length} consultas activas`)}
+      ${plaque('cantina', 'Cantina', 'Consultas rápidas',`Cantina: ${live.length} consultas activas`)}
       <div class="wall">${ROOM_DECO.cantina.map(deco).join('')}</div>
       <div class="stools">${live.map(c => `<button class="desk ${c.status}" data-chat="${c.id}" title="${h(c.title)}"><span class="who">${agentSprite(agent(c.agent_id), 3.8)}${c.status === 'esperando' ? BUB.esperando : ''}</span><span class="lbl">${h(c.title)}</span></button>`).join('')}
         ${live.length ? '' : recent.length ? `<div class="room-info"><small class="muted">Últimas consultas</small>${recent.map(c => `<button type="button" class="room-link" data-chat="${c.id}">${agentSprite(agent(c.agent_id), 1.5)}<span class="ellipsis">${h(c.title)}</span><small>${ago(c.updated_at)}</small></button>`).join('')}</div>` : '<span class="hint">Nadie en la barra</span>'}</div>
@@ -322,12 +332,13 @@ const estacion = {
     const last = council[0];
     const consejo = `<section class="room2 consejo2" data-go="#/consejo" style="--c:#b98cff">
       <div class="room-rug rug-council"></div>
-      ${plaque('holocron', 'Consejo Jedi', 'Propuestas de mejora', 'CMD-00', 'Sala del Consejo')}
+      ${plaque('holocron', 'Consejo Jedi', 'Propuestas de mejora','Sala del Consejo')}
       <div class="council-body">
         <div class="round-table"><span class="council-yoda deco-interactive" data-interact="yoda" tabindex="-1" role="button" title="Gran Maestro Yoda">${sprite('yoda', '', 3.2)}</span></div>
         <div class="room-info">${last
           ? `<small class="muted">Última sesión · ${ago(last.at)}</small><b>${last.status === 'lista' ? `${last.aceptadas}/${last.propuestas} propuestas aceptadas` : last.status === 'error' ? 'Terminó con error' : 'En sesión…'}</b>`
-          : '<small class="muted">El consejo aún no se ha reunido</small><b>Convoca uno para recibir propuestas</b>'}</div>
+          : '<small class="muted">El consejo aún no se ha reunido</small><b>Convoca uno para recibir propuestas</b>'}
+          ${canEdit() && S.boot.projects.length ? `<button type="button" class="btn sm" data-go="#/consejo?project=${S.project || S.boot.projects[0].id}">Convocar</button>` : ''}</div>
       </div>
     </section>`;
     const me = S.boot.me;
@@ -335,6 +346,7 @@ const estacion = {
     // salas fijas arriba según el tipo de sala de cada área (Configuración → Áreas); el resto va a "Más salas"
     const fixedAreas = ROOMS.map(([k]) => S.boot.areas.find(a => a.room === k)).filter(Boolean);
     const otherAreas = S.boot.areas.filter(a => !fixedAreas.includes(a));
+    const otherActive = vis.filter(t => otherAreas.some(a => a.id === t.area_id) && AT_DESK.includes(t.status)).length;
 
     const hall = `<div class="hall" aria-label="Pasillo principal">
       <div class="hall-runner"><span class="hall-arrows">‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹</span></div>
@@ -343,49 +355,62 @@ const estacion = {
         <span class="avatar" title="Tú">${userSprite(me, 3.8)}<span class="tag">${h(me.name.split(' ')[0])}</span><span class="avatar-status">Tú</span></span>
         ${S.boot.agents.map(a => {
           const st = agentState(a, busy), lim = agentLimits(a);
-          return `<button type="button" class="avatar ${st.sleeping ? 'sleeping' : ''}" data-agent="${a.id}" title="${h(a.name)} · ${st.text}">
-            ${agentSprite(a, 3.8)}${st.sleeping && a.enabled ? '<span class="bubble z">Zz</span>' : ''}
+          return `<button type="button" class="avatar ${st.sleeping ? 'sleeping' : busy.has(a.id) ? 'working' : ''}" data-agent="${a.id}" title="${h(a.name)} · ${st.text}">
+            ${agentSprite(a, 3.8)}${st.sleeping && a.enabled ? '<span class="bubble z" title="Sin cuota">Zz</span>' : ''}
             <span class="tag">${h(a.name)}</span>
             <span class="avatar-status">${st.text}</span>
             ${lim.fiveHour || lim.weekly || lim.usage5h?.tokens ? `<span class="avatar-limits">${agentLimitsBadge(a, true)}</span>` : ''}
           </button>`;
         }).join('')}
       </div>
-      <span class="avatar mouse-droid-walker deco-interactive" data-interact="mouse" tabindex="-1" role="button" style="--d:9s" title="Droide ratón MSE-6">${sprite('mousedroid', '', 2.6)}<span class="tag">MSE-6</span></span>
-      <button type="button" class="hall-more-btn" id="btnMoreRooms" title="Salas adicionales, Puente de Mando y Archivos">Más salas <span class="n">${otherAreas.length + 2}</span></button>
+      <span class="avatar mouse-droid-walker deco-interactive" data-interact="mouse" tabindex="-1" role="button" title="Droide ratón MSE-6">${sprite('mousedroid', '', 2.6)}<span class="tag">MSE-6</span></span>
+      <button type="button" class="hall-more-btn" id="btnMoreRooms" title="${h([...otherAreas.map(a => a.alias), 'Puente de Mando', 'Archivos Jedi'].join(', '))}">Más salas <span class="n">${otherAreas.length + 2}</span>${otherActive ? ` · ${otherActive} activas` : ''}</button>
     </div>`;
 
-    // lo que está en curso primero, luego lo más reciente
-    const runsList = (execs?.rows || []).slice(0, 8).sort((x, y) => !y.ended_at - !x.ended_at);
+    // una fila por tarea o chat (su último turno y cuántos hubo); lo que está en curso primero
+    const byTarget = new Map();
+    for (const r of execs?.rows || []) { const k = r.task_id ? 't' + r.task_id : 'c' + r.conversation_id; if (byTarget.has(k)) byTarget.get(k).n++; else byTarget.set(k, { ...r, n: 1 }); }
+    const runsList = [...byTarget.values()].slice(0, 8).sort((x, y) => !y.ended_at - !x.ended_at);
+    const RUN_END = { listo: '✓ listo', consulta: '? consulta', abortado: '■ abortado' };
     const runItemHTML = r => {
       const a = agent(r.agent_id);
       const t = tasks.find(x => x.id === r.task_id);
       const targetTitle = t ? `#${t.id} ${t.title}` : (r.task_id ? `Tarea #${r.task_id}` : `Chat #${r.conversation_id}`);
       const isRunning = !r.ended_at;
-      const isOk = r.exit_code === 0 || r.end_reason === 'listo' || r.end_reason === 'completado';
+      const isOk = r.exit_code === 0 || ['listo', 'consulta', 'completado'].includes(r.end_reason);
       const statusDot = isRunning ? '<span class="dot ok blink"></span>' : isOk ? '<span class="dot ok"></span>' : '<span class="dot bad"></span>';
-      const statusText = isRunning ? 'en curso' : dur((Date.parse(r.ended_at) - Date.parse(r.started_at)) / 1000);
+      const statusText = isRunning ? 'en curso' : `${RUN_END[r.end_reason] || `${isOk ? '✓' : '✗'} ${h(String(r.end_reason || (isOk ? 'ok' : 'error')).replace('_', ' '))}`} · ${dur((Date.parse(r.ended_at) - Date.parse(r.started_at)) / 1000)}`;
       const tok = (r.tokens_in || 0) + (r.tokens_out || 0);
       return `<a class="run-item ${isRunning ? 'running' : ''}" href="${r.task_id ? `#/tarea/${r.task_id}` : `#/cantina/${r.conversation_id}`}">
         <div class="row" style="justify-content:space-between;gap:4px">
           <span class="row" style="gap:5px;font-size:12px;font-weight:600">${agentSprite(a, 1.5)} ${h(a?.name || 'Agente')}</span>
-          <span class="run-status">${statusDot} ${statusText}</span>
+          <span class="run-status" ${isOk || isRunning ? '' : 'style="color:var(--red)"'}>${statusDot} ${statusText}</span>
         </div>
-        <div class="run-desc ellipsis" title="${h(targetTitle)}">${h(targetTitle)}</div>
-        <div class="run-meta row" style="justify-content:space-between"><span>${h(r.model || '')}</span><span>${tok ? num(tok) + ' tok · ' : ''}${ago(r.started_at)}</span></div>
+        <div class="run-desc ellipsis" title="${h(targetTitle)}">${h(targetTitle)}${r.n > 1 ? ` · ${r.n} turnos` : ''}</div>
+        <div class="run-meta row" style="justify-content:space-between"><span>${h(r.model || '')}</span><span>${tok ? kTok(tok) + ' tok · ' : ''}${r.cost_usd ? '$' + r.cost_usd.toFixed(2) + ' · ' : ''}${ago(r.started_at)}</span></div>
       </a>`;
     };
-    // sin ejecuciones el panel empieza plegado (salvo que el usuario lo haya abierto a mano)
-    const sidePref = localStorage.getItem('ov_station_aside');
-    const sideHidden = sidePref === '0' || (sidePref !== '1' && !runsList.length);
+    // visible salvo que el usuario lo oculte: lleva también Repositorios, que importa aunque no haya ejecuciones
+    const sideHidden = localStorage.getItem('ov_station_aside') === '0';
 
-    const needs = [...vis.filter(t => NEEDS.includes(t.status)).map(t => [`#/tarea/${t.id}`, t.status, `#${t.id} ${t.title}`]),
-      ...chats.filter(c => c.status === 'esperando').map(c => [`#/cantina/${c.id}`, 'esperando', c.title])];
-    const attention = needs.length ? `<nav class="attention" aria-label="Necesita atención"><b>Necesita atención</b>${needs.map(([link, st, t]) => `<a class="att-item st-${st}" href="${link}"><span>${STATUS[st]}</span>${h(t)}</a>`).join('')}</nav>` : '';
+    // lo que espera al humano, en la barra superior (siempre a la vista): permisos primero, con su acción directa
+    const att = (link, st, label, title, actions = '') => `<span class="att-item st-${st}"><a href="${link}" title="${h(title)}"><em>${label}</em>${h(title)}</a>${canEdit() ? actions : ''}</span>`;
+    const needs = [
+      ...perms.map(p => att(p.task_id ? `#/tarea/${p.task_id}` : `#/cantina/${p.conv_id}`, 'fallida', 'Permiso',
+        p.task_id ? `#${p.task_id} ${tasks.find(t => t.id === p.task_id)?.title || ''}` : chats.find(c => c.id === p.conv_id)?.title || 'Chat',
+        `<button type="button" class="att-btn" data-perm="${h(p.request_id)}" data-allow="1" title="Aprobar el permiso">✔</button><button type="button" class="att-btn" data-perm="${h(p.request_id)}" data-allow="0" title="Denegar el permiso">✕</button>`)),
+      ...vis.filter(t => NEEDS.includes(t.status)).map(t => att(`#/tarea/${t.id}`, t.status, STATUS[t.status], `#${t.id} ${t.title}`,
+        t.status === 'revision' ? `<button type="button" class="att-btn" data-att-approve="${t.id}" title="Aprobar #${t.id}">✔ Aprobar</button>` : '')),
+      ...chats.filter(c => c.status === 'esperando').map(c => att(`#/cantina/${c.id}`, 'esperando', STATUS.esperando, c.title)),
+    ];
+    const slot = $('#hudAtt');
+    if (slot) {
+      slot.innerHTML = needs.length ? `<nav class="attention" aria-label="Necesita atención"><b>Necesita atención</b>${needs.join('')}</nav>` : '';
+      slot.onclick = e => { const b = e.target.closest('[data-att-approve]'); if (b) get('/api/tasks/' + b.dataset.attApprove).then(x => approveDialog(x.task), fail); };
+    }
 
     const kbHidden = localStorage.getItem('ov_station_kanban') === '0';
     el.innerHTML = `<div class="station-layout">
-      ${attention}
       <div class="station-top-row">
         <div class="station-main">
           <div class="floor">
@@ -397,18 +422,18 @@ const estacion = {
         <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Repositorios y últimas ejecuciones">
           <section class="repo-box" id="repoBox" aria-label="Repositorios">
             <div class="station-aside-head"><b class="aside-title">⎇ Repositorios</b><button type="button" class="btn sm ghost" id="repoFetch" title="Traer el estado del remoto (git fetch)">⟳</button></div>
-            <div class="repo-body" id="repoBody"><div class="empty" style="padding:10px;font-size:11px">Cargando…</div></div>
+            <div class="repo-body" id="repoBody">${reposCache.key === (S.project || 0) && reposCache.html || '<div class="empty" style="padding:10px;font-size:11px">Cargando…</div>'}</div>
           </section>
           <div class="station-aside-head">
             <b class="aside-title"><span class="dot ok"></span> Ejecuciones</b>
             <div class="row" style="gap:4px">
               <a href="#/archivos/ejecuciones" class="btn sm ghost">Historial</a>
-              <button type="button" class="btn sm ghost" id="hideSideBtn" aria-label="Ocultar ejecuciones">✕</button>
+              <button type="button" class="btn sm ghost" id="hideSideBtn" aria-label="Ocultar repositorios y ejecuciones">✕</button>
             </div>
           </div>
           <div class="station-aside-body">${runsList.map(runItemHTML).join('') || '<div class="empty" style="padding:14px">Sin ejecuciones recientes</div>'}</div>
         </aside>
-        <button type="button" class="station-tab-btn" id="openSideBtn" ${sideHidden ? '' : 'hidden'} title="Ver últimas ejecuciones">📡 <span>Ejecuciones</span>${runsList.some(r => !r.ended_at) ? '<span class="dot ok blink"></span>' : ''}</button>
+        <button type="button" class="station-tab-btn" id="openSideBtn" ${sideHidden ? '' : 'hidden'} title="Ver repositorios y últimas ejecuciones">⎇ <span>Repos y ejecuciones</span>${runsList.some(r => !r.ended_at) ? '<span class="dot ok blink"></span>' : ''}</button>
       </div>
 
       <section class="station-kanban-box ${kbHidden ? 'collapsed' : ''}" id="stationKanban" aria-label="Tablero Kanban de tareas">
@@ -419,39 +444,28 @@ const estacion = {
             ${S.project ? `<span class="chip" style="border-color:${h(project(S.project)?.color)}">${h(project(S.project)?.name)}</span>` : ''}
           </div>
           <div class="row" style="gap:6px">
-            ${canEdit() ? '<button type="button" class="btn sm y" id="skNewTask">+ Tarea</button>' : ''}
-            <a class="btn sm ghost" href="#/kanban/${S.project || 'todos'}">Filtros ↗</a>
+            <a class="btn sm ghost" href="#/kanban/${S.project || 'todos'}">Tablero completo ↗</a>
             <button type="button" class="btn sm ghost" id="toggleKanbanBtn" aria-expanded="${!kbHidden}">${kbHidden ? '▲ Mostrar' : '▼ Ocultar'}</button>
           </div>
         </div>
         <div class="kanban" id="skGrid">
           ${COLS.map(([k, l]) => {
             const list = vis.filter(t => k === 'atascadas' ? STUCK.includes(t.status) : t.status === k).sort((a, b) => a.kanban_order - b.kanban_order);
-            return `<div class="kcol" data-col="${k}">
-              <div class="kcol-head"><span>${l}</span><span>${list.length}</span></div>
-              <div class="kcol-body">${list.map(t => kanbanCard(t, !S.project)).join('') || '<div class="empty" style="padding:16px 8px;font-size:11px">Sin tareas</div>'}</div>
-            </div>`;
+            // completadas: solo las 5 más recientes; el resto en el tablero completo
+            const cut = k === 'completada' && list.length > 5;
+            const shown = cut ? [...list].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 5) : list;
+            return kcolHTML(k, l, list.length, shown.map(t => kanbanCard(t, !S.project)).join('') + (cut ? `<a class="btn sm ghost" href="#/kanban/${S.project || 'todos'}">Ver las ${list.length} ↗</a>` : ''));
           }).join('')}
         </div>
       </section>
     </div>`;
 
     bindKanbanDrag(el, vis);
-    loadRepos(el);
+    loadRepos(el, false, true);
 
     el.onclick = e => {
       if (e.target.closest('.kmove')) return;
-      if (e.target.closest('#repoFetch')) return loadRepos(el, true);
-      const rma = e.target.closest('[data-mergeall]');
-      if (rma) return mergeAll(REPOS.get(+rma.dataset.mergeall), () => loadRepos(el));
-      const ra = e.target.closest('[data-analyze]');
-      if (ra) return analyzeRepo(REPOS.get(+ra.dataset.analyze), () => loadRepos(el));
-      const rm = e.target.closest('[data-merge]');
-      if (rm) return approveDialog(tasks.find(t => t.id === +rm.dataset.merge));
-      const rp = e.target.closest('[data-push]');
-      if (rp) return act(() => post(`/api/folders/${rp.dataset.push}/push`), 'Push hecho').then(() => loadRepos(el), () => {});
-      const rd = e.target.closest('[data-deploy]');
-      if (rd) return deployRepo(rd.dataset.deploy, rd.dataset.name, rd.dataset.target).then(() => loadRepos(el));
+      if (repoClick(e, el)) return;
       const tk = e.target.closest('#toggleKanbanBtn');
       if (tk) {
         const isCollapsed = $('#stationKanban', el).classList.toggle('collapsed');
@@ -468,7 +482,6 @@ const estacion = {
         $('#openSideBtn', el).hidden = show;
         return;
       }
-      if (e.target.closest('#skNewTask')) return taskForm({}, { project_id: S.project });
       if (e.target.closest('#btnMoreRooms')) return otherRoomsModal(vis, busy, otherAreas);
       const di = e.target.closest('.deco-interactive');
       if (di) { e.stopPropagation(); return handleDecoInteract(di); }
@@ -486,16 +499,35 @@ const estacion = {
 
 // ---------- Repositorios: estado de la rama base y de las ramas de cada tarea ----------
 // se carga aparte del mapa: consulta git en la máquina y puede tardar
-async function loadRepos(el, fetch = false) {
-  const box = $('#repoBox', el), body = $('#repoBody', el);
-  if (!box) return;
-  if (fetch) body.innerHTML = '<div class="empty" style="padding:10px">Consultando remoto…</div>';
+// lazy: lo pide el refresco del mapa (cada evento); se pinta del caché y git se consulta como mucho cada 30 s
+async function loadRepos(el, fetch = false, lazy = false) {
+  if (!$('#repoBox', el)) return;
+  const key = S.project || 0;
+  if (lazy && reposCache.key === key && Date.now() - reposCache.at < 30000) return;
+  if (fetch) $('#repoBody', el).innerHTML = '<div class="empty" style="padding:10px">Consultando remoto…</div>';
   const repos = await get(`/api/repos?fetch=${fetch ? 1 : 0}${S.project ? '&project_id=' + S.project : ''}`).catch(e => [{ folder: {}, error: e.message }]);
-  if (!body.isConnected) return;
   for (const x of repos) REPOS.set(x.folder.id, x);
-  body.innerHTML = repos.map(repoHTML).join('') || `<div class="empty" style="padding:10px;font-size:11px">${S.project ? 'Este proyecto no tiene carpetas git.' : 'Ningún proyecto tiene carpetas git.'} Agrégalas en Proyecto → Carpetas.</div>`;
+  const html = repos.map(repoHTML).join('') || `<div class="empty" style="padding:10px;font-size:11px">${S.project ? 'Este proyecto no tiene carpetas git.' : 'Ningún proyecto tiene carpetas git.'} Agrégalas en Proyecto → Carpetas.</div>`;
+  if (key !== (S.project || 0)) return; // cambió el proyecto mientras consultaba
+  reposCache = { key, at: Date.now(), html };
+  const body = $('#repoBody', el); // el mapa pudo redibujarse mientras tanto
+  if (body) body.innerHTML = html;
 }
 const REPOS = new Map(); // último estado de cada carpeta, para el análisis
+let reposCache = { key: null, at: 0, html: '' };
+// botones de Repositorios, en el mapa y en el panel #/repos; true si el clic era suyo
+function repoClick(e, el) {
+  const q = s => e.target.closest(s), reload = () => loadRepos(el);
+  let b;
+  if (q('#repoFetch')) loadRepos(el, true);
+  else if ((b = q('[data-mergeall]'))) mergeAll(REPOS.get(+b.dataset.mergeall), reload);
+  else if ((b = q('[data-analyze]'))) analyzeRepo(REPOS.get(+b.dataset.analyze), reload);
+  else if ((b = q('[data-merge]'))) get('/api/tasks/' + b.dataset.merge).then(x => approveDialog(x.task), fail);
+  else if ((b = q('[data-push]'))) act(() => post(`/api/folders/${b.dataset.push}/push`), 'Push hecho').then(reload, () => {});
+  else if ((b = q('[data-deploy]'))) deployRepo(b.dataset.deploy, b.dataset.name, b.dataset.target).then(reload);
+  else return false;
+  return true;
+}
 // estado que escriben hooks/plugins (IJFW, Serena, Claude…): no es código del proyecto
 const NOISE = /^\.(ijfw|serena|claude|commandcode|omc|sisyphus|codex|oficina|vscode)\//;
 const repoName = f => `${f.project_name || ''}${f.label ? ' · ' + f.label : ''}`;
@@ -518,14 +550,19 @@ function repoHTML(x) {
     </div>`;
   }).join('');
   const sync = x.upstream ? `↑${x.ahead} ↓${x.behind}` : 'sin remoto';
+  const dirty = x.changes?.filter(c => !NOISE.test(c.file)).length;
+  const local = !x.changes?.length ? 'limpio'
+    : `<button type="button" class="btn sm ${dirty ? 'warn' : 'ghost'}" data-analyze="${f.id}" title="Ver qué es y qué hacer">${dirty ? `${dirty} sin commit` : 'solo ruido de herramientas'} · revisar</button>`;
+  const ld = x.last_deploy, ldOk = ld && JSON.parse(ld.detail || '{}').ok;
   return `<div class="repo" style="border-left:3px solid ${h(f.color || 'var(--line)')}">
     <div class="row" style="justify-content:space-between;gap:4px"><b class="ellipsis" title="${h(f.path)}">${h(name)}</b><code title="${h(x.log.join('\n'))}">${h(x.head)}</code></div>
-    <div class="run-meta">${sync}${x.changes?.length ? (n => ` · <button type="button" class="linkish" data-analyze="${f.id}" title="Ver qué es y qué hacer" style="color:var(${n ? '--orange' : '--muted'})">${n ? `${n} sin commit` : 'solo ruido de herramientas'} 🔍</button>`)(x.changes.filter(c => !NOISE.test(c.file)).length) : ''} · ${x.branches.filter(b => b.ahead).length} ramas pendientes${x.deploy ? ` · despliega en <b>${h(x.deploy.target)}</b>` : ''}</div>
+    <div class="repo-kv"><span>Remoto</span><b>${sync}</b><span>Local</span><b>${local}</b><span>Ramas</span><b>${x.branches.filter(b => b.ahead).length} pendientes</b>
+      ${x.deploy ? `<span>Destino</span><b>${h(x.deploy.target)}${ld ? `<br><small style="color:var(${ldOk ? '--muted' : '--red'})">${ldOk ? '✓' : '✗'} último despliegue ${ago(ld.at)}</small>` : ''}</b>` : ''}</div>
     ${br}
     ${canEdit() ? `<div class="row" style="gap:4px">
       ${(n => n ? `<button type="button" class="btn sm g" data-mergeall="${f.id}" data-n="${n}" title="Aprueba y fusiona todas las tareas en revisión, de la más antigua a la más nueva">⇉ Fusionar listas (${n})</button>` : '')(x.branches.filter(b => b.status === 'revision').length)}
       ${x.upstream ? `<button type="button" class="btn sm" data-push="${f.id}" title="git pull --no-rebase + push de ${h(x.head)}: nunca pisa lo remoto">⇅ Push${x.ahead ? ` (${x.ahead})` : ''}</button>` : ''}
-      ${x.deploy ? `<button type="button" class="btn sm y" data-deploy="${f.id}" data-name="${h(name)}" data-target="${h(x.deploy.target)}" title="Desplegar en ${h(x.deploy.target)}" aria-label="Desplegar en ${h(x.deploy.target)}">🚀</button>` : '<small class="muted" title="Agrega el repo en &quot;deploy&quot; de worker.json">sin despliegue configurado</small>'}
+      ${x.deploy ? `<button type="button" class="btn sm warn" data-deploy="${f.id}" data-name="${h(name)}" data-target="${h(x.deploy.target)}" title="Desplegar en ${h(x.deploy.target)}">🚀 Desplegar</button>` : '<small class="muted" title="Agrega el repo en &quot;deploy&quot; de worker.json">sin despliegue configurado</small>'}
     </div>` : ''}
   </div>`;
 }
@@ -733,7 +770,7 @@ const kanban = {
         <small class="muted">Arrastra a "En curso" para ejecutar con el agente asignado.</small></div>
       <div class="kanban">${COLS.map(([k, l]) => {
         const list = tasks.filter(t => k === 'atascadas' ? STUCK.includes(t.status) : t.status === k).sort((a, b) => a.kanban_order - b.kanban_order);
-        return `<div class="kcol" data-col="${k}"><div class="kcol-head"><span>${l}</span><span>${list.length}</span></div><div class="kcol-body">${list.map(t => kanbanCard(t, !pid)).join('') || '<div class="empty" style="padding:16px 8px;font-size:11px">Sin tareas</div>'}</div></div>`;
+        return kcolHTML(k, l, list.length, list.map(t => kanbanCard(t, !pid)).join(''));
       }).join('')}</div>`;
     $('#kt', el)?.addEventListener('click', () => taskForm({}, { project_id: pid }));
     $('#km', el)?.addEventListener('click', missionForm);
@@ -743,6 +780,17 @@ const kanban = {
     el.onclick = e => { const c = !e.target.closest('.kmove') && e.target.closest('.kcard'); if (c) go('#/tarea/' + c.dataset.id); };
     el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('.kcard')) go('#/tarea/' + e.target.dataset.id); };
     bindKanbanDrag(el, all);
+  },
+};
+
+// ===================== REPOSITORIOS (panel: también en móvil, donde el mapa no muestra la barra lateral) =====================
+const repos = {
+  async render(el) {
+    el.innerHTML = `<div class="row"><h1 style="margin:0">Repositorios</h1><button type="button" class="btn sm right" id="repoFetch" title="Traer el estado del remoto (git fetch)">⟳ Consultar remoto</button></div>
+      <p class="muted">Rama base de cada carpeta git, ramas de tareas pendientes, push y despliegue.</p>
+      <section id="repoBox"><div class="repo-body repo-page" id="repoBody">${reposCache.key === (S.project || 0) && reposCache.html || '<div class="empty">Cargando…</div>'}</div></section>`;
+    el.onclick = e => repoClick(e, el);
+    loadRepos(el);
   },
 };
 
@@ -773,7 +821,7 @@ function messagesHTML(msgs) {
   return msgs.map(m => `<div class="msg ${m.role} ${m.kind === 'consulta' ? 'consulta' : ''}"><div class="who">${m.role === 'agente' ? agentChip(m.agent_id, 1) : m.role === 'usuario' ? userChip(m.user_id) : 'SISTEMA'} · ${fmtDate(m.at)}${m.kind !== 'mensaje' ? ' · ' + h(m.kind) : ''}${m.role === 'agente' && window.speechSynthesis ? '<button type="button" class="btn sm ghost" data-say title="Leer en voz alta">🔊</button>' : ''}</div><div class="body">${md(m.text)}</div></div>`).join('') || '<div class="empty">Sin mensajes</div>';
 }
 function permsHTML(perms) {
-  return perms.map(p => `<div class="perm"><b class="pixel" style="font-size:9px">🔐 PERMISO SOLICITADO</b><pre style="white-space:pre-wrap">${h(JSON.stringify(p.input, null, 1)).slice(0, 800)}</pre>
+  return perms.map(p => `<div class="perm"><b class="lbl-up">🔐 PERMISO SOLICITADO</b><pre style="white-space:pre-wrap">${h(JSON.stringify(p.input, null, 1)).slice(0, 800)}</pre>
     <button class="btn sm g" data-perm="${h(p.request_id)}" data-allow="1">Aprobar</button><button class="btn sm r" data-perm="${h(p.request_id)}" data-allow="0">Denegar</button></div>`).join('');
 }
 function renderStructuredDiff(diff) {
@@ -783,14 +831,14 @@ function renderStructuredDiff(diff) {
   if (!chunks.length || (chunks.length === 1 && !diff.startsWith('diff --git'))) {
     return `<pre class="console" style="height:auto;max-height:70vh">${diff.split('\n').map(diffLine).join('\n')}</pre>`;
   }
-  return chunks.map(chunk => {
+  return chunks.map((chunk, i) => {
     const lines = chunk.split('\n');
     const headerMatch = /^[ab]\/(.*?)\s+[ab]\/(.*)/.exec(lines[0]) || /^(.+)/.exec(lines[0]);
     const fname = headerMatch ? (headerMatch[2] || headerMatch[1]) : 'archivo';
     const adds = lines.filter(l => l.startsWith('+') && !l.startsWith('+++')).length;
     const dels = lines.filter(l => l.startsWith('-') && !l.startsWith('---')).length;
     const bodyHtml = lines.map(diffLine).join('\n');
-    return `<details class="diff-file" open>
+    return `<details class="diff-file" ${i < 3 ? 'open' : ''}>
       <summary><span>📁 <b>${h(fname)}</b></span> <span><small style="color:#7CFC00">+${adds}</small> <small style="color:#ff6b6b">-${dels}</small></span></summary>
       <pre class="diff-body">${bodyHtml}</pre>
     </details>`;
@@ -814,41 +862,46 @@ const tarea = {
     const id = +r.args[0];
     const x = await get('/api/tasks/' + id);
     const t = x.task, a = agent(t.agent_id), ar = area(t.area_id);
-    const tab = S.taskTab ||= 'consola';
+    const tab = (S.taskTabs ||= {})[id] || 'consola'; // pestaña recordada por tarea
     const running = x.running || x.queued;
     const can = canEdit();
     const btn = (cond, id2, cls, label) => cond && can ? `<button class="btn ${cls}" id="${id2}">${label}</button>` : '';
+    const reply = () => `<form id="replyF" class="col-flex" style="margin-top:10px">${can ? `<textarea id="replyT" placeholder="${t.executor === 'humano' || !t.conversation_id ? 'Agregar nota…' : t.status === 'esperando' ? 'Responde al agente…' : 'Mensaje para el agente (reanuda la sesión)…'}" rows="3"></textarea>
+      <div class="row"><button class="btn y">${t.executor === 'humano' || !t.conversation_id ? 'Agregar nota' : 'Enviar al agente'}</button>${micBtn('#replyT')}${t.conversation_id && t.executor === 'agente' ? '<button class="btn ghost" id="noteB" type="button">Solo nota</button>' : ''}</div>` : ''}</form>`;
     el.innerHTML = `<div class="row"><a href="#/kanban/${t.project_id}" class="btn ghost sm">← ${h(x.project.name)}</a><h1 style="margin:0">#${t.id} ${h(t.title)}</h1>${chip(t.status)}</div>
-      <div class="row" style="margin:10px 0">${ar ? `<span class="chip" style="border-color:${ar.color}">${h(ar.alias)} · ${h(ar.name)}</span>` : ''}
-        ${t.executor === 'humano' ? `<span class="chip">Persona: ${h(user(t.assignee_user_id)?.name || 'sin asignar')}</span>` : `${agentChip(t.agent_id)}<span class="chip">${h(t.model || '-')} · ${h(t.effort || '-')} · ${h(t.mode)}</span>`}
-        <span class="chip pri-${t.priority}">${PRI[t.priority]}</span>${x.folder ? `<span class="chip" title="${h(x.folder.path)}">📁 ${h(x.folder.label)}</span>` : '<span class="chip">sandbox</span>'}
-        ${t.executor === 'agente' && machines().length ? `<span class="chip">🖥 ${h(x.machine || '')}${x.machine_online ? '' : ' (desconectada)'}</span>` : ''}
-        ${t.branch ? `<span class="chip">rama ${h(t.branch)}</span>` : ''}${t.due_date ? `<span class="chip">📅 ${h(t.due_date)}</span>` : ''}<small class="muted">creada por ${h(user(t.created_by)?.name || '-')} ${ago(t.created_at)}</small></div>
+      <div class="task-meta">${[
+        t.executor === 'humano' ? `Persona: <b>${h(user(t.assignee_user_id)?.name || 'sin asignar')}</b>` : `${agentSprite(a, 1.5)} <b>${h(a?.name || '—')}</b> ${h(t.model || '-')} · ${h(t.effort || '-')}`,
+        ar ? `${h(ar.alias)} · ${h(ar.name)}` : '',
+        `<span class="pri-${t.priority}">${PRI[t.priority]}</span>`,
+        x.folder ? `<span title="${h(x.folder.path)}">carpeta ${h(x.folder.label)}</span>` : 'sandbox',
+        t.executor === 'agente' && machines().length ? `máquina ${h(x.machine || '')}` : '',
+        t.branch ? `rama <code>${h(t.branch)}</code>` : '', t.due_date ? `vence ${h(t.due_date)}` : '',
+        `creada por ${h(user(t.created_by)?.name || '-')} ${ago(t.created_at)}`].filter(Boolean).join(' · ')}
+        ${t.executor === 'agente' ? (t.mode === 'editar' ? '<span class="chip st-revision" title="Sin sandbox: puede ejecutar comandos, hacer push y desplegar con tus credenciales">modo Editar</span>' : `<span class="chip">modo ${h(t.mode)}</span>`) : ''}</div>
       <div class="row">
         ${btn(t.executor === 'agente' && !running && t.status !== 'completada', 'bRun', 'y', t.conversation_id && ['esperando', 'fallida', 'pausada_cuota'].includes(t.status) ? '▶ Ejecutar de nuevo' : '▶ Ejecutar')}
         ${btn(running, 'bAbort', 'r', '■ Abortar')}
         ${btn(['revision', 'esperando'].includes(t.status), 'bApprove', 'g', '✔ Aprobar')}
-        ${btn(t.status === 'revision', 'bReturn', 'o', '↩ Devolver')}
-        ${btn(t.status !== 'completada', 'bHand', '', '⇄ Pasar a otro')}
-        ${btn(true, 'bEdit', 'ghost', 'Editar')}
-        ${btn(t.executor === 'agente' && !running, 'bDecomp', 'ghost', 'Descomponer')}
-        ${btn(['completada', 'revision'].includes(t.status), 'bReview', 'ghost', '¿Qué mejorarías?')}
         ${btn(t.executor === 'humano' && t.status !== 'completada', 'bHumDone', 'g', 'Marcar completada')}
-        ${btn(true, 'bDel', 'r right', 'Eliminar')}
+        ${btn(t.status === 'revision', 'bReturn', '', '↩ Devolver')}
+        ${btn(t.status !== 'completada', 'bHand', '', '⇄ Pasar a otro')}
+        ${can ? `<details class="more-menu"><summary class="btn ghost">⋯ Más</summary><div class="menu-pop">
+          ${btn(true, 'bEdit', 'ghost', 'Editar')}
+          ${btn(t.executor === 'agente' && !running, 'bDecomp', 'ghost', 'Descomponer')}
+          ${btn(['completada', 'revision'].includes(t.status), 'bReview', 'ghost', '¿Qué mejorarías?')}
+          ${btn(true, 'bDel', 'r', 'Eliminar')}</div></details>` : ''}
       </div>
       ${permsHTML(x.permissions)}
       ${t.executor === 'agente' && t.status !== 'completada' ? offlineWarn(x.machine, x.machine_online) : ''}
-      ${t.status === 'esperando' ? `<div class="panel y" style="margin:10px 0"><b class="pixel" style="font-size:9px;color:var(--yellow)">? EL AGENTE ESPERA TU RESPUESTA</b><div>${md((([a, b = '']) => b.trim() || a)((x.messages.filter(m => m.role === 'agente').at(-1)?.text || '').split('[[CONSULTA]]')))}</div></div>` : ''}
-      ${t.status === 'pausada_cuota' ? `<div class="panel r" style="margin:10px 0"><b class="pixel" style="font-size:9px">⛽ ${h(a?.name)} SE QUEDÓ SIN CUOTA</b><p>El avance quedó guardado (checkpoint + snapshot). Elige quién continúa.</p>${can ? '<button class="btn y" id="bHand2">Elegir relevo</button>' : ''} ${a?.quota_reset_at ? `<small>o espera a ${h(a.name)}: vuelve ${ago(a.quota_reset_at)}</small>` : ''}</div>` : ''}
-      ${t.summary ? `<div class="panel h" style="margin:10px 0"><b class="pixel" style="font-size:9px;color:var(--holo)">RESUMEN DEL AGENTE</b>${md(t.summary)}</div>` : ''}
-      ${t.review_comment ? `<div class="panel" style="margin:10px 0"><b class="pixel" style="font-size:9px">COMENTARIO DE REVISIÓN</b>${md(t.review_comment)}</div>` : ''}
-      <div class="panel" style="margin:10px 0"><div class="row"><b class="pixel" style="font-size:9px">ADJUNTOS (${x.attachments.length})</b>
+      ${t.status === 'esperando' ? `<div class="panel y" style="margin:10px 0"><b class="lbl-up" style="color:var(--yellow)">? EL AGENTE ESPERA TU RESPUESTA</b><div>${md((([a, b = '']) => b.trim() || a)((x.messages.filter(m => m.role === 'agente').at(-1)?.text || '').split('[[CONSULTA]]')))}</div>${tab !== 'chat' ? reply() : ''}</div>` : ''}
+      ${t.status === 'pausada_cuota' ? `<div class="panel r" style="margin:10px 0"><b class="lbl-up">⛽ ${h(a?.name)} SE QUEDÓ SIN CUOTA</b><p>El avance quedó guardado (checkpoint + snapshot). Elige quién continúa.</p>${can ? '<button class="btn y" id="bHand2">Elegir relevo</button>' : ''} ${a?.quota_reset_at ? `<small>o espera a ${h(a.name)}: vuelve ${ago(a.quota_reset_at)}</small>` : ''}</div>` : ''}
+      ${t.summary ? `<div class="panel h" style="margin:10px 0"><b class="lbl-up" style="color:var(--holo)">RESUMEN DEL AGENTE</b>${md(t.summary)}</div>` : ''}
+      ${t.review_comment ? `<div class="panel" style="margin:10px 0"><b class="lbl-up">COMENTARIO DE REVISIÓN</b>${md(t.review_comment)}</div>` : ''}
+      <div class="panel" style="margin:10px 0"><div class="row"><b class="lbl-up">ADJUNTOS (${x.attachments.length})</b>
         ${can ? '<label class="btn sm right">+ Adjuntar<input type="file" id="attIn" multiple hidden></label>' : ''}</div>${attachmentsHTML(x.attachments, can)}</div>
       <div class="tabs" style="margin-top:14px">${[['consola', 'Consola'], ['chat', `Chat (${x.messages.length})`], ['cambios', 'Cambios'], ['runs', `Ejecuciones (${x.runs.length})`], ['relevos', `Relevos (${x.handoffs.length})`], ['historial', 'Historial'], ['detalles', 'Detalles']].map(([k, l]) => `<button data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="tabBody"></div>`;
     const body = $('#tabBody', el);
-    const reply = () => `<form id="replyF" class="col-flex" style="margin-top:10px">${can ? `<textarea id="replyT" placeholder="${t.executor === 'humano' || !t.conversation_id ? 'Agregar nota…' : t.status === 'esperando' ? 'Responde al agente…' : 'Mensaje para el agente (reanuda la sesión)…'}" rows="3"></textarea>
-      <div class="row"><button class="btn y">${t.executor === 'humano' || !t.conversation_id ? 'Agregar nota' : 'Enviar al agente'}</button>${micBtn('#replyT')}${t.conversation_id && t.executor === 'agente' ? '<button class="btn ghost" id="noteB" type="button">Solo nota</button>' : ''}</div>` : ''}</form>`;
     if (tab === 'consola') {
       const runId = S.taskRun?.[id] || x.runs[0]?.id;
       body.innerHTML = x.runs.length ? `<div class="row" style="justify-content:space-between;margin-bottom:6px">
@@ -873,7 +926,7 @@ const tarea = {
       body.innerHTML = `<div class="table-wrap"><table class="grid"><tr><th>Turno</th><th>Agente</th><th>Modelo</th><th>Inicio</th><th>Duración</th><th>Fin</th><th>Tokens</th><th>Costo</th><th>Cambios</th></tr>
         ${x.runs.map(r => `<tr class="click" data-run="${r.id}"><td>${r.turn}</td><td>${agentChip(r.agent_id)}</td><td>${h(r.model || '')} ${h(r.effort || '')}</td><td>${fmtDate(r.started_at)}<br><small>${userChip(r.started_by)}</small></td>
         <td>${r.ended_at ? dur((Date.parse(r.ended_at) - Date.parse(r.started_at)) / 1000) : '…'}</td><td>${h(r.end_reason || 'en curso')}</td><td>${num(r.tokens_in + r.tokens_out)}</td><td>$${(r.cost_usd || 0).toFixed(3)}</td><td><small>${h((r.diff_stat || '').split('\n').pop())}</small></td></tr>`).join('')}</table></div>`;
-      $$('[data-run]', body).forEach(tr => tr.onclick = () => { (S.taskRun ||= {})[id] = +tr.dataset.run; S.taskTab = 'consola'; route(true); });
+      $$('[data-run]', body).forEach(tr => tr.onclick = () => { (S.taskRun ||= {})[id] = +tr.dataset.run; S.taskTabs[id] = 'consola'; route(true); });
     } else if (tab === 'relevos') {
       body.innerHTML = x.handoffs.map(hd => `<div class="panel" style="margin:8px 0"><div class="row">${agentChip(hd.from_agent_id)} → ${hd.to_user_id ? userChip(hd.to_user_id) : hd.to_agent_id ? agentChip(hd.to_agent_id) : '<span class="chip st-esperando">pendiente de decidir</span>'}
         <span class="chip">${h(hd.reason)}</span>${hd.commit_sha ? `<span class="chip">commit ${h(hd.commit_sha)}</span>` : ''}<small class="right">${fmtDate(hd.at)}</small></div>
@@ -889,7 +942,7 @@ const tarea = {
         ${x.proposal ? `<h3>Origen</h3><a href="#/consejo/${x.proposal.review_id}">Propuesta #${x.proposal.id} del Consejo #${x.proposal.review_id}</a>` : ''}
         ${t.worktree_path ? `<h3>Worktree</h3><code>${h(t.worktree_path)}</code>` : ''}`;
     }
-    $$('.tabs [data-tab]', el).forEach(b => b.onclick = () => { S.taskTab = b.dataset.tab; route(true); });
+    $$('.tabs [data-tab]', el).forEach(b => b.onclick = () => { S.taskTabs[id] = b.dataset.tab; route(true); });
     $('#attIn', el)?.addEventListener('change', async e => { try { await uploadAll([...e.target.files], { task_id: id }); e.target.value = ''; holo('Adjuntado', 'Lo recibirá el agente en su próximo turno'); } catch (err) { fail(err); } });
     $('#replyF', el)?.addEventListener('submit', async e => {
       e.preventDefault(); const text = $('#replyT').value.trim(); if (!text) return;
@@ -924,7 +977,7 @@ function runDialog(t) {
   $('#rdOk', d).onclick = async e => {
     e.preventDefault();
     const f = formData(d);
-    try { await post(`/api/tasks/${t.id}/run`, { agent_id: +f.agent_id, model: f.model, effort: f.effort, mode: f.mode, fresh: f.fresh }); closeModal(); S.taskTab = 'consola'; if (S.taskRun) delete S.taskRun[t.id]; beep('ok'); refreshSoon(0); } catch (err) { fail(err); }
+    try { await post(`/api/tasks/${t.id}/run`, { agent_id: +f.agent_id, model: f.model, effort: f.effort, mode: f.mode, fresh: f.fresh }); closeModal(); (S.taskTabs ||= {})[t.id] = 'consola'; if (S.taskRun) delete S.taskRun[t.id]; beep('ok'); refreshSoon(0); } catch (err) { fail(err); }
   };
 }
 export function approveDialog(t) {
@@ -974,13 +1027,14 @@ const cantina = {
     let right;
     if (!cid) {
       right = `<div class="panel y"><h2 style="margin-top:0">Nueva consulta rápida</h2><p class="muted">Pregunta lo que sea a un agente sin crear tarea. Queda en el historial y puedes convertirla en tarea o proyecto.</p>
-        <form id="ncF">${agentPicker('nc', {}, { modes: false })}
+        <form id="ncF"><label class="l">Mensaje ${micBtn('#ncText')}</label><textarea name="text" id="ncText" rows="5" required></textarea>
+        ${agentPicker('nc', {}, { modes: false })}
+        <details class="opts"><summary>Opciones: solo lectura · carpeta de la Cantina · sin adjuntos</summary>
         <div class="field-row"><div><label class="l">Modo</label><select name="mode">${opts([['plan', 'Solo lectura'], ['editar', 'Puede editar archivos']], 'plan')}</select></div>
         <div><label class="l">Proyecto (contexto, opcional)</label><select name="project_id" id="ncProj">${opts(S.boot.projects.map(p => [p.id, p.name]), '', '—')}</select></div></div>
         <div class="field-row">${machineSel('name="machine_id" id="ncMachine"')}</div>
         <label class="l">Carpeta (vacío = carpeta de la Cantina)</label><div class="row" style="flex-wrap:nowrap"><input name="folder_path" id="ncFolder" placeholder="D:\\cantina"><button class="btn sm" type="button" id="ncBrowse">Examinar</button></div>
-        <label class="l">Mensaje ${micBtn('#ncText')}</label><textarea name="text" id="ncText" rows="5" required></textarea>
-        <label class="l">Adjuntos (opcional)</label><input type="file" id="ncFiles" multiple>
+        <label class="l">Adjuntos (opcional)</label><input type="file" id="ncFiles" multiple></details>
         <button class="btn y" style="margin-top:10px">Enviar a la cantina</button></form></div>`;
     } else {
       const x = await get('/api/conversations/' + cid);
@@ -1081,36 +1135,11 @@ const consejo = {
       <div class="row" style="margin:10px 0">${v.lenses.map(l => `<span class="chip">${h(S.boot.lenses[l]?.[0] || l)}</span>`).join('')} ${v.agents.map(a => agentChip(a.agent_id)).join('')}${v.moderator_id ? ` moderador: ${agentChip(v.moderator_id)}` : ''}</div>
       ${v.status === 'en_curso' ? `<div class="panel h">Los agentes están deliberando… ${x.conversations.map(c => `<a href="#/cantina/${c.id}">${h(c.title)}</a> ${chip(c.status === 'inactiva' ? 'completada' : c.status, c.status)}`).join(' · ')}</div>` : ''}
       ${v.error ? `<div class="panel r">${h(v.error)}</div>` : ''}
-      <details style="margin:10px 0"><summary class="pixel" style="font-size:9px;cursor:pointer">Informe enviado al consejo</summary><div class="panel">${md(v.digest_md)}</div></details>
+      <details style="margin:10px 0"><summary class="lbl-up" style="cursor:pointer">Informe enviado al consejo</summary><div class="panel">${md(v.digest_md)}</div></details>
       ${props.length ? `<h2>Matriz impacto × esfuerzo</h2><div class="matrix">${QUAD.map(([n, fn]) => `<div class="q"><h3>${n}</h3>${props.filter(p => p.status !== 'descartada' && fn(p)).map(p => `<div>• ${h(p.title)} ${p.votes > 1 ? `<span class="votes">★${p.votes}</span>` : ''}</div>`).join('') || '<small class="muted">—</small>'}</div>`).join('')}</div>
       <h2>Propuestas</h2><div class="grid2">${props.map(pc).join('')}</div>` : v.status !== 'en_curso' ? '<div class="empty">Sin propuestas</div>' : ''}
       <h3>Conversaciones del consejo</h3>${x.conversations.map(c => `<div><a href="#/cantina/${c.id}">${h(c.title)}</a></div>`).join('')}`;
     el.onclick = async e => {
-      const tc = e.target.closest('.theme-card[data-t]');
-      if (tc) {
-        const t = tc.dataset.t;
-        applyTheme(t);
-        $('.theme-card[data-t]', el).forEach(c => {
-          const match = c.dataset.t === t;
-          c.classList.toggle('on', match);
-          const r = $('input[name=theme]', c);
-          if (r) r.checked = match;
-        });
-        const tb = $('#themeBtn');
-        if (tb) tb.textContent = 'Tema: ' + (t === 'blanco' ? 'blanco (Hoth)' : 'oscuro (espacio)');
-        if (S.sound) beep('ok');
-      }
-      const ac = e.target.closest('.theme-card[data-av]');
-      if (ac) {
-        const av = ac.dataset.av;
-        $$('.theme-card[data-av]', el).forEach(c => {
-          const match = c.dataset.av === av;
-          c.classList.toggle('on', match);
-          const r = $('input[name=avatar]', c);
-          if (r) r.checked = match;
-        });
-        if (S.sound) beep('ok');
-      }
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.acc) {
         const p = props.find(y => y.id === +b.dataset.acc);
@@ -1134,9 +1163,8 @@ async function conveneDialog(pid) {
   const L = S.boot.lenses;
   const d = modal(`<h2>Convocar al Consejo Jedi</h2>
     <h3>1 · Alcance: ¿qué trabajo revisar?</h3>
-    <div class="field-row"><div><label class="l">Proyectos</label><select name="project_ids" multiple size="3">${S.boot.projects.map(p => `<option value="${p.id}" ${p.id === pid ? 'selected' : ''}>${h(p.name)}</option>`).join('')}</select></div>
-      <div><label class="l">Áreas</label><select name="area_ids" multiple size="3">${S.boot.areas.map(a => `<option value="${a.id}">${h(a.name)}</option>`).join('')}</select></div>
-      <div><label class="l">Hecho por</label><select name="agent_ids" multiple size="3">${S.boot.agents.map(a => `<option value="${a.id}">${h(a.name)}</option>`).join('')}</select></div></div>
+    <div class="field-row">${[['project_ids', 'Proyectos', S.boot.projects, pid], ['area_ids', 'Áreas', S.boot.areas], ['agent_ids', 'Hecho por', S.boot.agents]].map(([n, l, list, sel]) =>
+      `<div><div class="l">${l} <small>(ninguno = todos)</small></div><div class="check-list">${list.map(x => `<label class="row"><input type="checkbox" name="${n}" value="${x.id}" ${x.id === sel ? 'checked' : ''}> ${h(x.name)}</label>`).join('')}</div></div>`).join('')}</div>
     <div class="field-row"><div><label class="l">Últimas N tareas</label><input type="number" name="last_n" value="10" min="1" max="50"></div><div><label class="l">Desde</label><input type="date" name="from"></div><div><label class="l">Hasta</label><input type="date" name="to"></div></div>
     <button class="btn sm" id="cvDig">Generar informe</button>
     <label class="l">Informe (editable antes de enviar)</label><textarea name="digest_md" id="cvMd" rows="8" placeholder="Pulsa «Generar informe»"></textarea>
@@ -1150,7 +1178,7 @@ async function conveneDialog(pid) {
     <label class="l">Moderador (consolida si opinan varios)</label><select name="moderator">${opts(agentsOn().map(a => [a.id, a.name]), '', 'Sin moderador (consolidación automática)')}</select>
     <div class="row" style="margin-top:12px"><button class="btn y" id="cvOk">Convocar</button><button class="btn ghost" value="c">Cancelar</button></div>`);
   const scope = () => {
-    const ms = n => [...d.querySelector(`[name=${n}]`).selectedOptions].map(o => +o.value);
+    const ms = n => $$(`[name=${n}]:checked`, d).map(c => +c.value);
     return { project_ids: ms('project_ids'), area_ids: ms('area_ids'), agent_ids: ms('agent_ids'), last_n: +d.querySelector('[name=last_n]').value, from: d.querySelector('[name=from]').value, to: d.querySelector('[name=to]').value };
   };
   $('#cvDig', d).onclick = async e => { e.preventDefault(); try { $('#cvMd', d).value = (await post('/api/council/digest', { scope: scope() })).digest_md; } catch (err) { fail(err); } };
@@ -1183,6 +1211,12 @@ const LINK = {
   chats: r => r.kind === 'tarea' && r.task_id ? '#/tarea/' + r.task_id : '#/cantina/' + r.id, tareas: r => '#/tarea/' + r.id, consejos: r => '#/consejo/' + r.id,
   notificaciones: r => r.link, bitacora: r => r.entity === 'tarea' ? '#/tarea/' + r.entity_id : r.entity === 'chat' ? '#/cantina/' + r.entity_id : r.entity === 'consejo' ? '#/consejo/' + r.entity_id : null,
 };
+// valores del filtro «estado» según la pestaña (el servidor lo aplica a status, end_reason o kind)
+const stFilter = tab => ({ // función: NOTIF_KINDS se declara más abajo
+  tareas: ['Estado', Object.entries(STATUS)],
+  ejecuciones: ['Fin', ['listo', 'consulta', 'cuota', 'error', 'abortado', 'timeout', 'sin_marcador', 'interrumpido'].map(x => [x, x.replace('_', ' ')])],
+  notificaciones: ['Tipo', NOTIF_KINDS],
+})[tab];
 const archivos = {
   async render(el, r) {
     const tab = r.args[0] || 'buscar';
@@ -1203,7 +1237,7 @@ const archivos = {
         <select id="afG" style="width:auto">${opts(S.boot.agents.map(a => [a.id, a.name]), f.agent_id, 'Agente')}</select>
         <select id="afP" style="width:auto">${opts(S.boot.projects.map(p => [p.id, p.name]), f.project_id, 'Proyecto')}</select>
         <select id="afA" style="width:auto">${opts(S.boot.areas.map(a => [a.id, a.name]), f.area_id, 'Área')}</select>
-        <input id="afS" style="max-width:140px" placeholder="estado/tipo" value="${h(f.status || '')}"><input id="afF" type="date" style="max-width:170px" value="${h(f.from || '')}"><input id="afT" type="date" style="max-width:170px" value="${h(f.to || '')}">
+        ${stFilter(tab) ? `<select id="afS" style="width:auto">${opts(stFilter(tab)[1], f.status, stFilter(tab)[0])}</select>` : tab === 'bitacora' ? `<input id="afS" style="max-width:180px" placeholder="entidad: tarea, chat, git…" value="${h(f.status || '')}">` : ''}<input id="afF" type="date" style="max-width:170px" value="${h(f.from || '')}"><input id="afT" type="date" style="max-width:170px" value="${h(f.to || '')}">
         <input id="afQ" style="max-width:200px" placeholder="texto" value="${h(f.q || '')}"><button class="btn sm" id="afGo">Filtrar</button><button class="btn sm ghost" id="afClr">Limpiar</button>
         <a class="btn sm o" href="/api/history/${tab}?${qs}&format=csv">CSV</a></div>
         <div class="panel table-wrap"><table class="grid"><tr>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr>
@@ -1212,9 +1246,9 @@ const archivos = {
       S.arows = data.rows;
     }
     el.innerHTML = `<h1>Archivos Jedi</h1><div class="tabs">${TABS.map(([k, l]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>${bodyHTML}`;
-    $$('[data-t]', el).forEach(b => b.onclick = () => { f.page = 1; go('#/archivos/' + b.dataset.t); });
+    $$('[data-t]', el).forEach(b => b.onclick = () => { f.page = 1; delete f.status; go('#/archivos/' + b.dataset.t); }); // el estado significa otra cosa en cada pestaña
     $('#sF', el)?.addEventListener('submit', e => { e.preventDefault(); go('#/archivos/buscar?q=' + encodeURIComponent($('#sQ').value)); });
-    const apply = () => { Object.assign(f, { user_id: $('#afU').value, agent_id: $('#afG').value, project_id: $('#afP').value, area_id: $('#afA').value, status: $('#afS').value, from: $('#afF').value, to: $('#afT').value, q: $('#afQ').value, page: 1 }); route(true); };
+    const apply = () => { Object.assign(f, { user_id: $('#afU').value, agent_id: $('#afG').value, project_id: $('#afP').value, area_id: $('#afA').value, status: $('#afS')?.value || '', from: $('#afF').value, to: $('#afT').value, q: $('#afQ').value, page: 1 }); route(true); };
     $('#afGo', el)?.addEventListener('click', apply);
     $('#afQ', el)?.addEventListener('keydown', e => { if (e.key === 'Enter') apply(); });
     $('#afClr', el)?.addEventListener('click', () => { for (const k of Object.keys(f)) if (k !== 'sq') delete f[k]; route(true); });
@@ -1264,7 +1298,7 @@ const puente = {
       <span class="right">${canEdit() ? '<button class="btn y" id="scan">Escanear ahora</button><button class="btn" id="ntest">Notificación de prueba</button><button class="btn ghost" id="ttest">Toast Windows</button>' : ''}
       ${isAdmin() ? (s.queue_paused ? '<button class="btn g" id="resume">Reanudar cola</button>' : '<button class="btn r" id="o66">ORDEN 66</button>') : ''}</span></div>
       ${s.queue_paused ? '<div class="panel r" style="margin:10px 0">La cola está en pausa: nada nuevo se ejecuta.</div>' : ''}
-      <h2>Máquinas</h2><div class="grid3">${s.machines.map(m => `<div class="panel ${m.online ? 'h' : 'r'}"><div class="row">${sprite('desk', m.online ? '#3ddc84' : '#ff3b3b', 3)}<div class="grow"><b class="pixel" style="font-size:9px">${h(m.name)}</b>${m.is_default ? ' ★' : ''}<br>
+      <h2>Máquinas</h2><div class="grid3">${s.machines.map(m => `<div class="panel ${m.online ? 'h' : 'r'}"><div class="row">${sprite('desk', m.online ? '#3ddc84' : '#ff3b3b', 3)}<div class="grow"><b class="lbl-up">${h(m.name)}</b>${m.is_default ? ' ★' : ''}<br>
         <span class="dot ${m.online ? 'ok' : 'bad'}"></span> ${m.online ? 'conectada' : 'desconectada'} · ${m.is_local ? 'este servidor' : 'agente de campo'}</div></div>
         <div class="kv" style="margin-top:6px"><b>Visto</b><span>${ago(m.last_seen)}</span><b>Equipo</b><span>${h(m.info?.hostname || '-')} ${h(m.info?.platform || '')}</span><b>Ejecutando</b><span>${m.running}</span>${m.info?.roots ? `<b>Raíces</b><span class="ellipsis">${h(m.info.roots.join(', '))}</span>` : ''}</div></div>`).join('') || `<div class="panel r">No hay máquinas. ${isAdmin() ? '<a href="#/config/maquinas">Conecta esta PC</a>' : ''}</div>`}</div>
       <h2>Agentes</h2><div class="grid2">${s.agents.filter(a => a.enabled || a.found !== false).map(card).join('')}</div>
@@ -1349,7 +1383,7 @@ const config = {
         <label class="l">Precios USD por 1M tokens (modelo = entrada / salida / caché, uno por línea)</label><textarea name="prices" rows="4">${h(Object.entries(a.prices || {}).map(([m, p]) => `${m} = ${p.join(' / ')}`).join('\n'))}</textarea>
         <label class="l">Patrones de cuota agotada (regex, uno por línea)</label><textarea name="quota_patterns" rows="3">${h(a.quota_patterns.join('\n'))}</textarea>
         <div class="row"><button class="btn y">Guardar</button><button class="btn" type="button" data-test="${a.id}">Probar</button>${a.last_test ? `<small>${a.last_test.ok ? '✔' : '✘'} ${ago(a.last_test.at)}</small>` : ''}</div></form>`).join('') +
-        `<details class="panel"><summary class="pixel" style="font-size:9px;cursor:pointer">+ Agregar agente</summary><form id="newAg"><div class="field-row"><div><label class="l">Clave</label><input name="key" required></div><div><label class="l">Nombre</label><input name="name"></div>
+        `<details class="panel"><summary class="lbl-up" style="cursor:pointer">+ Agregar agente</summary><form id="newAg"><div class="field-row"><div><label class="l">Clave</label><input name="key" required></div><div><label class="l">Nombre</label><input name="name"></div>
         <div><label class="l">Adaptador</label><select name="adapter">${opts([['claude', 'claude'], ['codex', 'codex'], ['agy', 'agy'], ['commandcode', 'commandcode'], ['fake', 'fake (pruebas)']], 'claude')}</select></div></div>
         <label class="l">Ejecutable</label><input name="exe" required><button class="btn y" style="margin-top:10px">Crear</button></form></details>`;
     } else if (tab === 'areas') {
@@ -1412,7 +1446,6 @@ const config = {
       </form>`;
     } else {
       const me = S.boot.me, prefs = me.notif_prefs || {};
-      const cur = S.theme || 'oscuro';
       body = `<form class="panel" id="meF"><div class="row">${userSprite(me, 5)}<div><h2 style="margin:0">${h(me.name)}</h2><small>${h(me.username)} · ${h(me.role)} · ${h(S.boot.users.find(u => u.id === me.id)?.rank || '')}</small></div></div>
         <label class="l">Nombre</label><input name="name" value="${h(me.name)}"><label class="l">Nueva contraseña (vacío = no cambiar)</label><input name="password" type="password" minlength="6" autocomplete="new-password">
         <h3>Avatar</h3>
@@ -1422,21 +1455,6 @@ const config = {
             ${sprite(k, '#ff8c42', 4)}
             <b>${l}</b>
           </label>`).join('')}
-        </div>
-        <h3>Tema de la interfaz</h3>
-        <div class="theme-picks">
-          <label class="theme-card ${cur === 'oscuro' ? 'on' : ''}" data-t="oscuro">
-            <span class="theme-swatch dark-swatch"></span>
-            <input type="radio" name="theme" value="oscuro" ${cur === 'oscuro' ? 'checked' : ''} style="display:none">
-            <b>Oscuro (Espacio)</b>
-            <small class="muted">Fondo estelar negro</small>
-          </label>
-          <label class="theme-card ${cur === 'blanco' ? 'on' : ''}" data-t="blanco">
-            <span class="theme-swatch light-swatch"></span>
-            <input type="radio" name="theme" value="blanco" ${cur === 'blanco' ? 'checked' : ''} style="display:none">
-            <b>Crema / Hueso (Tatooine)</b>
-            <small class="muted">Fondo cálido de tono hueso</small>
-          </label>
         </div>
         <h3>Notificaciones de escritorio</h3>${NOTIF_KINDS.map(([k, l]) => `<label class="row"><input type="checkbox" name="n_${k}" ${prefs[k] !== false ? 'checked' : ''}> ${l}</label>`).join('')}
         <p class="muted">Permiso del navegador: ${'Notification' in window ? Notification.permission : 'no soportado'}. Si no hay pestañas abiertas, la oficina usa notificaciones de Windows.</p>
@@ -1514,7 +1532,6 @@ const config = {
       }).catch(() => {});
     }
     $$('[data-ct]', el).forEach(b => b.onclick = () => go('#/config/' + b.dataset.ct));
-    $('#meTheme', el)?.addEventListener('change', e => applyTheme(e.target.value)); // vista previa; se guarda con «Guardar»
     const list = s => s.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
     el.onsubmit = async e => {
       e.preventDefault();
@@ -1572,8 +1589,7 @@ const config = {
           const r = $('input[name=theme]', c);
           if (r) r.checked = match;
         });
-        const tb = $('#themeBtn');
-        if (tb) tb.textContent = 'Tema: ' + (t === 'blanco' ? 'crema (Tatooine)' : 'oscuro (espacio)');
+        $('#themeBtn')?.setAttribute('aria-checked', t !== 'blanco');
         if (S.sound) beep('ok');
       }
       const ac = e.target.closest('.theme-card[data-av]');
@@ -1621,7 +1637,7 @@ const config = {
   },
 };
 
-export const VIEWS = { estacion, proyectos, kanban, tarea, cantina, consejo, archivos, puente, config };
+export const VIEWS = { estacion, proyectos, kanban, repos, tarea, cantina, consejo, archivos, puente, config };
 
 
 // ---------- órdenes por voz desde el dock: dictar → interpretar → confirmar → ejecutar ----------
