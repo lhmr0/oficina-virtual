@@ -45,7 +45,7 @@ Principio rector: **el mapa comunica estado de un vistazo; las decisiones se tom
 | A1 | La franja «Necesita atención» existe (`views.js:382-384`), pero se oculta en escritorio: `@media (min-width: 821px) { .attention { display: none } }` (`style.css:676`). En escritorio, lo que te toca queda repartido entre el «!» del escritorio, «1 pend.», la columna Revisión, Bandeja y el punto rojo de Ejecuciones | Quitar esa regla y mostrar la franja arriba del mapa también en escritorio | alto | S | hecha: en la barra superior, junto al logo |
 | A2 | La franja no incluye **permisos pendientes** (modo supervisado) ni ejecuciones fallidas de chats; solo toma estados de tareas y chats `esperando` (`views.js:382-383`) | Añadir los permisos con botones Aprobar/Denegar en línea, igual que en Bandeja (`app.js:324`) | alto | M | hecha |
 | A3 | Los ítems de la franja solo navegan. La Bandeja sí permite responder y aprobar sin abrir la tarea (`app.js:321-327`) | Acciones rápidas en la franja: «Responder» (abre un campo en línea) y «Aprobar» (abre `approveDialog`) | medio | M | hecha: «✔ Aprobar» en línea; responder abre la tarea con la caja ya visible (E1) |
-| A4 | Las burbujas sobre los agentes (`?` espera, `!` revisión, `…` en cola, `Zz` sin cuota; `views.js:221`) no tienen leyenda y usan pixel de 8-9 px (`style.css:327-328`) | Añadir `aria-label`/tooltip con texto («Espera tu respuesta») y una leyenda plegable en el pasillo | medio | S | parcial: texto al pasar el mouse; sin leyenda |
+| A4 | Las burbujas sobre los agentes (`?` espera, `!` revisión, `…` en cola, `Zz` sin cuota; `views.js:221`) no tienen leyenda y usan pixel de 8-9 px (`style.css:327-328`) | Añadir `aria-label`/tooltip con texto («Espera tu respuesta») y una leyenda plegable en el pasillo | medio | S | hecha: leyenda en el pasillo (escritorio) y texto al pasar el mouse |
 | A5 | Los avisos de permiso tienen `ms: 0` (`app.js:273`): se acumulan en la esquina hasta que alguien los atiende y tapan el tablero | Tope de 3 avisos visibles y el resto agrupado en «+N en Bandeja» | medio | S | hecha |
 | A6 | El contador de Bandeja suma revisiones, pero el título de la pestaña no (`app.js:303-306`). Son dos números distintos para la misma idea | Unificar: el mismo número en campana, título y favicon, o separar visualmente «preguntas» y «revisiones» | bajo | S | hecha |
 
@@ -116,12 +116,12 @@ Principio rector: **el mapa comunica estado de un vistazo; las decisiones se tom
 
 | ID | Problema (evidencia) | Propuesta | Impacto | Esf. | Estado |
 |---|---|---|---|---|---|
-| G1 | 11 tamaños de letra: 7, 8, 9, 10, 11, 12, 13, 14, 16, 17 y 20 px. En producción hay texto de 7 px (`.plaque b` en móvil, `style.css:619`) y 8-9 px (lim-badge, avatar-status, chips) | Escala de 5 tokens: `--fs-xs: 11px`, `--fs-sm: 12px`, `--fs-md: 14px`, `--fs-lg: 16px`, `--fs-xl: 20px`. Nada bajo 11 px (VT323 nunca bajo 16 px) | alto | M | parcial: mínimo 11 px aplicado; sin tokens de tamaño |
+| G1 | 11 tamaños de letra: 7, 8, 9, 10, 11, 12, 13, 14, 16, 17 y 20 px. En producción hay texto de 7 px (`.plaque b` en móvil, `style.css:619`) y 8-9 px (lim-badge, avatar-status, chips) | Escala de 5 tokens: `--fs-xs: 11px`, `--fs-sm: 12px`, `--fs-md: 14px`, `--fs-lg: 16px`, `--fs-xl: 20px`. Nada bajo 11 px (VT323 nunca bajo 16 px) | alto | M | hecha: --fs-xs/sm/md/base (11-14 px); pixel y VT323 aparte |
 | G2 | Press Start 2P en `h3` a 9 px (`style.css:80`) y en rótulos de panel a 9 px. Una fuente pixel a 9 px es ilegible | Pixel solo en `h1`, `h2`, nombres de sala y logo, a ≥10 px. `h3` y rótulos en Inter 600 | alto | S | hecha |
 | G3 | `.btn` por defecto se pinta de azul holo (`style.css:99`): cualquier botón sin clase parece importante. Hay 6 variantes (azul, y, g, r, o, ghost) sin regla de uso | Jerarquía: **primario** amarillo (1 por vista), **secundario** ghost (defecto), **éxito** verde (aprobar/fusionar), **peligro** rojo (eliminar/abortar), **advertencia** naranja con contorno (desplegar/push). El azul queda como secundario-ghost | alto | M | hecha |
-| G4 | Tres lenguajes de iconos: SVG de línea (dock, menú), sprites pixel (mapa) y emoji (🚀 🔍 📁 📅 ⛓ 🖥 📎 🔊 🎤 ⏱ ⎇ 📡) en la interfaz operativa | Pixel para el mundo (mapa), SVG de línea para acciones y controles, emoji solo en contenido (mensajes y títulos del usuario) | medio | M | pendiente |
-| G5 | 157 atributos `style="…"` en línea en `views.js` y 17 colores hex fijos (`MON`, lámparas, `#46529a`…); `color:var(--red)` se repite a mano | Clases utilitarias mínimas (`.t-red`, `.t-green`, `.t-orange`, `.mt-10`) y colores de estado como tokens (`--st-en_curso`, etc.) | medio | M | pendiente |
-| G6 | Tres paletas de estado distintas para lo mismo: `MON` del monitor (`views.js:220`), `.st-*` de chips (`style.css:120-123`) y lámparas de consola (`views.js:592`) | Una sola paleta de estado en tokens CSS, usada por los tres | bajo | S | pendiente |
+| G4 | Tres lenguajes de iconos: SVG de línea (dock, menú), sprites pixel (mapa) y emoji (🚀 🔍 📁 📅 ⛓ 🖥 📎 🔊 🎤 ⏱ ⎇ 📡) en la interfaz operativa | Pixel para el mundo (mapa), SVG de línea para acciones y controles, emoji solo en contenido (mensajes y títulos del usuario) | medio | M | hecha: iconos de línea en controles y etiquetas; quedan 🎤 del dictado (cambia de estado) y los mensajes de ambiente del mapa |
+| G5 | 157 atributos `style="…"` en línea en `views.js` y 17 colores hex fijos (`MON`, lámparas, `#46529a`…); `color:var(--red)` se repite a mano | Clases utilitarias mínimas (`.t-red`, `.t-green`, `.t-orange`, `.mt-10`) y colores de estado como tokens (`--st-en_curso`, etc.) | medio | M | parcial: colores de estado como clases (.t-red…); los márgenes sueltos quedan en línea, moverlos no cambia nada visible |
+| G6 | Tres paletas de estado distintas para lo mismo: `MON` del monitor (`views.js:220`), `.st-*` de chips (`style.css:120-123`) y lámparas de consola (`views.js:592`) | Una sola paleta de estado en tokens CSS, usada por los tres | bajo | S | hecha: los sprites leen --green/--yellow… del tema activo |
 
 ## H. Accesibilidad
 
@@ -139,14 +139,14 @@ Principio rector: **el mapa comunica estado de un vistazo; las decisiones se tom
 |---|---|---|---|---|---|
 | I1 | En móvil, Repositorios y Ejecuciones desaparecen por completo (`.station-aside { display: none !important }`, `style.css:652`). Desde el celular (el README lo presenta como uso normal vía VPS) no se puede fusionar, hacer push ni desplegar | Vista `#/repos` en el panel lateral, accesible desde el menú y la paleta Ctrl+K; en escritorio la barra lateral queda como resumen | alto | M | hecha: menú → Repositorios |
 | I2 | Placa de sala a 7 px, etiquetas de avatar y estado a 8 px (`style.css:619, 637, 646`) | Cubierto por G1 | alto | S | hecha |
-| I3 | Kanban a 82 vw por columna (`style.css:672`): 7 deslizamientos para recorrerlo, 5 de ellos a columnas vacías | C1 resuelve la mayor parte; en móvil, además, pestañas por columna con contador | medio | M | parcial: columnas vacías plegadas; sin pestañas |
+| I3 | Kanban a 82 vw por columna (`style.css:672`): 7 deslizamientos para recorrerlo, 5 de ellos a columnas vacías | C1 resuelve la mayor parte; en móvil, además, pestañas por columna con contador | medio | M | hecha: pestañas por columna + desplazamiento por columna |
 
 ## J. Rendimiento percibido
 
 | ID | Problema (evidencia) | Propuesta | Impacto | Esf. | Estado |
 |---|---|---|---|---|---|
 | J1 | Cada refresco del mapa pide 4 endpoints más repos (`views.js:277-282`, `440`) y reescribe todo con `innerHTML`: se pierden el scroll de las columnas del kanban y de la barra lateral, y el foco del teclado | Guardar y restaurar el `scrollTop` de `.kcol-body`, `.station-aside-body` y `.repo-body` (ya existe la idea en `snapshot/restore`, `app.js:241-250`); D6 para repos | alto | S | hecha |
-| J2 | `/api/tasks` trae también todas las completadas en cada refresco | Cuando C2 limite Completada a 5, pedir solo las últimas N al servidor | bajo | M | pendiente |
+| J2 | `/api/tasks` trae también todas las completadas en cada refresco | Cuando C2 limite Completada a 5, pedir solo las últimas N al servidor | bajo | M | descartada: con cientos de tareas el costo es mínimo; revisar si llegan a miles |
 
 ## K. Fallos de interfaz encontrados en la revisión
 

@@ -1,6 +1,35 @@
 // Núcleo del cliente: estado, API, helpers, widgets, modal, hologramas y sonido
 import { agentSprite, userSprite } from './sprites.js';
 
+// iconos de línea (24×24, trazo): controles y etiquetas de la interfaz. Los sprites pixel son del mapa; los emoji, del contenido
+const ICONS = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
+  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  folder: '<path d="M3 6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  council: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/>',
+  archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/>',
+  gauge: '<path d="m12 14 4-4"/><path d="M3.5 18a10 10 0 1 1 17 0"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  rocket: '<path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2M9 13l2 2M14 4c3-1 6-1 6-1s0 3-1 6l-7 7-5-5z"/><circle cx="15" cy="9" r="1.5"/>',
+  moon: '<path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/>',
+  sound: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/>',
+  mic: '<rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 17.5V21M8 21h8"/>',
+  logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l-5-5 5-5M5 12h11"/>',
+  branch: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9c0 5-7 4-11 8"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  clip: '<path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15.5 7"/>',
+  pin: '<path d="M12 17v5M8 3h8l-1 6 3 4H6l3-4z"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  note: '<path d="M5 3h10l4 4v14H5z"/><path d="M9 12h6M9 16h6"/>',
+};
+export const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
+
 export const S = { boot: null, project: +localStorage.getItem('ov_project') || null, stationFilter: localStorage.getItem('ov_station_filter') || '', unseen: 0, sound: localStorage.getItem('ov_sound') !== '0', theme: localStorage.getItem('ov_theme') || 'oscuro' };
 
 export function applyTheme(theme) {
@@ -168,7 +197,7 @@ export function folderPicker(machineId, start) {
           <div class="row"><code class="grow ellipsis">${h(x.path || 'Raíces permitidas')}</code>${x.is_git ? '<span class="chip st-completada">git</span>' : ''}</div>
           <div class="chat-list" style="max-height:50vh;margin:10px 0">
             ${x.parent ? `<button type="button" class="chat-item" data-p="${h(x.parent)}">⬆ ..</button>` : x.path ? '<button type="button" class="chat-item" data-p="">⬆ raíces</button>' : ''}
-            ${x.dirs.map(f => `<button type="button" class="chat-item" data-p="${h(f.path)}">📁 ${h(f.name)}</button>`).join('') || '<div class="empty">Sin subcarpetas</div>'}
+            ${x.dirs.map(f => `<button type="button" class="chat-item" data-p="${h(f.path)}">${ic('folder', 'sm')} ${h(f.name)}</button>`).join('') || '<div class="empty">Sin subcarpetas</div>'}
           </div>
           <div class="row"><button class="btn y" id="pkOk" ${x.path ? '' : 'disabled'}>Elegir esta carpeta</button><button class="btn ghost" id="pkNo">Cancelar</button></div>`;
         d.querySelectorAll('[data-p]').forEach(i => i.onclick = () => load(i.dataset.p));
@@ -197,7 +226,7 @@ document.addEventListener('click', async e => {
 export const bytesTxt = n => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.ceil(n / 1e3) + ' KB';
 export function attachmentsHTML(list, canDelete) {
   if (!list?.length) return '<small class="muted">Sin adjuntos</small>';
-  return `<div class="row">${list.map(a => `<div class="chip">${/^image\//.test(a.mime) ? `<img src="/api/attachments/${a.id}" alt="" style="width:40px;height:40px;object-fit:cover;image-rendering:auto">` : '📎'}
+  return `<div class="row">${list.map(a => `<div class="chip">${/^image\//.test(a.mime) ? `<img src="/api/attachments/${a.id}" alt="" style="width:40px;height:40px;object-fit:cover;image-rendering:auto">` : ic('clip', 'sm')}
     <a href="/api/attachments/${a.id}" target="_blank" rel="noopener">${h(a.name)}</a> <small>${bytesTxt(a.size)}</small>${canDelete ? `<button class="btn sm r" data-delatt="${a.id}" title="Quitar">×</button>` : ''}</div>`).join('')}</div>`;
 }
 export function confirmBox(text, okLabel = 'Confirmar', danger) {

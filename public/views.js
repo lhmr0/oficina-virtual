@@ -1,7 +1,7 @@
 // Vistas de la oficina
 import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS, PSTATUS, chip, agent, area, user, project, isAdmin, canEdit,
   agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
-  machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML, micBtn, isDictated, voicePrefs, speak, stopSpeaking, WIN_LABELS, agentLimits, agentLimitsBadge, startRecording, stopRecording, isRecording, transcribir } from './core.js';
+  machines, machineName, defaultMachine, folderPicker, ic, upload, attachmentsHTML, micBtn, isDictated, voicePrefs, speak, stopSpeaking, WIN_LABELS, agentLimits, agentLimitsBadge, startRecording, stopRecording, isRecording, transcribir } from './core.js';
 import { sprite, agentSprite, userSprite, icon, ICON_NAMES } from './sprites.js';
 import { route, refreshSoon, loadBoot, setProject, applyTheme } from './app.js';
 import { parseVoz } from './ordenes.js';
@@ -174,13 +174,20 @@ const kanbanCard = (t, showProject = true) => {
     <a class="t" href="#/tarea/${t.id}" draggable="false">${h(t.title)}</a>
     <div class="meta">${t.executor === 'humano' ? `${userSprite(user(t.assignee_user_id), 1)}${h(user(t.assignee_user_id)?.name || 'sin asignar')}` : `${agentSprite(a, 1)}${h(a?.name || '—')} <span>${h(t.model || '')}</span>`}
     ${WAIT[t.status] ? `<span class="chip ${stale ? 'st-fallida' : 'st-' + t.status}" title="${STATUS[t.status]} desde ${fmtDate(t.updated_at)}">${WAIT[t.status]} ${ago(t.updated_at).replace('hace ', '')}</span>` : ''}
-    ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">⛓${t.depends_on.length}</span>` : ''}${t.due_date ? `<span>📅${h(t.due_date)}</span>` : ''}</div>
+    ${t.depends_on.length ? `<span title="Depende de #${t.depends_on.join(', #')}">${ic('link', 'sm')}${t.depends_on.length}</span>` : ''}${t.due_date ? `<span title="Fecha límite">${ic('calendar', 'sm')}${h(t.due_date)}</span>` : ''}</div>
     ${canEdit() ? `<select class="kmove" aria-label="Mover #${t.id} a">${opts(COLS.filter(([k]) => k !== 'atascadas' && k !== t.status), '', 'Mover a…')}</select>` : ''}</div>`;
 };
 
 // columna: vacía se pliega a una tira (sigue aceptando tarjetas); Esperando y Revisión con tareas se destacan: son la cola del humano
 const kcolHTML = (k, l, n, cards) => `<div class="kcol ${n ? '' : 'empty'} ${n && ['esperando', 'revision'].includes(k) ? 'att' : ''}" data-col="${k}" ${n ? '' : `title="${l}: sin tareas"`}>
   <div class="kcol-head"><span>${l}</span><span>${n}</span></div><div class="kcol-body">${cards}</div></div>`;
+
+// en móvil las columnas miden casi toda la pantalla: una pestaña por columna salta directo a ella
+const kTabs = cols => `<nav class="kcol-tabs" aria-label="Ir a columna">${cols.map(([k, l, list]) => `<button type="button" data-kcol="${k}">${l} <b>${list.length}</b></button>`).join('')}</nav>`;
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-kcol]');
+  if (b) b.closest('.kcol-tabs').nextElementSibling?.querySelector(`.kcol[data-col="${b.dataset.kcol}"]`)?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+});
 
 // mover una tarea (arrastrar en escritorio, "Mover a…" en pantallas táctiles, donde el arrastre HTML5 no funciona)
 async function moveTask(t, status, kanban_order) {
@@ -227,7 +234,10 @@ function bindKanbanDrag(root, getTasks) {
 // Se dibuja en la capa #map, siempre visible detrás del panel lateral.
 const AT_DESK = ['en_curso', 'en_cola', 'esperando', 'revision'];
 const LIVE = ['en_curso', 'en_cola', 'esperando'];
-const MON = { en_curso: '#3ddc84', en_cola: '#b98cff', esperando: '#ffe81f', revision: '#ff8c42' };
+// una sola paleta de estado: la de CSS (--green, --yellow…) del tema activo; los sprites SVG necesitan el color resuelto
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const MON = { en_curso: '--green', en_cola: '--purple', esperando: '--yellow', revision: '--orange' };
+const monColor = st => MON[st] ? cssVar(MON[st]) : undefined;
 const BUB = { esperando: '<span class="bubble" title="Espera tu respuesta">?</span>', en_cola: '<span class="bubble z" title="En cola">…</span>', revision: '<span class="bubble o" title="Lista para tu revisión">!</span>' };
 
 // Diálogos y sonidos temáticos estilo Gather para interactuar con adornos
@@ -300,7 +310,7 @@ const estacion = {
       const who = t.executor === 'humano' ? userSprite(user(t.assignee_user_id), 3.8) : agentSprite(a, 3.8);
       return `<button class="desk ${t.status}" data-task="${t.id}" title="#${t.id} ${h(t.title)} · ${STATUS[t.status]}${a ? ' · ' + h(a.name) : ''}">
         <span class="who">${who}${BUB[t.status] || ''}</span>
-        ${sprite('desk', MON[t.status], 3.2)}
+        ${sprite('desk', monColor(t.status), 3.2)}
         ${t.status === 'en_curso' ? `<span class="desk-mug">${sprite('mug', '', 1.4)}</span>` : ''}
         <span class="lbl">${h(t.title)}</span>
       </button>`;
@@ -363,6 +373,7 @@ const estacion = {
           </button>`;
         }).join('')}
       </div>
+      <span class="hall-legend" aria-hidden="true">? espera tu respuesta · ! lista para revisión · … en cola · Zz sin cuota</span>
       <span class="avatar mouse-droid-walker deco-interactive" data-interact="mouse" tabindex="-1" role="button" title="Droide ratón MSE-6">${sprite('mousedroid', '', 2.6)}<span class="tag">MSE-6</span></span>
       <button type="button" class="hall-more-btn" id="btnMoreRooms" title="${h([...otherAreas.map(a => a.alias), 'Puente de Mando', 'Archivos Jedi'].join(', '))}">Más salas <span class="n">${otherAreas.length + 2}</span>${otherActive ? ` · ${otherActive} activas` : ''}</button>
     </div>`;
@@ -383,8 +394,8 @@ const estacion = {
       const tok = (r.tokens_in || 0) + (r.tokens_out || 0);
       return `<a class="run-item ${isRunning ? 'running' : ''}" href="${r.task_id ? `#/tarea/${r.task_id}` : `#/cantina/${r.conversation_id}`}">
         <div class="row" style="justify-content:space-between;gap:4px">
-          <span class="row" style="gap:5px;font-size:12px;font-weight:600">${agentSprite(a, 1.5)} ${h(a?.name || 'Agente')}</span>
-          <span class="run-status" ${isOk || isRunning ? '' : 'style="color:var(--red)"'}>${statusDot} ${statusText}</span>
+          <span class="row" style="gap:5px;font-size:var(--fs-sm);font-weight:600">${agentSprite(a, 1.5)} ${h(a?.name || 'Agente')}</span>
+          <span class="run-status ${isOk || isRunning ? '' : 't-red'}">${statusDot} ${statusText}</span>
         </div>
         <div class="run-desc ellipsis" title="${h(targetTitle)}">${h(targetTitle)}${r.n > 1 ? ` · ${r.n} turnos` : ''}</div>
         <div class="run-meta row" style="justify-content:space-between"><span>${h(r.model || '')}</span><span>${tok ? kTok(tok) + ' tok · ' : ''}${r.cost_usd ? '$' + r.cost_usd.toFixed(2) + ' · ' : ''}${ago(r.started_at)}</span></div>
@@ -410,6 +421,7 @@ const estacion = {
     }
 
     const kbHidden = localStorage.getItem('ov_station_kanban') === '0';
+    const cols = COLS.map(([k, l]) => [k, l, vis.filter(t => k === 'atascadas' ? STUCK.includes(t.status) : t.status === k).sort((a, b) => a.kanban_order - b.kanban_order)]);
     el.innerHTML = `<div class="station-layout">
       <div class="station-top-row">
         <div class="station-main">
@@ -421,8 +433,8 @@ const estacion = {
         </div>
         <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Repositorios y últimas ejecuciones">
           <section class="repo-box" id="repoBox" aria-label="Repositorios">
-            <div class="station-aside-head"><b class="aside-title">⎇ Repositorios</b><button type="button" class="btn sm ghost" id="repoFetch" title="Traer el estado del remoto (git fetch)">⟳</button></div>
-            <div class="repo-body" id="repoBody">${reposCache.key === (S.project || 0) && reposCache.html || '<div class="empty" style="padding:10px;font-size:11px">Cargando…</div>'}</div>
+            <div class="station-aside-head"><b class="aside-title">${ic('branch', 'sm')} Repositorios</b><button type="button" class="btn sm ghost" id="repoFetch" title="Traer el estado del remoto (git fetch)">⟳</button></div>
+            <div class="repo-body" id="repoBody">${reposCache.key === (S.project || 0) && reposCache.html || '<div class="empty" style="padding:10px;font-size:var(--fs-xs)">Cargando…</div>'}</div>
           </section>
           <div class="station-aside-head">
             <b class="aside-title"><span class="dot ok"></span> Ejecuciones</b>
@@ -433,7 +445,7 @@ const estacion = {
           </div>
           <div class="station-aside-body">${runsList.map(runItemHTML).join('') || '<div class="empty" style="padding:14px">Sin ejecuciones recientes</div>'}</div>
         </aside>
-        <button type="button" class="station-tab-btn" id="openSideBtn" ${sideHidden ? '' : 'hidden'} title="Ver repositorios y últimas ejecuciones">⎇ <span>Repos y ejecuciones</span>${runsList.some(r => !r.ended_at) ? '<span class="dot ok blink"></span>' : ''}</button>
+        <button type="button" class="station-tab-btn" id="openSideBtn" ${sideHidden ? '' : 'hidden'} title="Ver repositorios y últimas ejecuciones">${ic('branch', 'sm')} <span>Repos y ejecuciones</span>${runsList.some(r => !r.ended_at) ? '<span class="dot ok blink"></span>' : ''}</button>
       </div>
 
       <section class="station-kanban-box ${kbHidden ? 'collapsed' : ''}" id="stationKanban" aria-label="Tablero Kanban de tareas">
@@ -448,9 +460,9 @@ const estacion = {
             <button type="button" class="btn sm ghost" id="toggleKanbanBtn" aria-expanded="${!kbHidden}">${kbHidden ? '▲ Mostrar' : '▼ Ocultar'}</button>
           </div>
         </div>
+        ${kTabs(cols)}
         <div class="kanban" id="skGrid">
-          ${COLS.map(([k, l]) => {
-            const list = vis.filter(t => k === 'atascadas' ? STUCK.includes(t.status) : t.status === k).sort((a, b) => a.kanban_order - b.kanban_order);
+          ${cols.map(([k, l, list]) => {
             // completadas: solo las 5 más recientes; el resto en el tablero completo
             const cut = k === 'completada' && list.length > 5;
             const shown = cut ? [...list].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 5) : list;
@@ -507,7 +519,7 @@ async function loadRepos(el, fetch = false, lazy = false) {
   if (fetch) $('#repoBody', el).innerHTML = '<div class="empty" style="padding:10px">Consultando remoto…</div>';
   const repos = await get(`/api/repos?fetch=${fetch ? 1 : 0}${S.project ? '&project_id=' + S.project : ''}`).catch(e => [{ folder: {}, error: e.message }]);
   for (const x of repos) REPOS.set(x.folder.id, x);
-  const html = repos.map(repoHTML).join('') || `<div class="empty" style="padding:10px;font-size:11px">${S.project ? 'Este proyecto no tiene carpetas git.' : 'Ningún proyecto tiene carpetas git.'} Agrégalas en Proyecto → Carpetas.</div>`;
+  const html = repos.map(repoHTML).join('') || `<div class="empty" style="padding:10px;font-size:var(--fs-xs)">${S.project ? 'Este proyecto no tiene carpetas git.' : 'Ningún proyecto tiene carpetas git.'} Agrégalas en Proyecto → Carpetas.</div>`;
   if (key !== (S.project || 0)) return; // cambió el proyecto mientras consultaba
   reposCache = { key, at: Date.now(), html };
   const body = $('#repoBody', el); // el mapa pudo redibujarse mientras tanto
@@ -533,7 +545,7 @@ const NOISE = /^\.(ijfw|serena|claude|commandcode|omc|sisyphus|codex|oficina|vsc
 const repoName = f => `${f.project_name || ''}${f.label ? ' · ' + f.label : ''}`;
 function repoHTML(x) {
   const f = x.folder, name = repoName(f);
-  if (x.error) return `<div class="repo"><b class="ellipsis">${h(name)}</b><small style="color:var(--red)">${h(x.error)}</small></div>`;
+  if (x.error) return `<div class="repo"><b class="ellipsis">${h(name)}</b><small class="t-red">${h(x.error)}</small></div>`;
   // archivos que tocan varias ramas pendientes: se fusionan bien si git no marca choque, pero conviene revisarlos juntos
   const byFile = {};
   for (const b of x.branches) for (const p of b.files || []) (byFile[p] ||= []).push(b.task_id);
@@ -541,11 +553,11 @@ function repoHTML(x) {
     const shared = [...new Set((b.files || []).flatMap(p => byFile[p].filter(id => id !== b.task_id)))];
     const st = b.missing ? '<span class="muted">rama borrada</span>'
       : !b.ahead ? '<span class="muted">ya integrada</span>'
-      : b.conflicts.length ? `<span style="color:var(--red)" title="${h(b.conflicts.join('\n'))}">⚠ choca (${b.conflicts.length})</span>`
-      : '<span style="color:var(--green)">✔ fusionable</span>';
+      : b.conflicts.length ? `<span class="t-red" title="${h(b.conflicts.join('\n'))}">⚠ choca (${b.conflicts.length})</span>`
+      : '<span class="t-green">✔ fusionable</span>';
     return `<div class="repo-br">
       <a href="#/tarea/${b.task_id}" class="ellipsis" title="${h(b.branch)}">#${b.task_id} ${h(b.title)}</a>
-      <div class="run-meta">${STATUS[b.status] || h(b.status)} · ${b.ahead || 0} commits · ${(b.files || []).length} arch · ${st}${b.behind ? ` · ${b.behind} atrás` : ''}${shared.length ? ` · <span style="color:var(--orange)" title="Tocan los mismos archivos">↔ #${shared.join(', #')}</span>` : ''}</div>
+      <div class="run-meta">${STATUS[b.status] || h(b.status)} · ${b.ahead || 0} commits · ${(b.files || []).length} arch · ${st}${b.behind ? ` · ${b.behind} atrás` : ''}${shared.length ? ` · <span class="t-orange" title="Tocan los mismos archivos">↔ #${shared.join(', #')}</span>` : ''}</div>
       ${canEdit() && b.ahead && ['revision', 'esperando'].includes(b.status) ? `<button type="button" class="btn sm g" data-merge="${b.task_id}">Aprobar y fusionar</button>` : ''}
     </div>`;
   }).join('');
@@ -562,7 +574,7 @@ function repoHTML(x) {
     ${canEdit() ? `<div class="row" style="gap:4px">
       ${(n => n ? `<button type="button" class="btn sm g" data-mergeall="${f.id}" data-n="${n}" title="Aprueba y fusiona todas las tareas en revisión, de la más antigua a la más nueva">⇉ Fusionar listas (${n})</button>` : '')(x.branches.filter(b => b.status === 'revision').length)}
       ${x.upstream ? `<button type="button" class="btn sm" data-push="${f.id}" title="git pull --no-rebase + push de ${h(x.head)}: nunca pisa lo remoto">⇅ Push${x.ahead ? ` (${x.ahead})` : ''}</button>` : ''}
-      ${x.deploy ? `<button type="button" class="btn sm warn" data-deploy="${f.id}" data-name="${h(name)}" data-target="${h(x.deploy.target)}" title="Desplegar en ${h(x.deploy.target)}">🚀 Desplegar</button>` : '<small class="muted" title="Agrega el repo en &quot;deploy&quot; de worker.json">sin despliegue configurado</small>'}
+      ${x.deploy ? `<button type="button" class="btn sm warn" data-deploy="${f.id}" data-name="${h(name)}" data-target="${h(x.deploy.target)}" title="Desplegar en ${h(x.deploy.target)}">${ic('rocket', 'sm')} Desplegar</button>` : '<small class="muted" title="Agrega el repo en &quot;deploy&quot; de worker.json">sin despliegue configurado</small>'}
     </div>` : ''}
   </div>`;
 }
@@ -572,9 +584,9 @@ function analyzeRepo(x, reload) {
   const ST = { M: 'modificado', D: 'borrado', '??': 'nuevo', A: 'agregado', R: 'renombrado' };
   const also = file => x.branches.filter(b => b.ahead && b.files?.includes(file)).map(b => '#' + b.task_id);
   const clash = real.filter(c => also(c.file).length);
-  const d = modal(`<h2>🔍 ${h(repoName(x.folder))}</h2>
+  const d = modal(`<h2>Cambios sin commit · ${h(repoName(x.folder))}</h2>
     <p class="muted">Son cambios hechos <b>directo en la carpeta base</b> (${h(x.head)}), fuera de las ramas de las tareas: por ti, un chat de la Cantina en modo Editar o una herramienta. Mientras no tengan commit, <b>Push no se hace</b> y <b>no se despliegan</b>.</p>
-    ${clash.length ? `<p style="color:var(--orange)">⚠ ${clash.length} también los cambia una tarea pendiente. Haz commit primero: al fusionar esa tarea git combina ambos cambios (o crea una tarea para resolver el choque). Sin commit, git se niega a fusionar para no pisarlos.</p>` : ''}
+    ${clash.length ? `<p class="t-orange">⚠ ${clash.length} también los cambia una tarea pendiente. Haz commit primero: al fusionar esa tarea git combina ambos cambios (o crea una tarea para resolver el choque). Sin commit, git se niega a fusionar para no pisarlos.</p>` : ''}
     ${real.length ? `<div class="table-wrap"><table class="grid"><tr><th></th><th>Archivo</th><th>Estado</th><th>Tareas</th></tr>
       ${real.map(c => `<tr><td><input type="checkbox" name="f" value="${h(c.file)}" checked aria-label="Incluir ${h(c.file)}"></td><td><code>${h(c.file)}</code></td><td>${ST[c.st] || h(c.st)}</td><td>${also(c.file).join(', ') || '—'}</td></tr>`).join('')}</table></div>
       ${canEdit() ? `<label class="l">Mensaje del commit</label><input name="message" value="cambios directos en ${h(x.head)}">
@@ -626,7 +638,7 @@ function agentCard(a, tasks, busy) {
 }
 
 function otherRoomsModal(vis, busy, otherAreas) {
-  const lamp = a => a.status === 'sin_cuota' ? '#ff3b3b' : !a.enabled ? '#444a6e' : busy.has(a.id) ? '#3ddc84' : '#4fc3f7';
+  const lamp = a => cssVar(a.status === 'sin_cuota' ? '--red' : !a.enabled ? '--line2' : busy.has(a.id) ? '--green' : '--holo');
   const card = (attrs, c, ic, title, sub, body) => `<button type="button" class="more-room-card" ${attrs} style="--c:${c}"><div class="card-head">${icon(ic, 3)}<div><b>${h(title)}</b><br><small class="muted">${h(sub)}</small></div></div>${body}</button>`;
   const d = modal(`<h2>Más salas de la estación</h2>
     <div class="more-rooms-grid">
@@ -664,7 +676,7 @@ const proyectos = {
       <div class="row" style="margin:12px 0"><select id="pfSt" style="width:auto">${opts(Object.entries(PSTATUS), f.status, 'Todos los estados')}</select><input id="pfQ" placeholder="Buscar proyecto" value="${h(f.q)}" style="max-width:280px"></div>
       <div class="panel table-wrap"><table class="grid"><tr><th>Código</th><th>Proyecto</th><th>Tipo</th><th>Estado</th><th>Carpetas</th><th>Avance</th><th>Tareas</th><th>Agentes</th><th>Actividad</th><th></th></tr>
       ${list.map(p => `<tr class="click" data-p="${p.id}"><td><span style="color:${h(p.color)}">■</span> ${h(p.code || '-')}</td><td><b><a href="#/kanban/${p.id}">${h(p.name)}</a></b><br><small>${h(p.description).slice(0, 80)}</small></td>
-        <td>${p.kind === 'con_carpetas' ? '📁 carpetas' : '📝 registro'}</td><td>${chip(p.status === 'activo' ? 'en_curso' : p.status === 'completado' ? 'completada' : p.status === 'pausado' ? 'esperando' : 'pendiente', PSTATUS[p.status])}</td>
+        <td>${p.kind === 'con_carpetas' ? `${ic('folder', 'sm')} carpetas` : `${ic('note', 'sm')} registro`}</td><td>${chip(p.status === 'activo' ? 'en_curso' : p.status === 'completado' ? 'completada' : p.status === 'pausado' ? 'esperando' : 'pendiente', PSTATUS[p.status])}</td>
         <td>${p.folders.map(x => `<span class="chip" title="${h(x.path)}">${h(x.label)}${x.is_git ? ' (git)' : ''}</span>`).join(' ') || '<small class="muted">—</small>'}</td>
         <td>${saber(p.progress, p.color)}<small>${p.progress}% (${p.counts.completada || 0}/${p.total})</small></td>
         <td>${['en_curso', 'esperando', 'revision', 'fallida'].filter(s => p.counts[s]).map(s => chip(s, `${STATUS[s]} ${p.counts[s]}`)).join(' ') || '<small class="muted">—</small>'}</td>
@@ -686,8 +698,8 @@ function folderRow(f, i) {
     <div><label class="l">Etiqueta</label><input data-k="label" value="${h(f.label || '')}" placeholder="backend"></div>
     ${f.id ? `<div><label class="l">Máquina</label><span class="chip">${h(machineName(f.machine_id || defaultMachine()))}</span></div>` : machineSel('data-k="machine_id"', f.machine_id)}
     <div style="grid-column:span 2"><label class="l">Ruta</label><div class="row" style="flex-wrap:nowrap"><input data-k="path" value="${h(f.path || '')}" placeholder="C:\\proyectos\\mi-app" ${f.id ? 'disabled' : ''}>${f.id ? '' : '<button class="btn sm" data-browse>Examinar</button>'}</div></div></div>
-    <div class="row"><label class="row" style="font-size:13px"><input type="checkbox" data-k="use_worktrees" ${f.use_worktrees !== 0 ? 'checked' : ''}> worktree por tarea (git)</label>
-    <label class="row" style="font-size:13px"><input type="radio" name="isdef" data-k="is_default" ${f.is_default ? 'checked' : ''}> por defecto</label>
+    <div class="row"><label class="row" style="font-size:var(--fs-md)"><input type="checkbox" data-k="use_worktrees" ${f.use_worktrees !== 0 ? 'checked' : ''}> worktree por tarea (git)</label>
+    <label class="row" style="font-size:var(--fs-md)"><input type="radio" name="isdef" data-k="is_default" ${f.is_default ? 'checked' : ''}> por defecto</label>
     ${f.id ? `<span class="chip">${f.is_git ? 'git' : 'sin git'}</span>` : ''}<button class="btn sm r right" data-rmf="${i}">Quitar</button></div></div>`;
 }
 function projectForm(p = null) {
@@ -759,6 +771,7 @@ const kanban = {
     const f = S.kf ||= { area: '', agent: '', pri: '', who: '' };
     const all = await get('/api/tasks' + (pid ? '?project_id=' + pid : ''));
     const tasks = all.filter(t => (!f.area || t.area_id === +f.area) && (!f.agent || t.agent_id === +f.agent) && (!f.pri || t.priority === f.pri) && (!f.who || t.assignee_user_id === +f.who));
+    const cols = COLS.map(([k, l]) => [k, l, tasks.filter(t => k === 'atascadas' ? STUCK.includes(t.status) : t.status === k).sort((a, b) => a.kanban_order - b.kanban_order)]);
     el.innerHTML = `<div class="row"><h1 style="margin:0">Kanban</h1>
       <select id="kfProj" style="width:auto;max-width:260px" aria-label="Proyecto">${opts(S.boot.projects.map(x => [x.id, x.name]), pid || '', 'Todos los proyectos')}</select>${p ? chip('pendiente', PSTATUS[p.status]) : ''}
       <span class="right">${canEdit() ? '<button class="btn y" id="kt">+ Tarea</button><button class="btn" id="km">+ Misión</button>' : ''}<a class="btn o" href="#/consejo${pid ? '?project=' + pid : ''}">Consejo</a>${p ? '<button class="btn ghost" id="kf">Ficha</button>' : ''}</span></div>
@@ -768,10 +781,7 @@ const kanban = {
         <select id="kfP" style="width:auto">${opts([['alta', 'Alta'], ['media', 'Media'], ['baja', 'Baja']], f.pri, 'Toda prioridad')}</select>
         <select id="kfW" style="width:auto">${opts(S.boot.users.map(u => [u.id, u.name]), f.who, 'Cualquier responsable')}</select>
         <small class="muted">Arrastra a "En curso" para ejecutar con el agente asignado.</small></div>
-      <div class="kanban">${COLS.map(([k, l]) => {
-        const list = tasks.filter(t => k === 'atascadas' ? STUCK.includes(t.status) : t.status === k).sort((a, b) => a.kanban_order - b.kanban_order);
-        return kcolHTML(k, l, list.length, list.map(t => kanbanCard(t, !pid)).join(''));
-      }).join('')}</div>`;
+      ${kTabs(cols)}<div class="kanban">${cols.map(([k, l, list]) => kcolHTML(k, l, list.length, list.map(t => kanbanCard(t, !pid)).join(''))).join('')}</div>`;
     $('#kt', el)?.addEventListener('click', () => taskForm({}, { project_id: pid }));
     $('#km', el)?.addEventListener('click', missionForm);
     $('#kf', el)?.addEventListener('click', () => projectCard(pid));
@@ -818,10 +828,10 @@ document.addEventListener('click', e => {
   if (c?.dataset.run) get(`/api/runs/${c.dataset.run}/log`).then(lg => { showLog(c, lg.log, true); c.scrollTop = 0; }, fail);
 });
 function messagesHTML(msgs) {
-  return msgs.map(m => `<div class="msg ${m.role} ${m.kind === 'consulta' ? 'consulta' : ''}"><div class="who">${m.role === 'agente' ? agentChip(m.agent_id, 1) : m.role === 'usuario' ? userChip(m.user_id) : 'SISTEMA'} · ${fmtDate(m.at)}${m.kind !== 'mensaje' ? ' · ' + h(m.kind) : ''}${m.role === 'agente' && window.speechSynthesis ? '<button type="button" class="btn sm ghost" data-say title="Leer en voz alta">🔊</button>' : ''}</div><div class="body">${md(m.text)}</div></div>`).join('') || '<div class="empty">Sin mensajes</div>';
+  return msgs.map(m => `<div class="msg ${m.role} ${m.kind === 'consulta' ? 'consulta' : ''}"><div class="who">${m.role === 'agente' ? agentChip(m.agent_id, 1) : m.role === 'usuario' ? userChip(m.user_id) : 'SISTEMA'} · ${fmtDate(m.at)}${m.kind !== 'mensaje' ? ' · ' + h(m.kind) : ''}${m.role === 'agente' && window.speechSynthesis ? '<button type="button" class="btn sm ghost" data-say title="Leer en voz alta" aria-label="Leer en voz alta">' + ic('sound', 'sm') + '</button>' : ''}</div><div class="body">${md(m.text)}</div></div>`).join('') || '<div class="empty">Sin mensajes</div>';
 }
 function permsHTML(perms) {
-  return perms.map(p => `<div class="perm"><b class="lbl-up">🔐 PERMISO SOLICITADO</b><pre style="white-space:pre-wrap">${h(JSON.stringify(p.input, null, 1)).slice(0, 800)}</pre>
+  return perms.map(p => `<div class="perm"><b class="lbl-up">${ic('lock', 'sm')} Permiso solicitado</b><pre style="white-space:pre-wrap">${h(JSON.stringify(p.input, null, 1)).slice(0, 800)}</pre>
     <button class="btn sm g" data-perm="${h(p.request_id)}" data-allow="1">Aprobar</button><button class="btn sm r" data-perm="${h(p.request_id)}" data-allow="0">Denegar</button></div>`).join('');
 }
 function renderStructuredDiff(diff) {
@@ -839,7 +849,7 @@ function renderStructuredDiff(diff) {
     const dels = lines.filter(l => l.startsWith('-') && !l.startsWith('---')).length;
     const bodyHtml = lines.map(diffLine).join('\n');
     return `<details class="diff-file" ${i < 3 ? 'open' : ''}>
-      <summary><span>📁 <b>${h(fname)}</b></span> <span><small style="color:#7CFC00">+${adds}</small> <small style="color:#ff6b6b">-${dels}</small></span></summary>
+      <summary><span>${ic('note', 'sm')} <b>${h(fname)}</b></span> <span><small style="color:#7CFC00">+${adds}</small> <small style="color:#ff6b6b">-${dels}</small></span></summary>
       <pre class="diff-body">${bodyHtml}</pre>
     </details>`;
   }).join('');
@@ -894,7 +904,7 @@ const tarea = {
       ${permsHTML(x.permissions)}
       ${t.executor === 'agente' && t.status !== 'completada' ? offlineWarn(x.machine, x.machine_online) : ''}
       ${t.status === 'esperando' ? `<div class="panel y" style="margin:10px 0"><b class="lbl-up" style="color:var(--yellow)">? EL AGENTE ESPERA TU RESPUESTA</b><div>${md((([a, b = '']) => b.trim() || a)((x.messages.filter(m => m.role === 'agente').at(-1)?.text || '').split('[[CONSULTA]]')))}</div>${tab !== 'chat' ? reply() : ''}</div>` : ''}
-      ${t.status === 'pausada_cuota' ? `<div class="panel r" style="margin:10px 0"><b class="lbl-up">⛽ ${h(a?.name)} SE QUEDÓ SIN CUOTA</b><p>El avance quedó guardado (checkpoint + snapshot). Elige quién continúa.</p>${can ? '<button class="btn y" id="bHand2">Elegir relevo</button>' : ''} ${a?.quota_reset_at ? `<small>o espera a ${h(a.name)}: vuelve ${ago(a.quota_reset_at)}</small>` : ''}</div>` : ''}
+      ${t.status === 'pausada_cuota' ? `<div class="panel r" style="margin:10px 0"><b class="lbl-up">${h(a?.name)} se quedó sin cuota</b><p>El avance quedó guardado (checkpoint + snapshot). Elige quién continúa.</p>${can ? '<button class="btn y" id="bHand2">Elegir relevo</button>' : ''} ${a?.quota_reset_at ? `<small>o espera a ${h(a.name)}: vuelve ${ago(a.quota_reset_at)}</small>` : ''}</div>` : ''}
       ${t.summary ? `<div class="panel h" style="margin:10px 0"><b class="lbl-up" style="color:var(--holo)">RESUMEN DEL AGENTE</b>${md(t.summary)}</div>` : ''}
       ${t.review_comment ? `<div class="panel" style="margin:10px 0"><b class="lbl-up">COMENTARIO DE REVISIÓN</b>${md(t.review_comment)}</div>` : ''}
       <div class="panel" style="margin:10px 0"><div class="row"><b class="lbl-up">ADJUNTOS (${x.attachments.length})</b>
@@ -1022,8 +1032,8 @@ const cantina = {
     const q = S.chatQ ||= { q: '', archived: false };
     const list = await get(`/api/conversations?q=${encodeURIComponent(q.q)}${q.archived ? '&archived=1' : ''}`);
     const left = `<div class="col-flex"><button class="btn y" id="newChat">+ Nueva consulta</button><input id="chatQ" placeholder="Buscar chats" value="${h(q.q)}">
-      <label class="row" style="font-size:13px"><input type="checkbox" id="chatArch" ${q.archived ? 'checked' : ''}> ver archivados</label>
-      <div class="chat-list" data-scroll="clist">${list.map(c => `<div class="chat-item ${c.id === cid ? 'on' : ''}" data-c="${c.id}"><div class="row" style="gap:6px">${agentSprite(agent(c.agent_id), 2)}<a class="ellipsis grow" href="#/cantina/${c.id}"><b>${c.pinned ? '📌 ' : ''}${h(c.title)}</b></a>${c.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : c.status === 'en_curso' ? '<span class="chip st-en_curso">…</span>' : ''}</div><small>${h(agent(c.agent_id)?.name)} · ${c.n_runs} turnos · ${ago(c.updated_at)}</small></div>`).join('') || '<div class="empty">Sin consultas todavía</div>'}</div></div>`;
+      <label class="row" style="font-size:var(--fs-md)"><input type="checkbox" id="chatArch" ${q.archived ? 'checked' : ''}> ver archivados</label>
+      <div class="chat-list" data-scroll="clist">${list.map(c => `<div class="chat-item ${c.id === cid ? 'on' : ''}" data-c="${c.id}"><div class="row" style="gap:6px">${agentSprite(agent(c.agent_id), 2)}<a class="ellipsis grow" href="#/cantina/${c.id}"><b>${c.pinned ? ic('pin', 'sm') + ' ' : ''}${h(c.title)}</b></a>${c.status === 'esperando' ? '<span class="chip st-esperando">?</span>' : c.status === 'en_curso' ? '<span class="chip st-en_curso">…</span>' : ''}</div><small>${h(agent(c.agent_id)?.name)} · ${c.n_runs} turnos · ${ago(c.updated_at)}</small></div>`).join('') || '<div class="empty">Sin consultas todavía</div>'}</div></div>`;
     let right;
     if (!cid) {
       right = `<div class="panel y"><h2 style="margin-top:0">Nueva consulta rápida</h2><p class="muted">Pregunta lo que sea a un agente sin crear tarea. Queda en el historial y puedes convertirla en tarea o proyecto.</p>
@@ -1039,9 +1049,9 @@ const cantina = {
     } else {
       const x = await get('/api/conversations/' + cid);
       const c = x.conversation;
-      right = `<div class="panel"><div class="row"><h2 style="margin:0" class="grow ellipsis">${c.pinned ? '📌 ' : ''}${h(c.title)}</h2>${chip(c.status === 'inactiva' ? 'completada' : c.status === 'error' ? 'fallida' : c.status === 'sin_cuota' ? 'pausada_cuota' : c.status, c.status)}</div>
+      right = `<div class="panel"><div class="row"><h2 style="margin:0" class="grow ellipsis">${c.pinned ? ic('pin', 'sm') + ' ' : ''}${h(c.title)}</h2>${chip(c.status === 'inactiva' ? 'completada' : c.status === 'error' ? 'fallida' : c.status === 'sin_cuota' ? 'pausada_cuota' : c.status, c.status)}</div>
         ${offlineWarn(x.machine, x.machine_online)}
-        <div class="row" style="margin:8px 0">${agentChip(c.agent_id)}${machines().length > 1 ? `<span class="chip">🖥 ${h(x.machine || '')}</span>` : ''}<span class="chip">${h(c.model || '-')} · ${h(c.effort || '-')} · ${c.mode === 'plan' ? 'lectura' : 'edición'}</span>${c.folder_path ? `<span class="chip" title="${h(c.folder_path)}">📁 ${h(c.folder_path.split(/[\\/]/).pop())}</span>` : ''}${c.project_id ? `<span class="chip">${h(project(c.project_id)?.name || '')}</span>` : ''}${c.task_id ? `<a class="chip" href="#/tarea/${c.task_id}">→ tarea #${c.task_id}</a>` : ''}</div>
+        <div class="row" style="margin:8px 0">${agentChip(c.agent_id)}${machines().length > 1 ? `<span class="chip">${ic('monitor', 'sm')} ${h(x.machine || '')}</span>` : ''}<span class="chip">${h(c.model || '-')} · ${h(c.effort || '-')} · ${c.mode === 'plan' ? 'lectura' : 'edición'}</span>${c.folder_path ? `<span class="chip" title="${h(c.folder_path)}">${ic('folder', 'sm')} ${h(c.folder_path.split(/[\\/]/).pop())}</span>` : ''}${c.project_id ? `<span class="chip">${h(project(c.project_id)?.name || '')}</span>` : ''}${c.task_id ? `<a class="chip" href="#/tarea/${c.task_id}">→ tarea #${c.task_id}</a>` : ''}</div>
         ${canEdit() ? `<div class="row">${x.running ? '<button class="btn sm r" id="cAbort">■ Abortar</button>' : ''}<button class="btn sm" id="cSwitch">⇄ Cambiar agente</button><button class="btn sm g" id="cTask">→ Tarea</button><button class="btn sm" id="cProj">→ Proyecto</button>
           <button class="btn sm ghost" id="cRename">Renombrar</button><button class="btn sm ghost" id="cPin">${c.pinned ? 'Desfijar' : 'Fijar'}</button><button class="btn sm ghost" id="cArch">${c.archived ? 'Desarchivar' : 'Archivar'}</button>
           <a class="btn sm ghost" href="/api/conversations/${cid}/md">Exportar .md</a><button class="btn sm r" id="cDel">Eliminar</button></div>` : ''}
@@ -1049,7 +1059,7 @@ const cantina = {
         ${x.attachments.length ? `<div style="margin-top:8px">${attachmentsHTML(x.attachments, canEdit())}</div>` : ''}
         <div class="chat" data-scroll="chat" style="margin-top:10px">${messagesHTML(x.messages)}</div>
         <div class="console" id="chatLive" style="height:160px" ${x.running ? '' : 'hidden'}></div>
-        ${canEdit() ? `<form id="crF" class="col-flex" style="margin-top:10px"><textarea id="crT" rows="3" placeholder="${c.status === 'esperando' ? 'Responde la consulta…' : 'Sigue la conversación…'}"></textarea><div class="row"><button class="btn y" ${x.running ? 'disabled' : ''}>Enviar</button>${micBtn('#crT')}<label class="btn ghost">📎 Adjuntar<input type="file" id="crFiles" multiple hidden></label><small id="crFilesN" class="muted"></small></div></form>` : ''}</div>`;
+        ${canEdit() ? `<form id="crF" class="col-flex" style="margin-top:10px"><textarea id="crT" rows="3" placeholder="${c.status === 'esperando' ? 'Responde la consulta…' : 'Sigue la conversación…'}"></textarea><div class="row"><button class="btn y" ${x.running ? 'disabled' : ''}>Enviar</button>${micBtn('#crT')}<label class="btn ghost">${ic('clip', 'sm')} Adjuntar<input type="file" id="crFiles" multiple hidden></label><small id="crFilesN" class="muted"></small></div></form>` : ''}</div>`;
       setTimeout(() => { const ch = $('.chat', el); if (ch) ch.scrollTop = ch.scrollHeight; });
       if (x.running && x.runs[0]) get(`/api/runs/${x.runs[0].id}/log`).then(lg => { const lv = $('#chatLive', el); if (lv) { lv.dataset.run = x.runs[0].id; showLog(lv, lg.log); lv.scrollTop = lv.scrollHeight; } });
     }
@@ -1085,7 +1095,7 @@ const cantina = {
       try { await uploadAll([...$('#crFiles', el).files], { conversation_id: cid }); await post(`/api/conversations/${cid}/reply`, { text, voz: isDictated($('#crT')) }); $('#crT').value = ''; refreshSoon(0); } catch (err) { fail(err); }
     });
     on('#cAbort', () => act(() => post(`/api/conversations/${cid}/abort`)));
-    on('#cRename', async () => { const v = await promptBox('Renombrar', 'Título', $('h2', el).textContent.replace('📌 ', '')); if (v) await act(() => put('/api/conversations/' + cid, { title: v })); });
+    on('#cRename', async () => { const v = await promptBox('Renombrar', 'Título', $('h2', el).textContent.trim()); if (v) await act(() => put('/api/conversations/' + cid, { title: v })); });
     on('#cPin', () => act(() => put('/api/conversations/' + cid, { pinned: !$('#cPin').textContent.includes('Desfijar') ? 1 : 0 })));
     on('#cArch', () => act(() => put('/api/conversations/' + cid, { archived: $('#cArch').textContent === 'Archivar' ? 1 : 0 })));
     on('#cDel', async () => { if (await confirmBox('¿Enviar el chat a la papelera?', 'Eliminar', true)) { await act(() => del('/api/conversations/' + cid)); go('#/cantina'); } });
@@ -1097,11 +1107,11 @@ const cantina = {
     on('#cTask', () => {
       const d = modal(`<h2>Convertir en tarea</h2><div class="field-row"><div><label class="l">Proyecto</label><select name="project_id" id="ctP">${opts(S.boot.projects.map(p => [p.id, p.name]), S.project)}</select></div>
         <div><label class="l">Área</label><select name="area_id">${opts(S.boot.areas.map(a => [a.id, a.name]), '', '—')}</select></div></div>
-        <label class="l">Título</label><input name="title" value="${h($('h2', el).textContent.replace('📌 ', ''))}"><label class="l">Instrucciones adicionales</label><textarea name="prompt"></textarea>
+        <label class="l">Título</label><input name="title" value="${h($('h2', el).textContent.trim())}"><label class="l">Instrucciones adicionales</label><textarea name="prompt"></textarea>
         <p class="muted">La conversación completa se adjunta a la tarea y queda vinculada.</p><div class="row"><button class="btn y" id="ctOk">Crear tarea</button><button class="btn ghost" value="c">Cancelar</button></div>`);
       $('#ctOk', d).onclick = async e => { e.preventDefault(); const f = formData(d); if (!f.project_id) return fail('Crea un proyecto primero'); try { const r2 = await post(`/api/conversations/${cid}/to-task`, { ...f, project_id: +f.project_id, area_id: +f.area_id || null, folder_id: project(f.project_id)?.folders.find(x => x.is_default)?.id || null }); closeModal(); go('#/tarea/' + r2.id); } catch (err) { fail(err); } };
     });
-    on('#cProj', async () => { const n = await promptBox('Crear proyecto desde este chat', 'Nombre del proyecto', $('h2', el).textContent.replace('📌 ', '')); if (n) { const r2 = await act(() => post(`/api/conversations/${cid}/new-project`, { name: n }), 'Proyecto creado'); await loadBoot(); S.project = r2.id; localStorage.setItem('ov_project', r2.id); go('#/proyectos'); } });
+    on('#cProj', async () => { const n = await promptBox('Crear proyecto desde este chat', 'Nombre del proyecto', $('h2', el).textContent.trim()); if (n) { const r2 = await act(() => post(`/api/conversations/${cid}/new-project`, { name: n }), 'Proyecto creado'); await loadBoot(); S.project = r2.id; localStorage.setItem('ov_project', r2.id); go('#/proyectos'); } });
   },
 };
 
@@ -1169,7 +1179,7 @@ async function conveneDialog(pid) {
     <button class="btn sm" id="cvDig">Generar informe</button>
     <label class="l">Informe (editable antes de enviar)</label><textarea name="digest_md" id="cvMd" rows="8" placeholder="Pulsa «Generar informe»"></textarea>
     <h3>2 · Lentes: ¿qué tipo de mejora buscas?</h3>
-    <div class="grid3">${Object.entries(L).map(([k, [n, desc]]) => `<label class="row" style="font-size:13px;align-items:flex-start" title="${h(desc)}"><input type="checkbox" name="lens" value="${k}" ${['siguiente'].includes(k) ? 'checked' : ''}><span><b>${h(n)}</b><br><small>${h(desc).slice(0, 70)}</small></span></label>`).join('')}</div>
+    <div class="grid3">${Object.entries(L).map(([k, [n, desc]]) => `<label class="row" style="font-size:var(--fs-md);align-items:flex-start" title="${h(desc)}"><input type="checkbox" name="lens" value="${k}" ${['siguiente'].includes(k) ? 'checked' : ''}><span><b>${h(n)}</b><br><small>${h(desc).slice(0, 70)}</small></span></label>`).join('')}</div>
     <label class="l">Pedido libre (lente «Libre»)</label><input name="custom" placeholder="p. ej. ¿cómo reducimos los tiempos de respuesta?">
     <h3>3 · ¿Quién opina?</h3>
     ${agentsOn().map((a, i) => `<div class="row" style="margin:4px 0"><label class="row" style="min-width:170px"><input type="checkbox" name="ag" value="${a.id}" ${i === 0 ? 'checked' : ''}>${agentSprite(a, 2)} ${h(a.name)}</label>
@@ -1288,7 +1298,7 @@ const puente = {
           <b>Éxito</b><span>${a.success_rate ?? '—'}% · media ${a.avg_duration_s != null ? dur(a.avg_duration_s) : '—'} · ${a.tasks_done} tareas</span>
           <b>Cortes cuota 7d</b><span>${a.quota_cuts_7d}${a.last_quota_cut ? ' · último ' + ago(a.last_quota_cut) : ''}</span>
           ${a.last_test ? `<b>Última prueba</b><span>${a.last_test.ok ? '✔ OK' : '✘ ' + h(a.last_test.error || a.last_test.end_reason || 'falló')} · ${a.last_test.latency_ms ? dur(a.last_test.latency_ms / 1000) : ''} · ${ago(a.last_test.at)}</span>` : ''}
-          ${a.last_error ? `<b>Último error</b><span style="color:var(--red)">${h(a.last_error).slice(0, 180)}</span>` : ''}</div>
+          ${a.last_error ? `<b>Último error</b><span class="t-red">${h(a.last_error).slice(0, 180)}</span>` : ''}</div>
         <h3>Límites informados por el CLI</h3>${a.limits_cli.map(x => `<div class="limit"><span>${h(WIN_LABELS[x.win] || WINL[x.win] || x.win)}</span>${saber(x.used_value, lvl(x.used_value))}<span>${Math.round(x.used_value)}%${x.resets_at ? `<br><small>${ago(x.resets_at)}</small>` : ''}</span></div>`).join('') || '<small class="muted">No informado por el CLI (se capturan al ejecutar)</small>'}
         ${a.limits_manual.length ? `<h3>Límites manuales</h3>${a.limits_manual.map(x => `<div class="limit"><span>${h(x.win)} ${h(x.metric)}</span>${saber(x.pct, lvl(x.pct))}<span>${x.pct}%<br><small>${num(Math.round(x.used_value * 100) / 100)}/${num(x.limit_value)}</small></span></div>`).join('')}` : ''}
         <h3>Consumo medido</h3><table class="grid"><tr><th></th><th>Tokens</th><th>Costo</th><th>Runs</th></tr>${Object.entries(a.usage).map(([w, u]) => `<tr><td>${w}</td><td>${num(u.tokens)}</td><td>$${u.usd.toFixed(2)}</td><td>${u.runs}</td></tr>`).join('')}</table>
@@ -1298,7 +1308,7 @@ const puente = {
       <span class="right">${canEdit() ? '<button class="btn y" id="scan">Escanear ahora</button><button class="btn" id="ntest">Notificación de prueba</button><button class="btn ghost" id="ttest">Toast Windows</button>' : ''}
       ${isAdmin() ? (s.queue_paused ? '<button class="btn g" id="resume">Reanudar cola</button>' : '<button class="btn r" id="o66">ORDEN 66</button>') : ''}</span></div>
       ${s.queue_paused ? '<div class="panel r" style="margin:10px 0">La cola está en pausa: nada nuevo se ejecuta.</div>' : ''}
-      <h2>Máquinas</h2><div class="grid3">${s.machines.map(m => `<div class="panel ${m.online ? 'h' : 'r'}"><div class="row">${sprite('desk', m.online ? '#3ddc84' : '#ff3b3b', 3)}<div class="grow"><b class="lbl-up">${h(m.name)}</b>${m.is_default ? ' ★' : ''}<br>
+      <h2>Máquinas</h2><div class="grid3">${s.machines.map(m => `<div class="panel ${m.online ? 'h' : 'r'}"><div class="row">${sprite('desk', cssVar(m.online ? '--green' : '--red'), 3)}<div class="grow"><b class="lbl-up">${h(m.name)}</b>${m.is_default ? ' ★' : ''}<br>
         <span class="dot ${m.online ? 'ok' : 'bad'}"></span> ${m.online ? 'conectada' : 'desconectada'} · ${m.is_local ? 'este servidor' : 'agente de campo'}</div></div>
         <div class="kv" style="margin-top:6px"><b>Visto</b><span>${ago(m.last_seen)}</span><b>Equipo</b><span>${h(m.info?.hostname || '-')} ${h(m.info?.platform || '')}</span><b>Ejecutando</b><span>${m.running}</span>${m.info?.roots ? `<b>Raíces</b><span class="ellipsis">${h(m.info.roots.join(', '))}</span>` : ''}</div></div>`).join('') || `<div class="panel r">No hay máquinas. ${isAdmin() ? '<a href="#/config/maquinas">Conecta esta PC</a>' : ''}</div>`}</div>
       <h2>Agentes</h2><div class="grid2">${s.agents.filter(a => a.enabled || a.found !== false).map(card).join('')}</div>
@@ -1306,7 +1316,7 @@ const puente = {
         ${s.work.active.map(w => `<tr><td>${w.run_id}</td><td><a href="${w.task_id ? '#/tarea/' + w.task_id : '#/cantina/' + w.conv_id}">${h(w.title || '')}</a></td><td>${agentChip(w.agent_id)}</td><td>${h(w.model || '')} ${h(w.effort || '')}</td><td>${w.pid}</td><td>${h(w.mem || '-')}</td><td>${h(w.cpu_time || '-')}</td><td>${ago(w.started_at)}</td>
         <td>${canEdit() ? `<button class="btn sm r" data-abort="${w.task_id ? 't' + w.task_id : 'c' + w.conv_id}">Abortar</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">Ningún droide trabajando</td></tr>'}</table>
         <p>En cola: ${s.work.queue.map(q => h(q.title)).join(', ') || '—'} · Bloqueadas: ${s.work.blocked} · Fallidas 24h: ${s.work.failed_24h} · Permisos pendientes: ${s.work.permissions.length}</p>
-        <h3>Esperando a un humano</h3>${[...s.work.waiting.map(t => `<a href="#/tarea/${t.id}">#${t.id} ${h(t.title)}</a> ${chip(t.status)}`), ...s.work.waiting_chats.map(c => `<a href="#/cantina/${c.id}">💬 ${h(c.title)}</a>`)].join(' · ') || '<small class="muted">nada</small>'}</div>
+        <h3>Esperando a un humano</h3>${[...s.work.waiting.map(t => `<a href="#/tarea/${t.id}">#${t.id} ${h(t.title)}</a> ${chip(t.status)}`), ...s.work.waiting_chats.map(c => `<a href="#/cantina/${c.id}">${ic('chat', 'sm')} ${h(c.title)}</a>`)].join(' · ') || '<small class="muted">nada</small>'}</div>
       <h2>Carpetas y git</h2><div class="panel table-wrap"><table class="grid"><tr><th>Proyecto</th><th>Carpeta</th><th>Estado</th><th>Rama</th><th>Sin commit</th><th>Worktrees</th><th>Libre</th></tr>
         ${s.folders.map(f => `<tr><td>${h(f.project)}</td><td><b>${h(f.label)}</b><br><small>${h(f.path)}</small></td><td><span class="dot ${f.exists ? 'ok' : 'bad'}"></span> ${f.exists ? (f.is_git ? 'git' : 'sin git') : 'NO EXISTE'}</td><td>${h(f.branch || '-')}</td><td>${f.dirty ?? '-'}</td>
         <td>${f.worktrees.map(w => `<div><small>${h(w.path.split(/[\\/]/).pop())} ${w.task_id ? `<a href="#/tarea/${w.task_id}">#${w.task_id}</a>` : ''}</small>${w.orphan && canEdit() ? ` <button class="btn sm r" data-clean="${f.id}|${h(w.path)}">Limpiar</button>` : ''}</div>`).join('') || '-'}</td><td>${bytes(f.free_bytes)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">Sin carpetas asociadas</td></tr>'}</table></div>

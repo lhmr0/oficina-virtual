@@ -1,5 +1,5 @@
 // Arranque, login, shell, router, tiempo real (SSE) y bandeja de pendientes
-import { S, get, post, put, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme, canListen, speak, voicePrefs } from './core.js';
+import { S, get, post, put, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme, canListen, speak, voicePrefs, ic } from './core.js';
 import { announce } from './voz.js';
 import { userSprite } from './sprites.js';
 import { VIEWS, taskForm, missionForm, approveDialog, vozForm } from './views.js';
@@ -52,27 +52,6 @@ export function setProject(id) {
   localStorage.setItem('ov_project', S.project || '');
   const s = $('#projSel'); if (s) s.value = S.project || '';
 }
-// iconos de línea (24×24, trazo) para el dock y el menú
-const ICONS = {
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
-  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
-  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
-  bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/>',
-  folder: '<path d="M3 6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
-  council: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/>',
-  archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/>',
-  gauge: '<path d="m12 14 4-4"/><path d="M3.5 18a10 10 0 1 1 17 0"/>',
-  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
-  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
-  rocket: '<path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2M9 13l2 2M14 4c3-1 6-1 6-1s0 3-1 6l-7 7-5-5z"/><circle cx="15" cy="9" r="1.5"/>',
-  moon: '<path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/>',
-  sound: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/>',
-  mic: '<rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 17.5V21M8 21h8"/>',
-  logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l-5-5 5-5M5 12h11"/>',
-  branch: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9c0 5-7 4-11 8"/>',
-};
-const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
 const MENU = [['proyectos', 'Proyectos', 'folder'], ['kanban', 'Kanban', 'board'], ['repos', 'Repositorios', 'branch'],['cantina', 'Cantina', 'chat'], ['consejo', 'Consejo Jedi', 'council'], ['archivos', 'Archivos Jedi', 'archive'], ['puente', 'Puente de Mando', 'gauge'], ['config', 'Configuración', 'gear']];
 const WIDE = ['proyectos', 'kanban', 'consejo', 'archivos', 'puente', 'config'];
 function shell() {
@@ -141,7 +120,7 @@ function shell() {
       prefs.theme = next;
       await put('/api/me', { notif_prefs: prefs });
     } catch {}
-    if (current?.name === 'config') refreshSoon();
+    refreshSoon(); // el mapa toma los colores de estado del tema
   };
   $('#soundBtn').onclick = e => { S.sound = !S.sound; localStorage.setItem('ov_sound', S.sound ? '1' : '0'); e.currentTarget.setAttribute('aria-checked', S.sound); if (S.sound) beep('ok'); };
   $('#mMission')?.addEventListener('click', () => { toggleMenu(false); missionForm(); });
@@ -280,7 +259,7 @@ function connectSSE() {
   on('permiso', p => {
     beep('consulta');
     if (voicePrefs().read) speak(`Permiso solicitado: ${p.desc}. ¿Lo apruebas?`);
-    holo('🔐 Permiso solicitado', p.desc, { ms: 0, alert: true, link: p.task_id ? `#/tarea/${p.task_id}` : `#/cantina/${p.conv_id}`,
+    holo('Permiso solicitado', p.desc, { ms: 0, alert: true, link: p.task_id ? `#/tarea/${p.task_id}` : `#/cantina/${p.conv_id}`,
       actions: `<button class="btn sm g" data-perm="${h(p.request_id)}" data-allow="1">Aprobar</button><button class="btn sm r" data-perm="${h(p.request_id)}" data-allow="0">Denegar</button>` });
     desktop('Permiso solicitado', p.desc, p.task_id ? `#/tarea/${p.task_id}` : `#/cantina/${p.conv_id}`);
     pass('permiso', p);
@@ -333,7 +312,7 @@ function renderInbox(x) {
     ${'Notification' in window && Notification.permission !== 'granted' ? '<button class="btn sm y" id="deskN">Activar notificaciones de escritorio</button>' : ''}
     <h3>Permisos (${x.permissions.length})</h3>${x.permissions.map(p => `<div class="perm">${h(JSON.stringify(p.input).slice(0, 200))}<div class="row"><button class="btn sm g" data-perm="${h(p.request_id)}" data-allow="1">Aprobar</button><button class="btn sm r" data-perm="${h(p.request_id)}" data-allow="0">Denegar</button></div></div>`).join('') || '<div class="empty">—</div>'}
     <h3>Consultas de agentes</h3>${[...x.tasks.filter(t => t.status === 'esperando').map(t => item(`#/tarea/${t.id}`, `#${t.id} ${h(t.title)}`, `${agentChip(t.agent_id, 1)} ${ago(t.updated_at)}`, reply(`/api/tasks/${t.id}/reply`))),
-      ...x.chats.map(c => item(`#/cantina/${c.id}`, `💬 ${h(c.title)}`, `${agentChip(c.agent_id, 1)} ${ago(c.updated_at)}`, reply(`/api/conversations/${c.id}/reply`)))].join('') || '<div class="empty">Nadie pregunta nada</div>'}
+      ...x.chats.map(c => item(`#/cantina/${c.id}`, `${ic('chat', 'sm')} ${h(c.title)}`, `${agentChip(c.agent_id, 1)} ${ago(c.updated_at)}`, reply(`/api/conversations/${c.id}/reply`)))].join('') || '<div class="empty">Nadie pregunta nada</div>'}
     <h3>Revisiones</h3>${x.tasks.filter(t => t.status === 'revision').map(t => item(`#/tarea/${t.id}`, `#${t.id} ${h(t.title)}`, `${chip('revision')} ${ago(t.updated_at)}`, `<div class="row"><button class="btn sm g" data-approve="${t.id}">✔ Aprobar</button></div>`)).join('') || '<div class="empty">—</div>'}
     <h3>Relevos / fallos</h3>${x.tasks.filter(t => ['pausada_cuota', 'fallida'].includes(t.status)).map(t => item(`#/tarea/${t.id}`, `#${t.id} ${h(t.title)}`, `${chip(t.status)} ${ago(t.updated_at)}`)).join('') || '<div class="empty">—</div>'}
     <div class="row"><h3>Notificaciones</h3><button class="btn sm ghost right" id="seenAll">Marcar leídas</button></div>
