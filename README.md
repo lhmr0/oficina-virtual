@@ -15,7 +15,7 @@ Requisitos: Node 22+, git, y los CLIs de los agentes instalados y con sesión in
 
 | Sección | Para qué |
 |---|---|
-| **Estación** | Mapa de la oficina (estilo Gather): cada área es una sala con escritorios; los droides trabajan, piden ayuda con "?", esperan revisión con "!" y duermen (Zz) sin cuota. Cantina, Consejo, Puente y Archivos también son salas. Todo lo demás se abre en un panel lateral sobre el mapa; dock inferior y buscador **Ctrl+K**. |
+| **Estación** | Mapa de la oficina (estilo Gather): cada área es una sala con escritorios donde se trabajan sus tareas; en la **Sala de agentes** cada agente tiene su puesto con lo que hace, en qué tarea y su cuota ("?" espera tu respuesta, "!" lista para revisión, Zz sin cuota). Cantina, Consejo, Puente y Archivos están en «Más salas». Todo lo demás se abre en un panel lateral sobre el mapa; dock inferior y buscador **Ctrl+K**. |
 | **Proyectos** | Con carpetas locales (una o varias, git opcional) o solo de registro. Estado, avance, métricas. |
 | **Kanban** | Por proyecto o de todos los proyectos. Arrastra a "En curso" para ejecutar. |
 | **Tarea** | Agente + modelo + esfuerzo + modo, consola en vivo, chat con el agente, diff, ejecuciones, relevos, historial de cambios. |

@@ -242,14 +242,10 @@ const BUB = { esperando: '<span class="bubble" title="Espera tu respuesta">?</sp
 
 // Diálogos y sonidos temáticos estilo Gather para interactuar con adornos
 const LORE_MESSAGES = {
-  dejarik: { sound: 'dejarik', text: '♟ Dejarik: "Deja ganar al Wookiee..."' },
   gonk: { sound: 'gonk', text: '⚡ GNK: "¡Gonk... gonk... gonk!"' },
-  arcade: { sound: 'arcade', text: '🕹 TRENCH RUN 84: ¡1UP +1000 PTS!' },
   coffee: { sound: 'coffee', text: '☕ Caf negro recién servido' },
-  mouse: { sound: 'mouse', text: '🤖 MSE-6: *¡Bip bip squeak!*' },
   holotable: { sound: 'holo', text: '📐 Holoproyector: Esquema táctico activo' },
   vending: { sound: 'vending', text: '🥤 Expendedora: Leche azul bien fría' },
-  yoda: { sound: 'holo', text: '✨ Yoda: "Hacerlo o no hacerlo. No hay intentos."' },
   bookshelf: { sound: 'holo', text: '📜 Archivo: 100,000 textos Jedi catalogados' },
   pillar: { sound: 'holo', text: '🔮 Holocrón iluminado con la Fuerza' },
   whiteboard: { sound: 'notify', text: '📋 Sprint sincronizado en la pizarra' },
@@ -281,8 +277,12 @@ const ROOM_DECO = {
   doc: [['bookshelf', 'bookshelf', 'Estantería de holocrones y códices'], ['pillar', 'archive_pillar', 'Pilar de Datacrones'], ['server', 'server', 'Servidor de archivo'], ['whiteboard', 'whiteboard', 'Pizarra de documentación'], ['plant', 'bigplant', 'Planta sagrada del archivo']],
   dev: [['whiteboard', 'whiteboard', 'Pizarra de arquitectura y sprints'], ['holotable', 'holotable', 'Holoproyector de arquitectura', 'deco-holo'], ['server', 'server', 'Cluster de compilación'], ['workbench', 'workbench', 'Banco de herramientas'], ['gonk', 'gonk', 'Droide de energía GNK', 'deco-gonk'], ['crate', 'crate', 'Caja de repuestos']],
   ana: [['holotable', 'holotable', 'Holoproyector táctico de análisis', 'deco-holo'], ['console', 'console', 'Consola de radar', '', '#3ddc84'], ['server', 'server', 'Servidor de telemetría'], ['whiteboard', 'whiteboard', 'Pizarra de análisis'], ['plant', 'bigplant', 'Planta de la sala de mando']],
-  cantina: [['coffee', 'coffee', 'Estación de caf'], ['vending', 'vending', 'Expendedora de leche azul'], ['arcade', 'arcade', 'Arcade: Trench Run', 'deco-arcade'], ['dejarik', 'dejarik', 'Mesa de Dejarik', 'deco-dejarik']],
 };
+// sala de agentes: planta a la izquierda; café y expendedora a la derecha
+const ZONE_DECO = [['plant', 'bigplant', 'Planta de la oficina'], ['coffee', 'coffee', 'Estación de caf'], ['vending', 'vending', 'Expendedora de leche azul']];
+const WS_ORDER = ['esperando', 'en_curso', 'en_cola']; // lo que se muestra en el puesto: primero lo que te espera
+const WS_TXT = { esperando: 'Espera tu respuesta ·', en_curso: 'Trabajando en', en_cola: 'En cola ·' };
+const WS_MON = { esperando: '--yellow', en_curso: '--green', libre: '--holo', sleeping: '--line2' }; // color del monitor
 const ROOMS = [['doc', 'Archivo (biblioteca)'], ['dev', 'Hangar (taller)'], ['ana', 'Sala de mando (radar)']];
 const NEEDS = ['esperando', 'revision', 'fallida', 'pausada_cuota'];
 const agentState = (a, busy) => {
@@ -330,27 +330,6 @@ const estacion = {
       </section>`;
     };
     const live = chats.filter(c => LIVE.includes(c.status));
-    const recent = chats.filter(c => !LIVE.includes(c.status)).slice(0, 3);
-    const cantina = `<section class="room2 cantina2" data-go="#/cantina" style="--c:#ffe81f">
-      <div class="room-rug rug-cantina"></div>
-      ${plaque('cantina', 'Cantina', 'Consultas rápidas',`Cantina: ${live.length} consultas activas`)}
-      <div class="wall">${ROOM_DECO.cantina.map(deco).join('')}</div>
-      <div class="stools">${live.map(c => `<button class="desk ${c.status}" data-chat="${c.id}" title="${h(c.title)}"><span class="who">${agentSprite(agent(c.agent_id), 3.8)}${c.status === 'esperando' ? BUB.esperando : ''}</span><span class="lbl">${h(c.title)}</span></button>`).join('')}
-        ${live.length ? '' : recent.length ? `<div class="room-info"><small class="muted">Últimas consultas</small>${recent.map(c => `<button type="button" class="room-link" data-chat="${c.id}">${agentSprite(agent(c.agent_id), 1.5)}<span class="ellipsis">${h(c.title)}</span><small>${ago(c.updated_at)}</small></button>`).join('')}</div>` : '<span class="hint">Nadie en la barra</span>'}</div>
-      <div class="bar"></div>
-    </section>`;
-    const last = council[0];
-    const consejo = `<section class="room2 consejo2" data-go="#/consejo" style="--c:#b98cff">
-      <div class="room-rug rug-council"></div>
-      ${plaque('holocron', 'Consejo Jedi', 'Propuestas de mejora','Sala del Consejo')}
-      <div class="council-body">
-        <div class="round-table"><span class="council-yoda deco-interactive" data-interact="yoda" tabindex="-1" role="button" title="Gran Maestro Yoda">${sprite('yoda', '', 3.2)}</span></div>
-        <div class="room-info">${last
-          ? `<small class="muted">Última sesión · ${ago(last.at)}</small><b>${last.status === 'lista' ? `${last.aceptadas}/${last.propuestas} propuestas aceptadas` : last.status === 'error' ? 'Terminó con error' : 'En sesión…'}</b>`
-          : '<small class="muted">El consejo aún no se ha reunido</small><b>Convoca uno para recibir propuestas</b>'}
-          ${canEdit() && S.boot.projects.length ? `<button type="button" class="btn sm" data-go="#/consejo?project=${S.project || S.boot.projects[0].id}">Convocar</button>` : ''}</div>
-      </div>
-    </section>`;
     const me = S.boot.me;
 
     // salas fijas arriba según el tipo de sala de cada área (Configuración → Áreas); el resto va a "Más salas"
@@ -358,25 +337,39 @@ const estacion = {
     const otherAreas = S.boot.areas.filter(a => !fixedAreas.includes(a));
     const otherActive = vis.filter(t => otherAreas.some(a => a.id === t.area_id) && AT_DESK.includes(t.status)).length;
 
-    const hall = `<div class="hall" aria-label="Pasillo principal">
-      <div class="hall-runner"><span class="hall-arrows">‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹ ‹</span></div>
-      ${[12, 38, 64].map(x => `<span class="hall-lamp" style="left:${x}%">${sprite('bulkhead_lamp', '', 2)}</span>`).join('')}
-      <div class="hall-crew">
-        <span class="avatar" title="Tú">${userSprite(me, 3.8)}<span class="tag">${h(me.name.split(' ')[0])}</span><span class="avatar-status">Tú</span></span>
-        ${S.boot.agents.map(a => {
-          const st = agentState(a, busy), lim = agentLimits(a);
-          return `<button type="button" class="avatar ${st.sleeping ? 'sleeping' : busy.has(a.id) ? 'working' : ''}" data-agent="${a.id}" title="${h(a.name)} · ${st.text}">
-            ${agentSprite(a, 3.8)}${st.sleeping && a.enabled ? '<span class="bubble z" title="Sin cuota">Zz</span>' : ''}
-            <span class="tag">${h(a.name)}</span>
-            <span class="avatar-status">${st.text}</span>
-            ${lim.fiveHour || lim.weekly || lim.usage5h?.tokens ? `<span class="avatar-limits">${agentLimitsBadge(a, true)}</span>` : ''}
-          </button>`;
-        }).join('')}
+    // Sala de agentes: un puesto por agente con qué hace, en qué y cuánta cuota le queda (Cantina y Consejo pasan a «Más salas»)
+    const workstation = a => {
+      const st = agentState(a, busy), lim = agentLimits(a);
+      const mine = tasks.filter(t => t.agent_id === a.id && WS_ORDER.includes(t.status)).sort((x, y) => WS_ORDER.indexOf(x.status) - WS_ORDER.indexOf(y.status));
+      const chat = live.find(c => c.agent_id === a.id), t = mine[0];
+      const what = t ? `${WS_TXT[t.status]} #${t.id} ${t.title}` : chat ? `En la Cantina · ${chat.title}` : st.sleeping ? (a.enabled ? `Sin cuota${a.quota_reset_at ? ' · vuelve ' + ago(a.quota_reset_at) : ''}` : 'Apagado') : 'Disponible';
+      const more = mine.length + (chat && t ? 1 : 0) - 1;
+      const state = t?.status === 'esperando' || chat?.status === 'esperando' ? 'esperando' : st.sleeping ? 'sleeping' : busy.has(a.id) ? 'en_curso' : 'libre';
+      const pct = lim.fiveHour?.pct;
+      return `<button type="button" class="ws ws-${state}" data-agent="${a.id}" title="${h(a.name)} · ${h(what)}">
+        <span class="who">${agentSprite(a, 3.8)}${state === 'esperando' ? BUB.esperando : state === 'sleeping' && a.enabled ? '<span class="bubble z" title="Sin cuota">Zz</span>' : ''}</span>
+        ${sprite('desk', cssVar(WS_MON[state]), 3.2)}
+        <span class="ws-name">${h(a.name)}</span>
+        <span class="ws-what">${h(what)}${more > 0 ? ` <em>+${more}</em>` : ''}</span>
+        ${pct != null ? `<span class="ws-quota" title="Cuota 5 h: ${pct}%${lim.weekly ? ` · semanal: ${lim.weekly.pct}%` : ''}"><i style="width:${Math.min(100, pct)}%;background:var(${pct >= 90 ? '--red' : pct >= 75 ? '--yellow' : '--green'})"></i></span>`
+          : lim.usage5h?.tokens ? `<span class="ws-tok">${kTok(lim.usage5h.tokens)} tok en 5 h</span>` : ''}
+      </button>`;
+    };
+    const myPend = perms.length + vis.filter(t => NEEDS.includes(t.status)).length + chats.filter(c => c.status === 'esperando').length;
+    const zone = `<section class="agents-zone" aria-label="Sala de agentes">
+      <div class="plaque">${icon('radar', 2.5)}<b>Sala de agentes</b><small>${S.boot.agents.filter(a => busy.has(a.id)).length} de ${S.boot.agents.filter(a => a.enabled).length} trabajando</small>
+        <span class="zone-legend" aria-hidden="true">? espera tu respuesta · ! lista para revisión · … en cola · Zz sin cuota</span>
+        <button type="button" class="btn sm right" id="btnMoreRooms" title="${h([...otherAreas.map(a => a.alias), 'Cantina', 'Consejo Jedi', 'Puente de Mando', 'Archivos Jedi'].join(', '))}">Más salas <span class="n">${otherAreas.length + 4}</span>${otherActive + live.length ? ` · ${otherActive + live.length} activas` : ''}</button></div>
+      <div class="ws-row">
+        ${deco(ZONE_DECO[0])}
+        <button type="button" class="ws ws-me" id="wsMe" title="Tu puesto: abre la Bandeja">
+          <span class="who">${userSprite(me, 3.8)}</span>${sprite('desk', cssVar(myPend ? '--orange' : '--holo'), 3.2)}
+          <span class="ws-name">${h(me.name.split(' ')[0])} · tú</span><span class="ws-what">${myPend ? `${myPend} por decidir` : 'Nada pendiente'}</span>
+        </button>
+        ${S.boot.agents.filter(a => a.enabled).map(workstation).join('')}
+        ${ZONE_DECO.slice(1).map(deco).join('')}
       </div>
-      <span class="hall-legend" aria-hidden="true">? espera tu respuesta · ! lista para revisión · … en cola · Zz sin cuota</span>
-      <span class="avatar mouse-droid-walker deco-interactive" data-interact="mouse" tabindex="-1" role="button" title="Droide ratón MSE-6">${sprite('mousedroid', '', 2.6)}<span class="tag">MSE-6</span></span>
-      <button type="button" class="hall-more-btn" id="btnMoreRooms" title="${h([...otherAreas.map(a => a.alias), 'Puente de Mando', 'Archivos Jedi'].join(', '))}">Más salas <span class="n">${otherAreas.length + 2}</span>${otherActive ? ` · ${otherActive} activas` : ''}</button>
-    </div>`;
+    </section>`;
 
     // una fila por tarea o chat (su último turno y cuántos hubo); lo que está en curso primero
     const byTarget = new Map();
@@ -427,8 +420,7 @@ const estacion = {
         <div class="station-main">
           <div class="floor">
             <div class="wing wing-top">${fixedAreas.map(room).join('')}</div>
-            ${hall}
-            <div class="wing wing-bottom">${cantina}${consejo}</div>
+            ${zone}
           </div>
         </div>
         <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Repositorios y últimas ejecuciones">
@@ -494,15 +486,14 @@ const estacion = {
         $('#openSideBtn', el).hidden = show;
         return;
       }
-      if (e.target.closest('#btnMoreRooms')) return otherRoomsModal(vis, busy, otherAreas);
+      if (e.target.closest('#btnMoreRooms')) return otherRoomsModal(vis, busy, otherAreas, live, council[0]);
+      if (e.target.closest('#wsMe')) return $('#bellBtn')?.click();
       const di = e.target.closest('.deco-interactive');
       if (di) { e.stopPropagation(); return handleDecoInteract(di); }
       const ag = e.target.closest('[data-agent]'); if (ag) return agentCard(agent(ag.dataset.agent), tasks, busy);
       const kc = e.target.closest('.kcard');
       if (kc) return go('#/tarea/' + kc.dataset.id);
       const d = e.target.closest('[data-task]'); if (d) return go('#/tarea/' + d.dataset.task);
-      const c = e.target.closest('[data-chat]'); if (c) return go('#/cantina/' + c.dataset.chat);
-      const g = e.target.closest('[data-go]'); if (g) return go(g.dataset.go);
       const r = e.target.closest('[data-area]'); if (r) roomModal(+r.dataset.area, vis);
     };
     el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('.kcard')) e.target.click(); };
@@ -637,7 +628,7 @@ function agentCard(a, tasks, busy) {
   $('#acNew', d)?.addEventListener('click', e => { e.preventDefault(); closeModal(); taskForm({ agent_id: a.id }); });
 }
 
-function otherRoomsModal(vis, busy, otherAreas) {
+function otherRoomsModal(vis, busy, otherAreas, live, lastCouncil) {
   const lamp = a => cssVar(a.status === 'sin_cuota' ? '--red' : !a.enabled ? '--line2' : busy.has(a.id) ? '--green' : '--holo');
   const card = (attrs, c, ic, title, sub, body) => `<button type="button" class="more-room-card" ${attrs} style="--c:${c}"><div class="card-head">${icon(ic, 3)}<div><b>${h(title)}</b><br><small class="muted">${h(sub)}</small></div></div>${body}</button>`;
   const d = modal(`<h2>Más salas de la estación</h2>
@@ -647,6 +638,8 @@ function otherRoomsModal(vis, busy, otherAreas) {
         const pend = vis.filter(t => t.area_id === a.id && t.status === 'pendiente').length;
         return card(`data-area-modal="${a.id}"`, a.color, a.icon, a.alias, a.name, `<div class="card-meta"><b>${at}</b> en actividad · <b>${pend}</b> pendientes</div>`);
       }).join('')}
+      ${card('data-go-modal="#/cantina"', '#ffe81f', 'cantina', 'Cantina', 'Consultas rápidas', `<div class="card-meta">${live.length ? `<b>${live.length}</b> consultas activas: ${live.map(c => h(c.title)).slice(0, 2).join(', ')}` : 'Nadie en la barra'}</div>`)}
+      ${card('data-go-modal="#/consejo"', '#b98cff', 'holocron', 'Consejo Jedi', 'Propuestas de mejora', `<div class="card-meta">${lastCouncil ? `Última sesión ${ago(lastCouncil.at)} · ${lastCouncil.aceptadas}/${lastCouncil.propuestas} aceptadas` : 'Aún no se ha reunido'}</div>`)}
       ${card('data-go-modal="#/puente"', '#4fc3f7', 'radar', 'Puente de Mando', 'Estado y límites de agentes', `<div class="consoles">${S.boot.agents.map(a => `<span title="${h(a.name)}">${sprite('console', lamp(a), 2.5)}</span>`).join('')}</div>`)}
       ${card('data-go-modal="#/archivos"', '#8c97c9', 'holocron', 'Archivos Jedi', 'Historial y ejecuciones', '<div class="card-meta">Chats, tareas, ejecuciones, relevos y bitácora.</div>')}
     </div>
