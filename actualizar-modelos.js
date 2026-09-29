@@ -27,7 +27,7 @@ async function collectAgentData() {
   const ccEntry = '%APPDATA%/npm/node_modules/command-code/dist/index.mjs';
 
   const specs = [
-    { key: 'claude', name: 'Claude', adapter: 'claude', exe: 'claude', pre_args: [], fallbackModel: 'sonnet' },
+    { key: 'claude', name: 'Claude', adapter: 'claude', exe: 'claude', pre_args: [], fallbackModel: 'claude-sonnet-5-5' },
     { key: 'codex', name: 'Codex', adapter: 'codex', exe: 'codex', pre_args: [], fallbackModel: 'gpt-6-luna' },
     { key: 'antigravity', name: 'Antigravity', adapter: 'agy', exe: 'agy', pre_args: [], fallbackModel: 'gemini-3.8-flash-high' },
     { key: 'commandcode', name: 'CommandCode', adapter: 'commandcode', exe: 'node', pre_args: [ccEntry], fallbackModel: 'deepseek/deepseek-v4-flash' },

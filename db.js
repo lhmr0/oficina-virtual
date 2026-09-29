@@ -3,6 +3,7 @@ const { DatabaseSync } = require('node:sqlite');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
+const { CLAUDE_MODELS } = require('./hostops');
 
 const DATA0 = process.env.OFICINA_DATA || path.join(__dirname, 'data');
 for (const d of ['', 'runs', 'sandbox', 'backups']) fs.mkdirSync(path.join(DATA0, d), { recursive: true });
@@ -142,7 +143,7 @@ if (!one('select 1 from agents limit 1')) {
   const ccEntry = '%APPDATA%/npm/node_modules/command-code/dist/index.mjs'; // se expande en la máquina que ejecuta
   const ag = [
     { key: 'claude', name: 'Claude', adapter: 'claude', exe: 'claude', color: '#ff8c42',
-      models: ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'sonnet', default_effort: 'medium' },
+      models: CLAUDE_MODELS, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'claude-sonnet-5-5', default_effort: 'medium' },
     { key: 'codex', name: 'Codex', adapter: 'codex', exe: 'codex', color: '#3ddc84',
       models: ['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_model: 'gpt-6-luna', default_effort: 'medium' },
     { key: 'antigravity', name: 'Antigravity', adapter: 'agy', exe: 'agy', color: '#4fa3ff',
@@ -163,12 +164,12 @@ if (!one('select 1 from agents limit 1')) {
   for (const [an, title, prompt] of tpl) insert('templates', { area_id: areas.find(a => a.name === an).id, title, prompt });
 }
 // Precio API en USD por 1M tokens: [entrada, salida, entrada en caché]. Fuentes oficiales, consultadas 2026-09-24:
-// claude: platform.claude.com/docs/en/about-claude/pricing (sonnet=Sonnet 5, opus=Opus 5.5, haiku=Haiku 4.5, fable=Fable 5.1)
+// claude: platform.claude.com/docs/en/about-claude/pricing (consultado 2026-09-29)
 // codex: developers.openai.com/api/docs/pricing (contexto corto) · antigravity: ai.google.dev/gemini-api/docs/pricing (Flash: precio hasta 31/12/2026)
 // commandcode: api-docs.deepseek.com (hora pico), platform.kimi.ai, docs.z.ai, alibabacloud.com model-studio (Singapur)
 // Con suscripción (Claude Max, ChatGPT, etc.) no pagas esto: sirve como costo equivalente para comparar. Editable en Configuración → Agentes.
 const PRICES = {
-  claude: { sonnet: [2, 10, 0.2], opus: [4, 20, 0.2], haiku: [1, 5, 0.1], fable: [10, 50, 0.25] },
+  claude: { 'claude-sonnet-5-5': [2, 10, 0.2], 'claude-opus-5-5': [4, 20, 0.2], 'claude-fable-5-1': [10, 50, 0.25], 'claude-haiku-4-5': [1, 5, 0.1] },
   codex: { 'gpt-5.6-terra': [2, 12, 0.2], 'gpt-5.6-sol': [4, 20, 0.4], 'gpt-5.6-luna': [0.2, 1.2, 0.02], 'gpt-5.5': [5, 30, 0.5], 'gpt-6-luna': [0.1, 0.5, 0.01], 'gpt-6-sol': [2, 10, 0.2], 'gpt-6-astra': [5, 25, 0.5] },
   antigravity: { 'gemini-3.8-flash-high': [0.75, 3.75], 'gemini-3.8-flash-medium': [0.75, 3.75], 'gemini-3.8-flash-low': [0.75, 3.75], 'gemini-3.1-pro-high': [2, 12], 'gemini-3.1-pro-low': [2, 12],
     'claude-sonnet-4-6': [3, 15, 0.3], 'claude-opus-4-6-thinking': [5, 25, 0.5] },
@@ -192,6 +193,21 @@ if (cxInit) {
   if (pUp) update('agents', cxInit.id, { prices: JSON.stringify(curP) });
 }
 
+// Claude: los alias (sonnet, opus…) y los IDs viejos duplicaban la lista y ocultaban Sonnet 5.5 → dejar solo CLAUDE_MODELS
+// (conserva modelos agregados a mano). Las sincronizaciones solo agregan, por eso se limpia aquí en cada arranque.
+const CLAUDE_OLD = { sonnet: 'claude-sonnet-5-5', 'claude-sonnet-5': 'claude-sonnet-5-5', opus: 'claude-opus-5-5', fable: 'claude-fable-5-1', haiku: 'claude-haiku-4-5', 'claude-haiku-4-5-20251001': 'claude-haiku-4-5' };
+function migrateClaudeModels() {
+  const cl = one("select id, models, model_efforts, default_model, prices from agents where key='claude'");
+  if (!cl) return;
+  const models = [...new Set([...CLAUDE_MODELS, ...J(cl.models, []).filter(m => !CLAUDE_OLD[m])])];
+  const me = Object.fromEntries(Object.entries(J(cl.model_efforts, {})).filter(([m]) => !CLAUDE_OLD[m]));
+  const def = CLAUDE_OLD[cl.default_model] || (models.includes(cl.default_model) ? cl.default_model : 'claude-sonnet-5-5');
+  const prices = { ...PRICES.claude, ...J(cl.prices, {}) }; // alias viejos se quedan: conversaciones antiguas aún los usan
+  const next = { models: JSON.stringify(models), model_efforts: JSON.stringify(me), default_model: def, prices: JSON.stringify(prices) };
+  if (Object.keys(next).some(k => next[k] !== cl[k])) update('agents', cl.id, next);
+}
+migrateClaudeModels();
+
 // Codex y Antigravity informan el uso acumulado de la sesión en cada turno; antes se guardaba tal cual → pasar a delta por turno (una vez)
 function migrateUsageDelta() {
   const prev = {};
@@ -211,4 +227,4 @@ function migrateUsageDelta() {
 }
 if (!setting('mig_usage_delta', false)) { migrateUsageDelta(); setSetting('mig_usage_delta', true); }
 
-module.exports = { db, migrateUsageDelta, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting };
+module.exports = { db, migrateUsageDelta, migrateClaudeModels, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting };
