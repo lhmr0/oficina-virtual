@@ -103,6 +103,7 @@ export async function taskForm(t = {}, preset = {}) {
     <label class="l">Depende de (se ejecuta al completarse éstas)</label>
     <select name="depends_on" id="tfDeps" multiple size="4">${projTasks.filter(x => x.id !== t.id).map(x => `<option value="${x.id}" ${deps.includes(x.id) ? 'selected' : ''}>#${x.id} ${h(x.title)} (${STATUS[x.status]})</option>`).join('')}</select>
     <label class="l">Adjuntos (imágenes, PDF, documentos: el agente los recibe en .oficina/adjuntos)</label><input type="file" id="tfFiles" multiple>
+    ${preset.voz ? '<input type="hidden" name="voz" value="1">' : ''}
     ${t.id ? '' : '<label class="row" style="margin-top:10px"><input type="checkbox" name="run" id="tfRun"> Ejecutar al crear</label>'}
     <div class="row" style="margin-top:12px"><button class="btn y" value="ok" id="tfSave">${t.id ? 'Guardar' : 'Crear tarea'}</button><button class="btn ghost" value="cancel" formnovalidate>Cancelar</button></div>`);
   bindPicker(d, 'tf');
@@ -1504,8 +1505,6 @@ function pintarOrden(box, texto, o) {
   const head = `<div class="panel" style="margin-bottom:10px"><small class="muted">Se entendió</small><div>«${h(texto)}»</div></div>`;
   const repetir = '<button type="button" class="btn ghost" id="vzAgain">Repetir</button>';
   const agentes = opts(agentsOn().map(a => [a.id, a.name]), o.agente_id, '— por defecto —');
-  const proyectos = opts(S.boot.projects.map(p => [p.id, p.name]), o.proyecto_id, S.boot.projects.length ? null : 'Sin proyectos');
-  const areas = opts(S.boot.areas.map(a => [a.id, a.name]), o.area_id, '— por defecto —');
   if (o.accion === 'ir' && o.destino) {
     box.innerHTML = head + `<p>Ir a <b>${h(o.destinoNombre)}</b>.</p><div class="row"><button type="button" class="btn y" id="vzGo">Ir</button>${repetir}</div>`;
     $('#vzGo', box).onclick = () => { closeModal(); go(o.destino); };
@@ -1524,29 +1523,13 @@ function pintarOrden(box, texto, o) {
       try { const r = await post('/api/conversations', { agent_id, text, project_id: +$('#vzProj', box).value || null, voz: true }); closeModal(); beep('ok'); go('#/cantina/' + r.id); } catch (err) { fail(err); }
     };
   } else if (o.accion === 'tarea') {
-    box.innerHTML = head + `<div class="field-row"><div><label class="l">Proyecto</label><select id="vzProj">${proyectos}</select></div>
-      <div><label class="l">Área</label><select id="vzArea">${areas}</select></div>
-      <div><label class="l">Agente</label><select id="vzAgent">${agentes}</select></div></div>
-      <label class="l">Título</label><input id="vzTitle" value="${h(o.titulo || '')}">
-      <label class="l">Instrucciones para el agente ${micBtn('#vzPrompt')}</label><textarea id="vzPrompt" rows="3">${h(o.prompt || '')}</textarea>
-      <label class="row" style="margin-top:10px"><input type="checkbox" id="vzRun" checked> Ejecutar al crear</label>
-      <div class="row" style="margin-top:10px"><button type="button" class="btn y" id="vzDo">Crear tarea</button>${repetir}</div>`;
-    $('#vzDo', box).onclick = async () => {
-      const title = $('#vzTitle', box).value.trim(), project_id = +$('#vzProj', box).value, agent_id = +$('#vzAgent', box).value || null;
-      if (!title) return fail('Falta el título');
-      if (!project_id) return fail('Elige un proyecto');
-      const folder_id = project(project_id)?.folders.find(f => f.is_default)?.id || null;
-      try {
-        const r = await post('/api/tasks', { project_id, area_id: +$('#vzArea', box).value || null, agent_id, folder_id,
-          title, prompt: $('#vzPrompt', box).value.trim(), voz: true, priority: 'media' });
-        if ($('#vzRun', box).checked && agent_id) await post(`/api/tasks/${r.id}/run`, {});
-        closeModal(); beep('ok'); holo('Tarea creada', `#${r.id} ${title}`, { link: `#/tarea/${r.id}` }); refreshSoon(0);
-      } catch (err) { fail(err); }
-    };
+    // reutiliza el formulario real de "Nueva tarea" (todos los campos) prellenado con lo dictado
+    closeModal();
+    taskForm({ title: o.titulo, prompt: o.descripcion || o.prompt, project_id: o.proyecto_id || S.project || S.boot.projects[0]?.id || null, area_id: o.area_id || null, agent_id: o.agente_id || null }, { voz: true });
   } else {
     box.innerHTML = head + `<p class="muted">No reconocí una orden de la oficina. Elige qué hacer con lo dictado:</p>
       <div class="row"><button type="button" class="btn y" id="vzDo">Crear tarea</button><button type="button" class="btn" id="vzChat">Enviar a la Cantina</button>${repetir}</div>`;
-    $('#vzDo', box).onclick = () => { closeModal(); taskForm({ title: texto.slice(0, 90), prompt: texto }); };
+    $('#vzDo', box).onclick = () => { closeModal(); taskForm({ title: texto.slice(0, 90), prompt: texto }, { voz: true }); };
     $('#vzChat', box).onclick = () => pintarOrden(box, texto, { accion: 'chat', agente_id: null, area_id: null, proyecto_id: null, texto });
   }
   $('#vzAgain', box)?.addEventListener('click', () => { box.innerHTML = ''; });

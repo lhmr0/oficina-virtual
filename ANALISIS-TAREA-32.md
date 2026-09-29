@@ -112,3 +112,17 @@ voz», «crea una tarea en el proyecto X titulada Y para el agente Z») se resue
 **orden larga y libre** como este dictado real deja un título que hay que editar a mano. Ese es
 justamente el caso donde un LLM local (o mandar el texto a un agente) aportaría valor. La tarjeta de
 confirmación evita que una interpretación errónea se ejecute sola.
+## Segunda captura: campos del formulario y reparto título/descripción
+
+Observado: al crear una tarea por voz, la tarjeta mostraba solo proyecto/área/agente/título/
+instrucciones y «Ejecutar al crear», sin el resto de campos del formulario real (plantilla, carpeta,
+prioridad, fecha límite, ejecutor, dependencias, adjuntos, modo, modelo/esfuerzo); y el título
+absorbía parte de la descripción.
+
+Corregido:
+- La orden de tarea ya no usa una tarjeta propia: abre el **formulario real «Nueva tarea»**
+  (`taskForm`) con proyecto, área, agente, título e instrucciones prellenados y la marca de voz. Así
+  aparecen todos los campos y la experiencia es la de siempre.
+- El intérprete separa título y descripción: reconoce «con el título … / la descripción sea …» y, si no
+  hay marcadores, usa la primera frase como título (acotado a 90 caracteres) y el resto como
+  descripción (antes tropezaba con decimales tipo «5.5»).
