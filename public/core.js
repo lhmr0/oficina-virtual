@@ -215,6 +215,46 @@ export function promptBox(title, label, value = '', multiline) {
 }
 export const formData = el => Object.fromEntries([...el.querySelectorAll('[name]')].map(i => [i.name, i.type === 'checkbox' ? i.checked : i.value]));
 
+// ---------- voz: 🎤 dicta en un textarea (Whisper en el servidor interno) y 🔊 lee en voz alta (voz del navegador) ----------
+// micBtn('#id') junto al textarea; al enviar, voz: isDictated(ta) avisa al agente que el texto viene de un dictado
+export const micBtn = sel => S.boot?.ia && navigator.mediaDevices?.getUserMedia && window.MediaRecorder ? `<button type="button" class="btn ghost" data-mic="${sel}" title="Dictar por voz (pulsa otra vez para terminar)">🎤</button>` : '';
+export const isDictated = ta => { const v = ta?.dataset.voz === '1'; if (ta) delete ta.dataset.voz; return v; };
+let recording = null;
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-mic]'); if (!b) return;
+  e.preventDefault();
+  if (recording) return recording.stop(); // segundo clic: termina y transcribe
+  const sel = b.dataset.mic; if (!document.querySelector(sel)) return;
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { return fail('No se pudo usar el micrófono: revisa el permiso del navegador'); }
+  const chunks = [], rec = new MediaRecorder(stream);
+  rec.ondataavailable = ev => ev.data.size && chunks.push(ev.data);
+  rec.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop()); recording = null;
+    // la vista pudo re-renderizarse mientras hablabas: se buscan de nuevo el botón y el textarea
+    const btn = () => document.querySelector(`[data-mic="${sel}"]`) || b;
+    Object.assign(btn(), { textContent: '⏳', disabled: true }); btn().classList.remove('r');
+    try {
+      const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+      const r = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
+      const j = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(j?.error || `Error ${r.status}`);
+      const ta = document.querySelector(sel);
+      if (j.text && ta) { ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + j.text; ta.dataset.voz = '1'; ta.focus(); }
+      else if (!j.text) holo('No se entendió el audio', 'Intenta hablar más cerca del micrófono.');
+    } catch (err) { fail(err); } finally { Object.assign(btn(), { textContent: '🎤', disabled: false }); }
+  };
+  rec.start(); recording = rec;
+  b.textContent = '⏹'; b.classList.add('r');
+});
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-say]'); if (!b || !window.speechSynthesis) return;
+  if (speechSynthesis.speaking) return speechSynthesis.cancel();
+  const txt = b.closest('.msg')?.querySelector('.body')?.innerText.replace(/\[\[\w+\]\]/g, '') || '';
+  const u = new SpeechSynthesisUtterance(txt); u.lang = 'es-ES';
+  speechSynthesis.speak(u);
+});
+
 // ---------- hologramas (toasts) ----------
 export function holo(title, body = '', { link, err, ms = 7000, actions } = {}) {
   const el = document.createElement('div');

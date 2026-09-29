@@ -222,6 +222,7 @@ r('GET', '/api/bootstrap', 'observador', ({ user }) => ({
   queue_paused: R.isPaused(),
   machines: host.machineList(),
   auth_mode: AUTH,
+  ia: !!R.iaCfg(),
   settings: { council_auto_n: setting('council_auto_n', 0), council_auto_agents: setting('council_auto_agents', []), divert_at_80: setting('divert_at_80', false), scan_min: setting('scan_min', 5), checkpoint_exclude: setting('checkpoint_exclude', R.DEFAULT_EXCLUDE) },
 }));
 
@@ -387,7 +388,7 @@ r('POST', '/api/tasks/:id/reply', 'operador', ({ params, body, user }) => {
   need(body.text?.trim(), 'Escribe una respuesta');
   const t = one('select * from tasks where id=?', +params.id);
   if (t.executor === 'humano' || !t.conversation_id) return noteTask(t, body.text, user);
-  bg(R.runTask(t.id, user.id, { text: body.text }), t.id);
+  bg(R.runTask(t.id, user.id, { text: body.text, voz: !!body.voz }), t.id);
   return { ok: true };
 });
 function noteTask(t, text, user) {
@@ -445,6 +446,7 @@ r('POST', '/api/missions', 'operador', ({ body, user }) => {
 });
 
 // ---------- conversaciones (Cantina) ----------
+const dictated = b => b.voz ? `${b.text}\n\n${R.VOZ}` : b.text; // al agente le avisa que el texto viene de un dictado; el mensaje guardado queda limpio
 function chatPrompt(c, text) {
   if (c.session_id) return text;
   const p = c.project_id ? one('select * from projects where id=?', c.project_id) : null;
@@ -467,7 +469,7 @@ r('POST', '/api/conversations', 'operador', async ({ body, user }) => {
     folder_path: chk?.path || null, machine_id: chk?.mid || (+body.machine_id || null), created_by: user.id, created_at: now(), updated_at: now() });
   for (const aid of body.attachment_ids || []) run('update attachments set conversation_id=? where id=? and conversation_id is null and task_id is null', id, +aid);
   log(user.id, 'chat', id, 'crear', { agente: ag.key });
-  R.runTurn(id, body.text, { userId: user.id, prompt: chatPrompt(one('select * from conversations where id=?', id), body.text) }).catch(() => {});
+  R.runTurn(id, body.text, { userId: user.id, prompt: chatPrompt(one('select * from conversations where id=?', id), dictated(body)) }).catch(() => {});
   return { id };
 });
 r('GET', '/api/conversations/:id', 'observador', ({ params }) => {
@@ -480,8 +482,8 @@ r('GET', '/api/conversations/:id', 'observador', ({ params }) => {
 r('POST', '/api/conversations/:id/reply', 'operador', ({ params, body, user }) => {
   need(body.text?.trim(), 'Escribe un mensaje');
   const c = one('select * from conversations where id=?', +params.id);
-  if (c.task_id && c.kind === 'tarea') { bg(R.runTask(c.task_id, user.id, { text: body.text }), c.task_id); return { ok: true }; }
-  R.runTurn(c.id, body.text, { userId: user.id, prompt: chatPrompt(c, body.text) }).catch(() => {});
+  if (c.task_id && c.kind === 'tarea') { bg(R.runTask(c.task_id, user.id, { text: body.text, voz: !!body.voz }), c.task_id); return { ok: true }; }
+  R.runTurn(c.id, body.text, { userId: user.id, prompt: chatPrompt(c, dictated(body)) }).catch(() => {});
   return { ok: true };
 });
 const transcript = cid => all('select role, text from messages where conversation_id=? order by id', cid).map(m => `**${m.role}:** ${m.text}`).join('\n\n');
@@ -529,6 +531,16 @@ r('GET', '/api/conversations/:id/md', 'observador', ({ params, res }) => {
   return RAW;
 });
 r('POST', '/api/permissions/:rid', 'operador', async ({ params, body, user }) => { await R.answerPermission(params.rid, !!body.allow, user.id); return { ok: true }; });
+
+// ---------- dictado por voz: el audio va al servicio de IA (Whisper) del servidor interno a través de una PC conectada ----------
+r('POST', '/api/transcribe', 'operador', async ({ req, body }) => {
+  need(R.iaCfg(), 'El dictado por voz no está configurado (OFICINA_IA_URL)');
+  need(body.length, 'Audio vacío');
+  need(body.length <= 8e6, 'Audio demasiado largo (máx. ~10 min)');
+  const mid = [host.defaultMachine(), ...host.machines().map(m => m.id)].find(id => id && host.online(id));
+  need(mid, 'No hay ninguna máquina conectada para transcribir');
+  return { text: await host.call(mid, 'transcribe', { ia: R.iaCfg(), audio: body.toString('base64'), mime: req.headers['content-type'] }) };
+}, { raw: true });
 
 // ---------- adjuntos (se entregan en .oficina/adjuntos de la carpeta de trabajo antes del turno) ----------
 const INLINE = /^(image\/(png|jpeg|gif|webp)|application\/pdf)$/;

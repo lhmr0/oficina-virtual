@@ -1,0 +1,23 @@
+# Servicio de IA de la Oficina Virtual en el servidor interno (172.17.128.91), junto a sij_ws: con tope de CPU/RAM.
+# Instalar/actualizar: copiar esta carpeta a ~/oficina-ia y   cd ~/oficina-ia && docker compose up -d --build
+# Clave: ~/oficina-ia/secrets/api_key. En la oficina: OFICINA_IA_URL=http://<servidor>:8010 y OFICINA_IA_KEY=<la clave>.
+name: oficina-ia
+services:
+  ia:
+    build: .
+    image: oficina-ia:1
+    container_name: oficina-ia
+    ports: ["0.0.0.0:8010:8010"]
+    environment:
+      IA_API_KEY_FILE: /run/secrets/api_key
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3-turbo}  # "small" es 3× más rápido y algo menos preciso
+      IA_THREADS: "4"
+      OMP_NUM_THREADS: "4"
+    volumes:
+      - ia-cache:/cache
+      - ./secrets/api_key:/run/secrets/api_key:ro
+    cpus: 4
+    mem_limit: 6g
+    restart: unless-stopped
+volumes:
+  ia-cache:

@@ -1,0 +1,111 @@
+# Servicio de IA local para la Oficina Virtual (corre en el servidor interno, no en el VPS):
+#   POST /transcribe            audio (webm/ogg/wav/mp3…) → {"text"}            Whisper (faster-whisper, CPU)
+#   POST /convert?name=x.pdf    PDF/DOCX/XLSX/PPTX/HTML → {"md", "pages", "ocr"}   (PDF escaneado → OCR en español)
+#   GET  /health
+# Laya (detector de inyección) se probó y se descartó: marcaba como sospechoso casi todo documento formal (tarea #29).
+# Todo exige Authorization: Bearer <clave> (IA_API_KEY_FILE). La oficina lo llama desde la PC (agente de campo).
+import hashlib, io, json, os, pathlib, threading, time
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
+
+KEY = pathlib.Path(os.environ["IA_API_KEY_FILE"]).read_text().strip()
+CACHE = pathlib.Path(os.environ.get("IA_CACHE", "/cache")); CACHE.mkdir(parents=True, exist_ok=True)
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
+# vocabulario de la oficina: Whisper acierta mejor nombres propios y jerga si se los "sugiere"
+WHISPER_PROMPT = os.environ.get("WHISPER_PROMPT", "Oficina Virtual: tarea, proyecto, Cantina, Consejo Jedi, Puente de Mando, Kanban, "
+                                "Claude, Codex, Antigravity, CommandCode, agente, desplegar, VPS, worktree, commit, push, sij_ws, Laya.")
+THREADS = int(os.environ.get("IA_THREADS", "4"))
+
+app = FastAPI()
+_whisper, _wlock, _plock = None, threading.Lock(), threading.Lock()
+
+
+def auth(req: Request):
+    if req.headers.get("authorization") != "Bearer " + KEY:
+        raise HTTPException(401, "clave inválida")
+
+
+def whisper():
+    global _whisper
+    if _whisper is None:
+        from faster_whisper import WhisperModel
+        _whisper = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8", cpu_threads=THREADS)
+    return _whisper
+
+
+@app.on_event("startup")
+def warm():
+    threading.Thread(target=whisper, daemon=True).start()  # descarga/carga el modelo sin bloquear /health
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "whisper": WHISPER_MODEL, "whisper_loaded": _whisper is not None}
+
+
+@app.post("/transcribe")
+async def transcribe(req: Request):
+    auth(req)
+    audio = await req.body()
+    if not audio:
+        raise HTTPException(400, "audio vacío")
+    t0 = time.time()
+    with _wlock:  # ponytail: una transcripción a la vez (CPU); cola si hay muchos usuarios a la vez
+        segs, info = whisper().transcribe(io.BytesIO(audio), language="es", initial_prompt=WHISPER_PROMPT, vad_filter=True, beam_size=5)
+        text = " ".join(s.text.strip() for s in segs).strip()
+    return {"text": text, "seconds": round(info.duration, 1), "ms": int((time.time() - t0) * 1000)}
+
+
+OFFICE = {".docx", ".xlsx", ".xls", ".pptx", ".html", ".htm"}
+
+
+def to_markdown(name, data):
+    ext = pathlib.Path(name).suffix.lower()
+    if ext in OFFICE:
+        from markitdown import MarkItDown
+        return MarkItDown().convert_stream(io.BytesIO(data), file_extension=ext).text_content, None, False
+    if ext != ".pdf":
+        raise HTTPException(415, "formato no soportado: " + ext)
+    import pymupdf, pymupdf4llm
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    md = pymupdf4llm.to_markdown(doc, show_progress=False)
+    if len(md.strip()) >= 80 * doc.page_count:
+        return md, doc.page_count, False
+    # casi sin texto: PDF escaneado → OCR en español (Tesseract)
+    pages = [p.get_text(textpage=p.get_textpage_ocr(language="spa+eng", dpi=200, full=True)) for p in doc]
+    return "\n\n".join(f"<!-- página {i + 1} -->\n{t.strip()}" for i, t in enumerate(pages)), doc.page_count, True
+
+
+@app.post("/convert")
+async def convert(req: Request, name: str = "archivo"):
+    auth(req)
+    data = await req.body()
+    key = hashlib.sha256(data).hexdigest()
+    cached = CACHE / (key + ".json")
+
+    def job(res):
+        t0 = time.time()
+        try:
+            with _plock:
+                md, pages, ocr = to_markdown(name, data)
+            out = json.dumps({"md": md, "pages": pages, "ocr": ocr, "ms": int((time.time() - t0) * 1000)}).encode()
+            cached.write_bytes(out)
+            res.append(out)
+        except HTTPException as e:
+            res.append(json.dumps({"error": e.detail}).encode())
+        except Exception as e:
+            res.append(json.dumps({"error": f"no se pudo convertir: {str(e)[:200]}"}).encode())
+
+    def work():
+        # ponytail: espacios mientras trabaja (el JSON sigue siendo válido): fetch de Node corta si pasan 5 min
+        # sin cabeceras o sin datos, y un PDF grande escaneado puede tardar más
+        if cached.exists():
+            yield cached.read_bytes(); return
+        res = []
+        t = threading.Thread(target=job, args=(res,), daemon=True); t.start()
+        while t.is_alive():
+            yield b" "
+            t.join(20)
+        yield res[0]
+
+    return StreamingResponse(work(), media_type="application/json")

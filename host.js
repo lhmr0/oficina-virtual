@@ -48,7 +48,7 @@ async function call(mid, op, args = {}) {
     if (op === 'putFiles') return local.ops.putFiles(args, f => fs.readFileSync(attachmentFile(f.id)));
     return local.ops[op](args);
   }
-  return rpc(mid, op, args, op === 'detectModels' || op === 'merge' ? 180000 : 120000);
+  return rpc(mid, op, args, op === 'convertDocs' ? 1800000 : op === 'detectModels' || op === 'merge' ? 180000 : 120000);
 }
 
 // Lanza un proceso de agente; los eventos llegan a onEvent (local directo o remoto vía /api/worker/events)

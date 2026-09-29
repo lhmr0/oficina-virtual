@@ -103,6 +103,13 @@ Para mantener actualizados automáticamente los 4 CLIs (`claude`, `codex`, `agy`
   ```
 - El registro de cada ejecución queda guardado en `actualizar.log`.
 
+### 6. Servicio de IA local (opcional): dictado por voz y adjuntos → texto
+Contenedor `oficina-ia` en un servidor de la red interna (`deploy/ia/`, sin GPU):
+- **🎤 Dictado** en la Cantina, las respuestas y la tarea nueva (Whisper `large-v3-turbo`, español, ~0,4 s por segundo de audio). Al agente se le avisa que el texto viene de un dictado. **🔊** lee en voz alta las respuestas de los agentes (voz del navegador).
+- **Adjuntos PDF/Office → `<adjunto>.md`** (tablas incluidas; OCR en español para los escaneados), que el agente lee en vez del original.
+
+Instalar: copiar `deploy/ia` al servidor como `~/oficina-ia`, crear `secrets/api_key` y ejecutar `docker compose up -d --build`. En la oficina: `OFICINA_IA_URL=http://<servidor>:8010` y `OFICINA_IA_KEY=<clave>`. Las llamadas salen desde el agente de campo (la PC ve la red interna y el VPS no). Sin estas variables, la función queda apagada. Si el servicio cae, todo sigue como antes.
+
 ## Datos
 
 Todo vive en `data/` (SQLite `oficina.db`, logs de ejecución, sandbox, respaldos diarios). Variables: `OFICINA_PORT` (4242), `OFICINA_DATA`, `OFICINA_BIND`, `OFICINA_LOCAL_EXEC` (0 = no ejecutar agentes en el servidor), `OFICINA_AUTH` (password|google), `OFICINA_PUBLIC_URL`, `OFICINA_ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OFICINA_NO_TOAST`, `OFICINA_CANTINA`.

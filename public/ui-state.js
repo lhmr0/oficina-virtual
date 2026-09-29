@@ -28,7 +28,7 @@ export function captureInputState(controls, activeElement) {
   for (const { control, key } of controlsWithKeys(controls)) {
     if (control.type === 'button' || !key || !('value' in control)) continue;
     if (control.type === 'file') { if (control.files?.length) values[key] = { files: control.files }; continue; } // value de un file no se puede restaurar
-    values[key] = { value: readValue(control), ...selection(control) };
+    values[key] = { value: readValue(control), ...selection(control), ...(control.dataset?.voz ? { voz: control.dataset.voz } : {}) };
     if (control === activeElement) focusKey = key;
   }
   return { values, focusKey };
@@ -44,6 +44,7 @@ export function restoreInputState(root, state) {
     if (control.type === 'file') { if (saved.files) { control.files = saved.files; control.dispatchEvent(new Event('change', { bubbles: true })); } continue; }
     if (control.type === 'checkbox' || control.type === 'radio') control.checked = saved.value;
     else if (control.tagName !== 'SELECT' || Array.from(control.options || []).some(option => option.value === saved.value)) control.value = saved.value;
+    if (saved.voz) control.dataset.voz = saved.voz; // texto dictado por voz: se avisa al agente al enviar
     if (saved.selectionStart !== undefined && typeof control.setSelectionRange === 'function') {
       try { control.setSelectionRange(saved.selectionStart, saved.selectionEnd, saved.selectionDirection); } catch {}
     }
