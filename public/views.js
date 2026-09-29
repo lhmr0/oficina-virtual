@@ -511,11 +511,11 @@ function repoHTML(x) {
   const sync = x.upstream ? `↑${x.ahead} ↓${x.behind}` : 'sin remoto';
   return `<div class="repo" style="border-left:3px solid ${h(f.color || 'var(--line)')}">
     <div class="row" style="justify-content:space-between;gap:4px"><b class="ellipsis" title="${h(f.path)}">${h(name)}</b><code title="${h(x.log.join('\n'))}">${h(x.head)}</code></div>
-    <div class="run-meta">${sync}${x.dirty ? ` · <span style="color:var(--orange)">${x.dirty} sin commit</span>` : ''} · ${x.branches.filter(b => b.ahead).length} ramas pendientes</div>
+    <div class="run-meta">${sync}${x.dirty ? ` · <span style="color:var(--orange)">${x.dirty} sin commit</span>` : ''} · ${x.branches.filter(b => b.ahead).length} ramas pendientes${x.deploy ? ` · despliega en <b>${h(x.deploy.target)}</b>` : ''}</div>
     ${br}
     ${canEdit() ? `<div class="row" style="gap:4px">
       ${x.upstream ? `<button type="button" class="btn sm" data-push="${f.id}" title="git pull --no-rebase + push de ${h(x.head)}: nunca pisa lo remoto">⇅ Push${x.ahead ? ` (${x.ahead})` : ''}</button>` : ''}
-      ${x.deploy ? `<button type="button" class="btn sm y" data-deploy="${f.id}" data-name="${h(name)}" data-target="${h(x.deploy.target)}" title="${h(x.deploy.cmd)}">🚀 Desplegar → ${h(x.deploy.target)}</button>` : '<small class="muted" title="Agrega el repo en &quot;deploy&quot; de worker.json">sin despliegue configurado</small>'}
+      ${x.deploy ? `<button type="button" class="btn sm y" data-deploy="${f.id}" data-name="${h(name)}" data-target="${h(x.deploy.target)}" title="Desplegar en ${h(x.deploy.target)}" aria-label="Desplegar en ${h(x.deploy.target)}">🚀</button>` : '<small class="muted" title="Agrega el repo en &quot;deploy&quot; de worker.json">sin despliegue configurado</small>'}
     </div>` : ''}
   </div>`;
 }
