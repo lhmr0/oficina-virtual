@@ -261,27 +261,36 @@ document.addEventListener('click', async e => {
 export const voicePrefs = () => ({ voice: localStorage.getItem('ov_voice') || (S.boot?.ia ? 'ia:piper-claude' : ''),
   speed: +localStorage.getItem('ov_voice_speed') || 1, read: localStorage.getItem('ov_read_notif') === '1' });
 let audio = null;
-export function stopSpeaking() { if (audio) { audio.pause(); audio = null; } window.speechSynthesis?.cancel(); }
+let speechRequest = null, speechSeq = 0;
+export function stopSpeaking() { speechSeq++; speechRequest?.abort(); speechRequest = null; if (audio) { audio.pause(); audio = null; } window.speechSynthesis?.cancel(); }
 export const isSpeaking = () => !!audio || !!window.speechSynthesis?.speaking;
 export async function speak(text, prefs = voicePrefs()) {
   stopSpeaking();
+  const seq = speechSeq;
   text = String(text || '').replace(/\[\[\w+\]\]|[*_`#>]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!text) return;
   if (prefs.voice.startsWith('ia:') && S.boot?.ia) {
     try {
-      const r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text.slice(0, 1500), voice: prefs.voice.slice(3), speed: prefs.speed }) });
+      const controller = speechRequest = new AbortController();
+      const r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal, body: JSON.stringify({ text: text.slice(0, 1500), voice: prefs.voice.slice(3), speed: prefs.speed }) });
       if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Error ${r.status}`);
-      const a = audio = new Audio(URL.createObjectURL(await r.blob()));
+      const blob = await r.blob();
+      if (seq !== speechSeq) return;
+      speechRequest = null;
+      const a = audio = new Audio(URL.createObjectURL(blob));
       const ended = new Promise(res => { a.onended = a.onpause = res; });
       await a.play();
       await ended;
       URL.revokeObjectURL(a.src); if (audio === a) audio = null;
       return;
     } catch (err) {
+      if (seq !== speechSeq || err.name === 'AbortError') return;
+      speechRequest = null;
       audio = null;
       if (err.name === 'NotAllowedError') return; // el navegador no deja sonar hasta que toques la página una vez
     } // si el servidor no responde, lee la voz del navegador
   }
+  if (seq !== speechSeq) return;
   if (!window.speechSynthesis) return;
   const u = new SpeechSynthesisUtterance(text); u.lang = 'es-ES'; u.rate = prefs.speed;
   const v = speechSynthesis.getVoices().find(x => 'nav:' + x.name === prefs.voice) || speechSynthesis.getVoices().find(x => /^es/i.test(x.lang));

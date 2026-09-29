@@ -9,6 +9,7 @@
 import hashlib, io, json, os, pathlib, threading, time, urllib.request, wave
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 KEY = pathlib.Path(os.environ["IA_API_KEY_FILE"]).read_text().strip()
 CACHE = pathlib.Path(os.environ.get("IA_CACHE", "/cache")); CACHE.mkdir(parents=True, exist_ok=True)
@@ -98,13 +99,7 @@ def voices(req: Request):
     return [{"id": k, "label": v[0]} for k, v in {**PIPER, **KOKORO}.items()]
 
 
-@app.post("/speak")
-async def speak(req: Request):
-    auth(req)
-    b = await req.json()
-    text, vid, speed = str(b.get("text", ""))[:1500].strip(), b.get("voice") or "piper-claude", min(max(float(b.get("speed") or 1), 0.5), 2)
-    if not text:
-        raise HTTPException(400, "texto vacío")
+def synthesize(text, vid, speed):
     buf = io.BytesIO()
     with _tlock:
         v = voice(vid)
@@ -117,7 +112,22 @@ async def speak(req: Request):
                 a, sr = v.create(text, voice=KOKORO[vid][1], speed=speed, lang="es")
                 wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(sr)
                 wf.writeframes((np.clip(a, -1, 1) * 32767).astype("<i2").tobytes())
-    return Response(buf.getvalue(), media_type="audio/wav")
+    return buf.getvalue()
+
+
+@app.post("/speak")
+async def speak(req: Request):
+    auth(req)
+    b = await req.json()
+    text, vid = str(b.get("text", ""))[:1500].strip(), b.get("voice") or "piper-claude"
+    try:
+        speed = min(max(float(b.get("speed") or 1), 0.5), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "velocidad inválida")
+    if not text:
+        raise HTTPException(400, "texto vacío")
+    wav = await run_in_threadpool(synthesize, text, vid, speed)
+    return Response(wav, media_type="audio/wav")
 
 
 OFFICE = {".docx", ".xlsx", ".xls", ".pptx", ".html", ".htm"}

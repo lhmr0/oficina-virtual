@@ -534,7 +534,7 @@ r('POST', '/api/permissions/:rid', 'operador', async ({ params, body, user }) =>
 
 // ---------- dictado por voz: el audio va al servicio de IA (Whisper) del servidor interno a través de una PC conectada ----------
 function iaMachine() {
-  need(R.iaCfg(), 'La voz no está configurada (OFICINA_IA_URL)');
+  need(R.iaCfg(), 'El servicio de voz no está configurado (OFICINA_IA_URL)');
   const mid = [host.defaultMachine(), ...host.machines().map(m => m.id)].find(id => id && host.online(id));
   need(mid, 'No hay ninguna máquina conectada para usar la voz');
   return mid;

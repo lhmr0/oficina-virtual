@@ -31,6 +31,7 @@ export function parseCommand(text, ctx = {}) {
   const target = loose => { const m = (loose ? /\b(?:tarea|la|el|numero)\s*(\d{1,6})\b/ : /\b(?:tarea|numero)\s*(\d{1,6})\b/).exec(s); return m ? { task: +m[1], conv: null } : { task: ctx.task || null, conv: ctx.conv || null }; };
   const after = re => { const m = re.exec(raw); return m ? raw.slice(m.index + m[0].length).replace(/^[\s,:.-]+/, '').trim() : ''; };
   if (!s) return { action: 'none' };
+  if (/^(si|claro|de acuerdo)$/.test(s) && ctx.kind === 'revision' && ctx.task) return { action: 'approve', task: ctx.task, conv: null, merge: false };
   if (/^(no|cancela\w*|olvida\w*|nada|despues|luego|dejala|dejalo)\b/.test(s)) return { action: 'none' };
   if (/\b(repite|repitelo|repetir|otra vez)\b/.test(s)) return { action: 'repeat' };
   if (/^(abre|abrela|abrelo|abrir|muestra\w*|ver)\b/.test(s)) return { action: 'open', ...target(true) };

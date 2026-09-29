@@ -21,6 +21,11 @@ document.addEventListener('click', async e => {
   const page = ctxFromLink(location.hash);
   const ctx = b.dataset.vcmd ? ctxFromLink(b.dataset.vcmd, b.dataset.kind) : page.task || page.conv ? page : last ? ctxFromLink(last.link, last.kind) : page;
   const text = await listen(st => paintMic(b, st));
+  if (text && activeConfirmation && /^(s[ií]|confirmo|confirmar|no|cancela|cancelar)[.!?\s]*$/i.test(text.trim())) {
+    const id = activeConfirmation;
+    await resolveConfirmation(id, /^(s[ií]|confirmo|confirmar)/i.test(text.trim()));
+    return;
+  }
   if (text) await run(parseCommand(text, ctx), text);
 });
 
@@ -58,18 +63,28 @@ async function run(c, heard) {
 }
 
 const pending = new Map();
+let activeConfirmation = null;
 function confirmAct(what, fn) {
   const id = String(Date.now() + Math.random());
+  if (activeConfirmation) pending.delete(activeConfirmation);
+  activeConfirmation = id;
   pending.set(id, { what, fn });
+  setTimeout(() => { pending.delete(id); if (activeConfirmation === id) activeConfirmation = null; }, 30000);
   holo('🎙 ¿Confirmas?', what.charAt(0).toUpperCase() + what.slice(1), { ms: 30000,
     actions: `<button class="btn sm g" data-vok="${id}">Confirmar</button><button class="btn sm ghost" data-vno="${id}">Cancelar</button>` });
   speak(`¿Confirmo ${what}?`);
 }
+async function resolveConfirmation(id, confirmed) {
+  const p = pending.get(id);
+  pending.delete(id);
+  if (activeConfirmation === id) activeConfirmation = null;
+  document.querySelector(`[data-vok="${id}"]`)?.closest('.holo')?.remove();
+  if (!p || !confirmed) return;
+  try { await p.fn(); holo('✔ Hecho', p.what); speak('Hecho.'); } catch (err) { fail(err); }
+}
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-vok],[data-vno]'); if (!b) return;
   e.stopPropagation();
-  const id = b.dataset.vok || b.dataset.vno, p = pending.get(id);
-  pending.delete(id); b.closest('.holo')?.remove();
-  if (!p || b.dataset.vno) return;
-  try { await p.fn(); holo('✔ Hecho', p.what); speak('Hecho.'); } catch (err) { fail(err); }
+  const id = b.dataset.vok || b.dataset.vno;
+  await resolveConfirmation(id, !!b.dataset.vok);
 });

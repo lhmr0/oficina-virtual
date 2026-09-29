@@ -60,6 +60,20 @@ async function main() {
   assert.equal(refreshedReplies[1].field.selectionEnd, 10);
   assert.equal(refreshedReplies[1].field.focused, true);
 
+  const { parseCommand, notifPhrase, ctxFromLink } = await import('./public/comandos.js');
+  const review = ctxFromLink('#/tarea/29', 'revision');
+  assert.deepEqual(review, { task: 29, conv: null, kind: 'revision', link: '#/tarea/29' });
+  assert.deepEqual(parseCommand('aprueba la 29', review), { action: 'approve', task: 29, conv: null, merge: false });
+  assert.deepEqual(parseCommand('sí', review), { action: 'approve', task: 29, conv: null, merge: false });
+  assert.deepEqual(parseCommand('devuélvela porque falta la prueba', review), { action: 'return', task: 29, conv: null, text: 'falta la prueba' });
+  assert.deepEqual(parseCommand('pásala a Codex', review), { action: 'handoff', task: 29, conv: null, agent: 'codex' });
+  assert.deepEqual(parseCommand('después', review), { action: 'none' });
+  assert.deepEqual(parseCommand('repite', review), { action: 'repeat' });
+  assert.deepEqual(parseCommand('responde en la tarea 30: ya está listo', review), { action: 'reply', task: 30, conv: null, text: 'ya está listo' });
+  assert.deepEqual(parseCommand('Necesito revisar la 2', ctxFromLink('#/cantina/7', 'consulta')), { action: 'reply', task: null, conv: 7, text: 'Necesito revisar la 2' });
+  assert.deepEqual(parseCommand('Idea nueva', {}), { action: 'chat', text: 'Idea nueva' });
+  assert.match(notifPhrase({ kind: 'revision', title: 'Tarea 29 lista', body: 'Revisar cambios' }), /¿La apruebas, la devuelves/);
+
   console.log('FRONTEND TODO OK');
 }
 
