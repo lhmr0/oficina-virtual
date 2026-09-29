@@ -164,3 +164,26 @@ de voz todavía no está desplegada. El script despliega el HEAD de este worktre
 
 Con esto, al fusionar la rama en master, `voz.js` queda para la otra función y `ordenes.js` recibe mi
 versión completa (con el fix 2). Sin desplegar todavía: el usuario avisará.
+## Conflicto al fusionar con master (verificado 29/09)
+
+Reproducido con `git merge-tree` y con un `git merge --no-commit` (abortado después). Al fusionar la
+rama con `master` chocan exactamente **dos** archivos:
+
+- `public/ordenes.js` — add/add + colisión de renombrado. `master` tiene una copia de mi intérprete en
+  la versión de `48ba3af`; la rama trae el renombrado voz.js→ordenes.js con el fix 2. **El de la rama
+  es superconjunto**: sólo añade `FUNC`/`limpiarBordes`/`separar`/`descripcion` (+50/-6). Resolución:
+  quedarse con el de la rama.
+- `test-frontend.js` — contenido. `master` añadió pruebas de su función de voz (`core.speak`,
+  `comandos.js`) y ya importa `./public/ordenes.js`; la rama añadió la regresión de título/descripción.
+  Resolución: conservar las dos (mismo import `./public/ordenes.js`).
+
+Todo lo demás auto-fusiona (views.js, app.js, core.js, server.js, README, ANALISIS). La función de voz
+de avisos vive en `public/voz.js` en `master` y se conserva. Receta:
+
+```
+git merge master
+git checkout --ours public/ordenes.js      # mi versión (superconjunto)
+# test-frontend.js: dejar el bloque de pruebas de master + mis 3 asserts (import a ordenes.js)
+git add public/ordenes.js test-frontend.js
+git commit
+```
