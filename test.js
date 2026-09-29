@@ -259,6 +259,12 @@ function gitRepo(name) {
     } finally { ia.close(); delete process.env.OFICINA_IA_URL; delete process.env.OFICINA_IA_KEY; }
   });
 
+  await t('voz: la tarea creada por voz avisa al agente de que el texto viene de un dictado', async () => {
+    const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'Voz', prompt: 'escribe', agent_id: fake, voz: true, run: true })).id;
+    await until(() => task(id).status === 'revision', 15000, 'revisión tarea por voz');
+    assert.match(task(id).summary, /VOZOK/, 'el agente recibió el aviso de dictado');
+  });
+
   let qid;
   await t('consulta → esperando + SSE consulta; respuesta reanuda; worktree + diff; aprobar y fusionar', async () => {
     qid = (await api('POST', '/api/tasks', { project_id: pid, folder_id: folder1, area_id: dev, title: 'Crear archivo', prompt: 'PREGUNTA primero', agent_id: fake })).id;

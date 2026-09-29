@@ -60,6 +60,33 @@ async function main() {
   assert.equal(refreshedReplies[1].field.selectionEnd, 10);
   assert.equal(refreshedReplies[1].field.focused, true);
 
+  const { parseVoz } = await import('./public/voz.js');
+  const ctx = {
+    projects: [{ id: 1, name: 'Oficina Virtual' }, { id: 2, name: 'Solo notas' }],
+    agents: [{ id: 10, name: 'Claude' }, { id: 11, name: 'Codex' }],
+    areas: [{ id: 20, name: 'Desarrollo', alias: 'dev' }, { id: 21, name: 'Análisis', alias: 'ana' }],
+  };
+  const tareaVoz = parseVoz('crea una tarea en el proyecto Oficina Virtual titulada arreglar el login para el agente Codex', ctx);
+  assert.equal(tareaVoz.accion, 'tarea');
+  assert.equal(tareaVoz.proyecto_id, 1);
+  assert.equal(tareaVoz.agente_id, 11);
+  assert.equal(tareaVoz.titulo, 'arreglar el login');
+  const irVoz = parseVoz('abre la cantina', ctx);
+  assert.equal(irVoz.accion, 'ir');
+  assert.equal(irVoz.destino, '#/cantina');
+  const chatVoz = parseVoz('pregúntale a Claude si el servidor está en línea', ctx);
+  assert.equal(chatVoz.accion, 'chat');
+  assert.equal(chatVoz.agente_id, 10);
+  assert.match(chatVoz.texto, /servidor está en línea/);
+  const buscarVoz = parseVoz('busca dictado por voz', ctx);
+  assert.equal(buscarVoz.accion, 'buscar');
+  assert.equal(buscarVoz.texto, 'dictado por voz');
+  const tareaVoz2 = parseVoz('nueva tarea en Solo notas: comprar pan', ctx);
+  assert.equal(tareaVoz2.accion, 'tarea');
+  assert.equal(tareaVoz2.proyecto_id, 2);
+  assert.equal(tareaVoz2.titulo, 'comprar pan');
+  assert.equal(parseVoz('hola qué tal', ctx).accion, null, 'sin orden reconocible');
+
   console.log('FRONTEND TODO OK');
 }
 

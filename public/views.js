@@ -1,9 +1,10 @@
 // Vistas de la oficina
 import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS, PSTATUS, chip, agent, area, user, project, isAdmin, canEdit,
   agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
-  machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML, micBtn, isDictated, WIN_LABELS, agentLimits, agentLimitsBadge } from './core.js';
+  machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML, micBtn, isDictated, WIN_LABELS, agentLimits, agentLimitsBadge, startRecording, stopRecording, isRecording, transcribir } from './core.js';
 import { sprite, agentSprite, userSprite, icon, ICON_NAMES } from './sprites.js';
 import { route, refreshSoon, loadBoot, setProject, applyTheme } from './app.js';
+import { parseVoz } from './voz.js';
 
 const go = hash => { location.hash = hash; };
 const ACTIVE = ['en_curso', 'en_cola', 'esperando'];
@@ -1471,3 +1472,82 @@ const config = {
 };
 
 export const VIEWS = { estacion, proyectos, kanban, tarea, cantina, consejo, archivos, puente, config };
+
+
+// ---------- órdenes por voz desde el dock: dictar → interpretar → confirmar → ejecutar ----------
+export function vozForm() {
+  if (!S.boot?.ia) return holo('Dictado no configurado', 'Falta OFICINA_IA_URL en el servidor (ver README §6).', { err: true });
+  if (!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder)) return holo('Voz no disponible', 'Este navegador no permite grabar audio.', { err: true });
+  const d = modal(`<h2>🎤 Orden por voz</h2>
+    <p class="muted">Pulsa el micro y habla. Ejemplos: «crea una tarea en el proyecto Oficina Virtual titulada arreglar el login para el agente Codex», «abre la cantina», «pregúntale a Claude si el servidor está en línea», «busca dictado por voz».</p>
+    <div class="row" style="margin:6px 0"><button type="button" class="btn y" id="vzMic">🎤 Hablar</button><small id="vzState" class="muted"></small></div>
+    <div id="vzBox"></div>`);
+  const box = $('#vzBox', d), state = $('#vzState', d), mic = $('#vzMic', d);
+  mic.onclick = async () => {
+    if (isRecording()) return stopRecording(); // segundo clic: termina y transcribe
+    try {
+      await startRecording(async blob => {
+        mic.textContent = '⏳'; mic.disabled = true; mic.classList.remove('r'); state.textContent = 'Transcribiendo…';
+        try {
+          const texto = await transcribir(blob);
+          state.textContent = '';
+          if (!texto) return holo('No se entendió el audio', 'Intenta hablar más cerca del micrófono.');
+          pintarOrden(box, texto, parseVoz(texto, { projects: S.boot.projects, areas: S.boot.areas, agents: agentsOn() }));
+        } catch (err) { state.textContent = ''; fail(err); } finally { mic.textContent = '🎤 Hablar'; mic.disabled = false; }
+      });
+    } catch { state.textContent = ''; return fail('No se pudo usar el micrófono: revisa el permiso del navegador'); }
+    mic.textContent = '⏹ Parar'; mic.classList.add('r'); state.textContent = 'Grabando…';
+  };
+}
+// tarjeta de confirmación: la orden se puede corregir antes de ejecutarla
+function pintarOrden(box, texto, o) {
+  const head = `<div class="panel" style="margin-bottom:10px"><small class="muted">Se entendió</small><div>«${h(texto)}»</div></div>`;
+  const repetir = '<button type="button" class="btn ghost" id="vzAgain">Repetir</button>';
+  const agentes = opts(agentsOn().map(a => [a.id, a.name]), o.agente_id, '— por defecto —');
+  const proyectos = opts(S.boot.projects.map(p => [p.id, p.name]), o.proyecto_id, S.boot.projects.length ? null : 'Sin proyectos');
+  const areas = opts(S.boot.areas.map(a => [a.id, a.name]), o.area_id, '— por defecto —');
+  if (o.accion === 'ir' && o.destino) {
+    box.innerHTML = head + `<p>Ir a <b>${h(o.destinoNombre)}</b>.</p><div class="row"><button type="button" class="btn y" id="vzGo">Ir</button>${repetir}</div>`;
+    $('#vzGo', box).onclick = () => { closeModal(); go(o.destino); };
+  } else if (o.accion === 'buscar') {
+    box.innerHTML = head + `<p>Buscar en el historial: <b>${h(o.texto)}</b></p><div class="row"><button type="button" class="btn y" id="vzGo">Buscar</button>${repetir}</div>`;
+    $('#vzGo', box).onclick = () => { closeModal(); go('#/archivos/buscar?q=' + encodeURIComponent(o.texto)); };
+  } else if (o.accion === 'chat') {
+    box.innerHTML = head + `<div class="field-row"><div><label class="l">Agente</label><select id="vzAgent">${agentes}</select></div>
+      <div><label class="l">Proyecto (contexto, opcional)</label><select id="vzProj">${opts(S.boot.projects.map(p => [p.id, p.name]), o.proyecto_id, '—')}</select></div></div>
+      <label class="l">Mensaje</label><textarea id="vzText" rows="4">${h(o.texto)}</textarea>
+      <div class="row" style="margin-top:10px"><button type="button" class="btn y" id="vzDo">Enviar a la Cantina</button>${repetir}</div>`;
+    $('#vzDo', box).onclick = async () => {
+      const agent_id = +$('#vzAgent', box).value, text = $('#vzText', box).value.trim();
+      if (!agent_id) return fail('Elige un agente');
+      if (!text) return fail('El mensaje está vacío');
+      try { const r = await post('/api/conversations', { agent_id, text, project_id: +$('#vzProj', box).value || null, voz: true }); closeModal(); beep('ok'); go('#/cantina/' + r.id); } catch (err) { fail(err); }
+    };
+  } else if (o.accion === 'tarea') {
+    box.innerHTML = head + `<div class="field-row"><div><label class="l">Proyecto</label><select id="vzProj">${proyectos}</select></div>
+      <div><label class="l">Área</label><select id="vzArea">${areas}</select></div>
+      <div><label class="l">Agente</label><select id="vzAgent">${agentes}</select></div></div>
+      <label class="l">Título</label><input id="vzTitle" value="${h(o.titulo || '')}">
+      <label class="l">Instrucciones para el agente ${micBtn('#vzPrompt')}</label><textarea id="vzPrompt" rows="3">${h(o.prompt || '')}</textarea>
+      <label class="row" style="margin-top:10px"><input type="checkbox" id="vzRun" checked> Ejecutar al crear</label>
+      <div class="row" style="margin-top:10px"><button type="button" class="btn y" id="vzDo">Crear tarea</button>${repetir}</div>`;
+    $('#vzDo', box).onclick = async () => {
+      const title = $('#vzTitle', box).value.trim(), project_id = +$('#vzProj', box).value, agent_id = +$('#vzAgent', box).value || null;
+      if (!title) return fail('Falta el título');
+      if (!project_id) return fail('Elige un proyecto');
+      const folder_id = project(project_id)?.folders.find(f => f.is_default)?.id || null;
+      try {
+        const r = await post('/api/tasks', { project_id, area_id: +$('#vzArea', box).value || null, agent_id, folder_id,
+          title, prompt: $('#vzPrompt', box).value.trim(), voz: true, priority: 'media' });
+        if ($('#vzRun', box).checked && agent_id) await post(`/api/tasks/${r.id}/run`, {});
+        closeModal(); beep('ok'); holo('Tarea creada', `#${r.id} ${title}`, { link: `#/tarea/${r.id}` }); refreshSoon(0);
+      } catch (err) { fail(err); }
+    };
+  } else {
+    box.innerHTML = head + `<p class="muted">No reconocí una orden de la oficina. Elige qué hacer con lo dictado:</p>
+      <div class="row"><button type="button" class="btn y" id="vzDo">Crear tarea</button><button type="button" class="btn" id="vzChat">Enviar a la Cantina</button>${repetir}</div>`;
+    $('#vzDo', box).onclick = () => { closeModal(); taskForm({ title: texto.slice(0, 90), prompt: texto }); };
+    $('#vzChat', box).onclick = () => pintarOrden(box, texto, { accion: 'chat', agente_id: null, area_id: null, proyecto_id: null, texto });
+  }
+  $('#vzAgain', box)?.addEventListener('click', () => { box.innerHTML = ''; });
+}
