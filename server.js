@@ -695,6 +695,15 @@ r('POST', '/api/folders/:id/push', 'operador', async ({ params, user }) => {
   log(user.id, 'git', f.id, 'push', { head: res.head });
   return res;
 });
+// aprueba y fusiona, de la más antigua a la más nueva, todas las tareas en revisión de la carpeta; un choque no detiene las demás
+r('POST', '/api/folders/:id/merge-all', 'operador', async ({ params, user }) => {
+  const f = repoFolder(+params.id), out = [];
+  for (const t of all(`select id, title from tasks where folder_id=? and status='revision' and worktree_path is not null and deleted_at is null order by id`, f.id)) {
+    try { await R.approveTask(t.id, user.id, { merge: true }); out.push({ id: t.id, title: t.title, ok: true }); }
+    catch (e) { out.push({ id: t.id, title: t.title, error: e.message }); }
+  }
+  return out;
+});
 r('POST', '/api/folders/:id/commit', 'operador', async ({ params, body, user }) => {
   const f = repoFolder(+params.id);
   need(Array.isArray(body.files) && body.files.length && body.message?.trim(), 'Elige archivos y escribe el mensaje');

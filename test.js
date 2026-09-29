@@ -292,6 +292,20 @@ function gitRepo(name) {
     assert.ok(!fs.existsSync(wt), 'worktree limpiado');
   });
 
+  await t('Repositorios: estado y "fusionar listas" (la que choca crea tarea de resolución, la otra entra)', async () => {
+    const mk = async p => { const id = (await api('POST', '/api/tasks', { project_id: pid, folder_id: folder1, title: 'Lista ' + p, prompt: p, agent_id: fake, run: true })).id; await until(() => task(id).status === 'revision', 15000, 'revisión ' + id); return id; };
+    const a = await mk('x'), b = await mk('xyz'); // ambas reescriben salida.txt con distinto contenido
+    const r = (await api('GET', `/api/repos?project_id=${pid}`)).find(x => x.folder.id === folder1);
+    assert.deepEqual(r.branches.map(x => x.task_id).sort(), [a, b].sort(), 'lista las ramas de las tareas');
+    assert.equal(r.branches.find(x => x.task_id === b).files.includes('salida.txt'), true);
+    const out = await api('POST', `/api/folders/${folder1}/merge-all`);
+    assert.deepEqual(out.map(x => x.id), [a, b], 'de la más antigua a la más nueva');
+    assert.ok(out[0].ok && task(a).status === 'completada');
+    assert.match(out[1].error, /Conflicto.*tarea #\d+/, 'la segunda choca en salida.txt');
+    assert.equal(task(b).status, 'revision', 'la que chocó sigue en revisión con su rama');
+    assert.ok(one("select 1 from tasks where title=?", `Resolver conflicto al fusionar tarea #${b}`), 'se creó la tarea de resolución');
+  });
+
   await t('segunda carpeta: la tarea corre en la carpeta elegida', async () => {
     const id = (await api('POST', '/api/tasks', { project_id: pid, folder_id: folder2, title: 'En docs', prompt: 'x', agent_id: fake, run: true })).id;
     await until(() => task(id).status === 'revision');

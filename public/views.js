@@ -442,6 +442,8 @@ const estacion = {
     el.onclick = e => {
       if (e.target.closest('.kmove')) return;
       if (e.target.closest('#repoFetch')) return loadRepos(el, true);
+      const rma = e.target.closest('[data-mergeall]');
+      if (rma) return mergeAll(REPOS.get(+rma.dataset.mergeall), () => loadRepos(el));
       const ra = e.target.closest('[data-analyze]');
       if (ra) return analyzeRepo(REPOS.get(+ra.dataset.analyze), () => loadRepos(el));
       const rm = e.target.closest('[data-merge]');
@@ -521,6 +523,7 @@ function repoHTML(x) {
     <div class="run-meta">${sync}${x.changes?.length ? (n => ` · <button type="button" class="linkish" data-analyze="${f.id}" title="Ver qué es y qué hacer" style="color:var(${n ? '--orange' : '--muted'})">${n ? `${n} sin commit` : 'solo ruido de herramientas'} 🔍</button>`)(x.changes.filter(c => !NOISE.test(c.file)).length) : ''} · ${x.branches.filter(b => b.ahead).length} ramas pendientes${x.deploy ? ` · despliega en <b>${h(x.deploy.target)}</b>` : ''}</div>
     ${br}
     ${canEdit() ? `<div class="row" style="gap:4px">
+      ${(n => n ? `<button type="button" class="btn sm g" data-mergeall="${f.id}" data-n="${n}" title="Aprueba y fusiona todas las tareas en revisión, de la más antigua a la más nueva">⇉ Fusionar listas (${n})</button>` : '')(x.branches.filter(b => b.status === 'revision').length)}
       ${x.upstream ? `<button type="button" class="btn sm" data-push="${f.id}" title="git pull --no-rebase + push de ${h(x.head)}: nunca pisa lo remoto">⇅ Push${x.ahead ? ` (${x.ahead})` : ''}</button>` : ''}
       ${x.deploy ? `<button type="button" class="btn sm y" data-deploy="${f.id}" data-name="${h(name)}" data-target="${h(x.deploy.target)}" title="Desplegar en ${h(x.deploy.target)}" aria-label="Desplegar en ${h(x.deploy.target)}">🚀</button>` : '<small class="muted" title="Agrega el repo en &quot;deploy&quot; de worker.json">sin despliegue configurado</small>'}
     </div>` : ''}
@@ -548,6 +551,18 @@ function analyzeRepo(x, reload) {
     const files = $$('input[name=f]:checked', d).map(i => i.value);
     try { const r = await post(`/api/folders/${x.folder.id}/commit`, { files, message: $('input[name=message]', d).value }); closeModal(); holo('Commit hecho', r.head); reload(); } catch (err) { fail(err); }
   };
+}
+async function mergeAll(x, reload) {
+  const list = x.branches.filter(b => b.status === 'revision');
+  if (!await confirmBox(`¿Aprobar y fusionar en ${x.head} las tareas ${list.map(b => '#' + b.task_id).join(', ')}?`, 'Fusionar')) return;
+  holo('Fusionando…', repoName(x.folder), { ms: 4000 });
+  try {
+    const r = await post(`/api/folders/${x.folder.id}/merge-all`);
+    modal(`<h2>⇉ Fusión de ${h(repoName(x.folder))}</h2>
+      ${r.map(t => `<div class="kv"><b><a href="#/tarea/${t.id}">#${t.id} ${h(t.title)}</a></b><span style="color:var(${t.ok ? '--green' : '--red'})">${t.ok ? '✔ fusionada' : h(t.error)}</span></div>`).join('') || '<p>No había tareas en revisión.</p>'}
+      <button class="btn ghost" value="c" style="margin-top:10px">Cerrar</button>`);
+    refreshSoon(0); reload();
+  } catch (e) { fail(e); }
 }
 async function deployRepo(id, name, target) {
   if (!await confirmBox(`¿Desplegar ${name} en ${target}? Se despliega la rama base tal como está en la carpeta (haz push antes si corresponde).`, 'Desplegar', true)) return;
