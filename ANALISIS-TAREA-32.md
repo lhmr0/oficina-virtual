@@ -187,3 +187,16 @@ git checkout --ours public/ordenes.js      # mi versión (superconjunto)
 git add public/ordenes.js test-frontend.js
 git commit
 ```
+## Merge resuelto (29/09)
+
+Se ejecutó `git merge master` en la rama y se resolvieron los dos conflictos:
+- `public/ordenes.js`: versión de la rama (con el fix 2). Ojo: el auto-merge dejó marcadores anidados
+  por la colisión de renombrado; se rehízo con `git checkout HEAD -- public/ordenes.js`.
+- `public/voz.js`: se restauró la versión de master (función de voz de avisos). El auto-merge la había
+  BORRADO por la colisión del renombrado; se recuperó con `git checkout master -- public/voz.js`.
+- `test-frontend.js`: combinadas las pruebas de master (voz/chatterbox, comandos) con la regresión de
+  título/descripción de la rama.
+
+Commit de merge: **022452b**. Verificado: `node --no-warnings test.js` -> TODO OK; `master` es ahora
+ancestro de la rama y `git merge-tree master HEAD` no reporta conflictos -> al fusionar en master será
+**fast-forward** (5 commits). Sin desplegar todavía.
