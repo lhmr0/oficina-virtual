@@ -852,3 +852,4 @@ dialog::backdrop { background: var(--dialog-backdrop); backdrop-filter: blur(3px
 .repo-br a { color: var(--text); text-decoration: none; font-size: 11px; }
 .repo-br a:hover { color: var(--yellow); }
 .repo-br .btn { align-self: flex-start; }
+.linkish { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; text-decoration: underline dotted; }

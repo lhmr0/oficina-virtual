@@ -695,6 +695,14 @@ r('POST', '/api/folders/:id/push', 'operador', async ({ params, user }) => {
   log(user.id, 'git', f.id, 'push', { head: res.head });
   return res;
 });
+r('POST', '/api/folders/:id/commit', 'operador', async ({ params, body, user }) => {
+  const f = repoFolder(+params.id);
+  need(Array.isArray(body.files) && body.files.length && body.message?.trim(), 'Elige archivos y escribe el mensaje');
+  const res = await host.call(f.machine_id || host.defaultMachine(), 'commitFiles', { repo: f.path, files: body.files.map(String), message: body.message.trim() });
+  if (res.error) throw new HttpError(409, res.error);
+  log(user.id, 'git', f.id, 'commit', { head: res.head, archivos: body.files.length });
+  return res;
+});
 r('POST', '/api/folders/:id/deploy', 'operador', async ({ params, user }) => {
   const f = repoFolder(+params.id);
   const res = await host.call(f.machine_id || host.defaultMachine(), 'deploy', { repo: f.path });

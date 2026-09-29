@@ -113,6 +113,9 @@ function create(cfg) {
   // ---------- git ----------
   const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim();
   const tryGit = (cwd, ...a) => { try { return git(cwd, ...a); } catch { return null; } };
+  // cambios sin commit de la carpeta: [{ st: 'M'|'D'|'??'…, file }]
+  const changes = r => (tryGit(r, '-c', 'core.quotepath=false', 'status', '--porcelain') || '').split(/\r?\n/).filter(Boolean).slice(0, 500)
+    .map(l => /^\s*(\S+)\s+(.*)$/.exec(l)).map(m => ({ st: m[1], file: m[2].replace(/^.* -> /, '').replace(/^"|"$/g, '') })); // git() recorta el espacio inicial
   const isGit = p => tryGit(p, 'rev-parse', '--is-inside-work-tree') === 'true';
   function exclude(repo, lines) {
     const f = path.resolve(repo, tryGit(repo, 'rev-parse', '--git-common-dir') || '.git', 'info', 'exclude');
@@ -188,6 +191,10 @@ function create(cfg) {
       const r = checkPath(repo);
       const cur = git(r, 'rev-parse', '--abbrev-ref', 'HEAD');
       if (cur !== base_branch) return { error: `La carpeta base está en la rama ${cur}, no en ${base_branch}` };
+      // git se negaría a fusionar para no pisar esos cambios: no es un conflicto entre ramas, falta un commit
+      const dirty = new Set(changes(r).map(c => c.file));
+      const hit = (tryGit(r, 'diff', '--name-only', `${base_branch}...${branch}`) || '').split(/\r?\n/).filter(f => dirty.has(f));
+      if (hit.length) return { error: `La carpeta base tiene cambios sin commit en ${hit.join(', ')}. Haz commit (Repositorios → 🔍) y vuelve a fusionar.` };
       try { git(r, 'merge', '--no-ff', '-m', message, branch); }
       catch (e) { tryGit(r, 'merge', '--abort'); return { conflict: String(e.stderr || e.message) }; }
       if (worktree_path) tryGit(r, 'worktree', 'remove', '--force', worktree_path);
@@ -203,7 +210,7 @@ function create(cfg) {
       const [behind, ahead] = up ? (tryGit(r, 'rev-list', '--left-right', '--count', `${up}...HEAD`) || '0 0').split(/\s+/).map(Number) : [null, null];
       const lines = s => (s || '').split(/\r?\n/).filter(Boolean);
       return {
-        head, upstream: up, ahead, behind, dirty: lines(tryGit(r, 'status', '--porcelain')).length, log: lines(tryGit(r, 'log', '--oneline', '-5')),
+        head, upstream: up, ahead, behind, changes: changes(r), log: lines(tryGit(r, 'log', '--oneline', '-5')),
         deploy: deployCfg(r) ? { target: deployCfg(r).target || 'servidor', cmd: deployCfg(r).cmd } : null,
         branches: branches.map(b => {
           const base = b.base || head;
@@ -215,6 +222,14 @@ function create(cfg) {
           return { ...b, ahead: bAhead, behind: bBehind, files: lines(tryGit(r, 'diff', '--name-only', `${base}...${b.branch}`)), conflicts };
         }),
       };
+    },
+    // commit en la rama base solo de los archivos elegidos (el ruido de herramientas se queda fuera)
+    commitFiles: ({ repo, files, message }) => {
+      const r = checkPath(repo), known = new Set(changes(r).map(c => c.file));
+      if (!files?.length || files.some(f => !known.has(f))) return { error: 'Archivos inválidos: vuelve a analizar' };
+      git(r, 'add', '-A', '--', ...files);
+      try { git(r, 'commit', '-q', '-m', message, '--', ...files); } catch { git(r, '-c', 'user.name=Oficina Virtual', '-c', 'user.email=oficina@localhost', 'commit', '-q', '-m', message, '--', ...files); }
+      return { ok: true, head: git(r, 'log', '--oneline', '-1') };
     },
     // trae lo remoto (merge, nunca rebase ni force) y sube la rama base: nada de lo ya publicado se pierde
     push: ({ repo }) => {

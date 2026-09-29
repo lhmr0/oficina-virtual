@@ -138,6 +138,24 @@ async function main() {
     assert.equal(fs.readFileSync(path.join(other, 'a.txt'), 'utf8').trim(), 'tarea1','el remoto tiene lo de t1');
     assert.equal(fs.readFileSync(path.join(other, 'b.txt'), 'utf8').trim(), 'remoto','y conserva lo que ya estaba en remoto');
     assert.match((await ops.deploy({ repo: main1 })).error, /Sin comando/, 'sin "deploy" en la config no se ejecuta nada');
+    // dos tareas en el mismo archivo: líneas distintas se combinan, la misma línea choca sin perder nada
+    const rr = path.join(temp, 'r3');
+    execFileSync('git', ['init', '-q', '-b', 'main', rr]);
+    fs.writeFileSync(path.join(rr, 'x.txt'), 'a\nb\nc\nd\ne\n'); g(rr, 'add', '-A'); g(rr, 'commit', '-qm', 'base');
+    const edit = (b, fn) => { g(rr, 'checkout', '-qb', b, 'main'); fs.writeFileSync(path.join(rr, 'x.txt'), fn(fs.readFileSync(path.join(rr, 'x.txt'), 'utf8'))); g(rr, 'commit', '-qam', b); g(rr, 'checkout', '-q', 'main'); };
+    edit('uno', () => 'A-tarea1\nb\nc\nd\ne\n');
+    edit('dos', () => 'a\nb\nc\nd\nE-tarea2\n');
+    edit('tres', () => 'A-tarea3\nb\nc\nd\ne\n');
+    const m = b => ops.merge({ repo: rr, branch: b, base_branch: 'main', message: 'm ' + b });
+    fs.writeFileSync(path.join(rr, 'x.txt'), 'a\nb\nc-directo\nd\ne\n'); // cambio directo sin commit en la base
+    assert.match(m('uno').error, /sin commit en x\.txt/, 'con cambios sin commit en el mismo archivo pide commit, no crea conflicto');
+    assert.equal(ops.repoStatus({ repo: rr }).changes[0].file, 'x.txt');
+    assert.ok(ops.commitFiles({ repo: rr, files: ['x.txt'], message: 'directo' }).ok);
+    assert.ok(m('uno').ok); assert.ok(m('dos').ok);
+    assert.equal(fs.readFileSync(path.join(rr, 'x.txt'), 'utf8').replace(/\r/g, ''), 'A-tarea1\nb\nc-directo\nd\nE-tarea2\n', 'se conservan tarea1, tarea2 y el cambio directo');
+    assert.ok(m('tres').conflict, 'la misma línea que tarea1 → conflicto');
+    assert.equal(fs.readFileSync(path.join(rr, 'x.txt'), 'utf8').replace(/\r/g, ''), 'A-tarea1\nb\nc-directo\nd\nE-tarea2\n', 'el conflicto no borra nada (merge abortado)');
+
     const conDeploy = create({ dataDir, deploy: { [main1]: { cmd: 'echo desplegado', target: 'VPS' } } }).ops;
     assert.equal(conDeploy.repoStatus({ repo: main1 }).deploy.target, 'VPS', 'informa el destino del despliegue');
     assert.match((await conDeploy.deploy({ repo: main1 })).output, /desplegado/, 'ejecuta el comando en la carpeta base');

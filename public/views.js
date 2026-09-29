@@ -442,6 +442,8 @@ const estacion = {
     el.onclick = e => {
       if (e.target.closest('.kmove')) return;
       if (e.target.closest('#repoFetch')) return loadRepos(el, true);
+      const ra = e.target.closest('[data-analyze]');
+      if (ra) return analyzeRepo(REPOS.get(+ra.dataset.analyze), () => loadRepos(el));
       const rm = e.target.closest('[data-merge]');
       if (rm) return approveDialog(tasks.find(t => t.id === +rm.dataset.merge));
       const rp = e.target.closest('[data-push]');
@@ -488,10 +490,15 @@ async function loadRepos(el, fetch = false) {
   if (fetch) body.innerHTML = '<div class="empty" style="padding:10px">Consultando remoto…</div>';
   const repos = await get(`/api/repos?fetch=${fetch ? 1 : 0}${S.project ? '&project_id=' + S.project : ''}`).catch(e => [{ folder: {}, error: e.message }]);
   if (!body.isConnected) return;
+  for (const x of repos) REPOS.set(x.folder.id, x);
   body.innerHTML = repos.map(repoHTML).join('') || `<div class="empty" style="padding:10px;font-size:11px">${S.project ? 'Este proyecto no tiene carpetas git.' : 'Ningún proyecto tiene carpetas git.'} Agrégalas en Proyecto → Carpetas.</div>`;
 }
+const REPOS = new Map(); // último estado de cada carpeta, para el análisis
+// estado que escriben hooks/plugins (IJFW, Serena, Claude…): no es código del proyecto
+const NOISE = /^\.(ijfw|serena|claude|commandcode|omc|sisyphus|codex|oficina|vscode)\//;
+const repoName = f => `${f.project_name || ''}${f.label ? ' · ' + f.label : ''}`;
 function repoHTML(x) {
-  const f = x.folder, name = `${f.project_name || ''}${f.label ? ' · ' + f.label : ''}`;
+  const f = x.folder, name = repoName(f);
   if (x.error) return `<div class="repo"><b class="ellipsis">${h(name)}</b><small style="color:var(--red)">${h(x.error)}</small></div>`;
   // archivos que tocan varias ramas pendientes: se fusionan bien si git no marca choque, pero conviene revisarlos juntos
   const byFile = {};
@@ -511,13 +518,36 @@ function repoHTML(x) {
   const sync = x.upstream ? `↑${x.ahead} ↓${x.behind}` : 'sin remoto';
   return `<div class="repo" style="border-left:3px solid ${h(f.color || 'var(--line)')}">
     <div class="row" style="justify-content:space-between;gap:4px"><b class="ellipsis" title="${h(f.path)}">${h(name)}</b><code title="${h(x.log.join('\n'))}">${h(x.head)}</code></div>
-    <div class="run-meta">${sync}${x.dirty ? ` · <span style="color:var(--orange)">${x.dirty} sin commit</span>` : ''} · ${x.branches.filter(b => b.ahead).length} ramas pendientes${x.deploy ? ` · despliega en <b>${h(x.deploy.target)}</b>` : ''}</div>
+    <div class="run-meta">${sync}${x.changes?.length ? (n => ` · <button type="button" class="linkish" data-analyze="${f.id}" title="Ver qué es y qué hacer" style="color:var(${n ? '--orange' : '--muted'})">${n ? `${n} sin commit` : 'solo ruido de herramientas'} 🔍</button>`)(x.changes.filter(c => !NOISE.test(c.file)).length) : ''} · ${x.branches.filter(b => b.ahead).length} ramas pendientes${x.deploy ? ` · despliega en <b>${h(x.deploy.target)}</b>` : ''}</div>
     ${br}
     ${canEdit() ? `<div class="row" style="gap:4px">
       ${x.upstream ? `<button type="button" class="btn sm" data-push="${f.id}" title="git pull --no-rebase + push de ${h(x.head)}: nunca pisa lo remoto">⇅ Push${x.ahead ? ` (${x.ahead})` : ''}</button>` : ''}
       ${x.deploy ? `<button type="button" class="btn sm y" data-deploy="${f.id}" data-name="${h(name)}" data-target="${h(x.deploy.target)}" title="Desplegar en ${h(x.deploy.target)}" aria-label="Desplegar en ${h(x.deploy.target)}">🚀</button>` : '<small class="muted" title="Agrega el repo en &quot;deploy&quot; de worker.json">sin despliegue configurado</small>'}
     </div>` : ''}
   </div>`;
+}
+// cambios hechos directo en la carpeta base: fuera de toda rama de tarea, no se suben ni despliegan sin commit
+function analyzeRepo(x, reload) {
+  const real = x.changes.filter(c => !NOISE.test(c.file)), noise = x.changes.filter(c => NOISE.test(c.file));
+  const ST = { M: 'modificado', D: 'borrado', '??': 'nuevo', A: 'agregado', R: 'renombrado' };
+  const also = file => x.branches.filter(b => b.ahead && b.files?.includes(file)).map(b => '#' + b.task_id);
+  const clash = real.filter(c => also(c.file).length);
+  const d = modal(`<h2>🔍 ${h(repoName(x.folder))}</h2>
+    <p class="muted">Son cambios hechos <b>directo en la carpeta base</b> (${h(x.head)}), fuera de las ramas de las tareas: por ti, un chat de la Cantina en modo Editar o una herramienta. Mientras no tengan commit, <b>Push no se hace</b> y <b>no se despliegan</b>.</p>
+    ${clash.length ? `<p style="color:var(--orange)">⚠ ${clash.length} también los cambia una tarea pendiente. Haz commit primero: al fusionar esa tarea git combina ambos cambios (o crea una tarea para resolver el choque). Sin commit, git se niega a fusionar para no pisarlos.</p>` : ''}
+    ${real.length ? `<div class="table-wrap"><table class="grid"><tr><th></th><th>Archivo</th><th>Estado</th><th>Tareas</th></tr>
+      ${real.map(c => `<tr><td><input type="checkbox" name="f" value="${h(c.file)}" checked aria-label="Incluir ${h(c.file)}"></td><td><code>${h(c.file)}</code></td><td>${ST[c.st] || h(c.st)}</td><td>${also(c.file).join(', ') || '—'}</td></tr>`).join('')}</table></div>
+      ${canEdit() ? `<label class="l">Mensaje del commit</label><input name="message" value="cambios directos en ${h(x.head)}">
+      <div class="row" style="margin-top:10px"><button class="btn g" id="rcOk">Commit de los marcados</button><button class="btn ghost" value="c">Cerrar</button></div>` : ''}`
+    : '<p>No hay cambios de código.</p>'}
+    ${noise.length ? `<details style="margin-top:10px"><summary class="muted">${noise.length} archivos de herramientas (.ijfw, .claude…): no son código, se ignoran</summary><small><code>${noise.map(c => h(c.st + ' ' + c.file)).join('<br>')}</code></small></details>` : ''}
+    ${!real.length || !canEdit() ? '<button class="btn ghost" value="c" style="margin-top:10px">Cerrar</button>' : ''}`);
+  const ok = $('#rcOk', d);
+  if (ok) ok.onclick = async e => {
+    e.preventDefault();
+    const files = $$('input[name=f]:checked', d).map(i => i.value);
+    try { const r = await post(`/api/folders/${x.folder.id}/commit`, { files, message: $('input[name=message]', d).value }); closeModal(); holo('Commit hecho', r.head); reload(); } catch (err) { fail(err); }
+  };
 }
 async function deployRepo(id, name, target) {
   if (!await confirmBox(`¿Desplegar ${name} en ${target}? Se despliega la rama base tal como está en la carpeta (haz push antes si corresponde).`, 'Desplegar', true)) return;
