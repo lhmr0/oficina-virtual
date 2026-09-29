@@ -200,3 +200,9 @@ Se ejecutó `git merge master` en la rama y se resolvieron los dos conflictos:
 Commit de merge: **022452b**. Verificado: `node --no-warnings test.js` -> TODO OK; `master` es ahora
 ancestro de la rama y `git merge-tree master HEAD` no reporta conflictos -> al fusionar en master será
 **fast-forward** (5 commits). Sin desplegar todavía.
+## Desplegado (29/09)
+
+- Commit desplegado: 932515f (incluye el merge 022452b). Contenedor oficina-virtual reiniciado.
+- Verificado en el VPS: contenedor arriba; /app/public/ordenes.js (9568 B, con `function separar`) y
+  /app/public/voz.js (5004 B, con `export function announce`); /api/setup 200; /ordenes.js y /voz.js
+  servidos 200. Se usó FORCE=1 (el run de esta tarea bloqueaba la espera del script).
