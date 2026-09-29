@@ -126,3 +126,29 @@ Corregido:
 - El intérprete separa título y descripción: reconoce «con el título … / la descripción sea …» y, si no
   hay marcadores, usa la primera frase como título (acotado a 90 caracteres) y el resto como
   descripción (antes tropezaba con decimales tipo «5.5»).
+## Verificación tras el push (integración en master) — hallazgo importante
+
+Estado verificado:
+- Rama `oficina/task-32-ordenar` (HEAD 72c4631): árbol limpio y **con todo** (fix 1 «tarea vs
+  buscar» + fix 2 «formulario completo + título/descripción»). `node --no-warnings test.js` -> TODO OK.
+- No hay remotos git (`git remote -v` vacío): el «push» es la integración interna de la oficina en
+  `master`.
+- `master` (27e78bf) integró las tareas #29/#33/#34 y, al resolver el conflicto, **renombró mi
+  intérprete** `public/voz.js` -> `public/ordenes.js` y dejó el nombre `public/voz.js` para OTRA
+  función de voz (avisos hablados: `announce`/responder hablando, con `public/comandos.js`).
+
+Consecuencia (el punto que pediste verificar):
+- `master:public/ordenes.js` es mi intérprete **en la versión de 48ba3af**: trae el fix 1
+  (`const arranque`) pero **NO** el fix 2 (no tiene `separar` ni `descripcion`).
+- `master:public/views.js` sigue con la tarjeta mínima de tarea (sin `taskForm` completo ni marca
+  `voz`). Es decir: en `master` **persiste lo que reportaste** (faltan campos y mal reparto
+  título/descripción).
+- Si se fusiona mi rama tal cual, habrá conflicto en `public/voz.js` (yo lo tengo ahí; master lo usa
+  para la otra función) y el fix 2 no entrará solo: hay que llevarlo a `public/ordenes.js`.
+
+Recomendación: alinear la rama con el layout de `master` (mi intérprete como `public/ordenes.js` y
+`voz.js` reservado para la otra función) y apuntar el import de `views.js` a `ordenes.js`. Así el
+merge conserva las dos funciones de voz y no se pierde el fix 2.
+
+Despliegue: el VPS corre el contenido de 48ba3af (solo mi función de voz, sin fix 2); la otra función
+de voz todavía no está desplegada. El script despliega el HEAD de este worktree (la rama).
