@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-test-'));
 process.env.OFICINA_DATA = path.join(TMP, 'data');
@@ -93,7 +93,10 @@ function gitRepo(name) {
   });
   for (const script of ['test-hostops.js', 'test-frontend.js']) {
     const file = path.join(__dirname, script);
-    if (fs.existsSync(file)) await t(`regresión: ${script}`, async () => execFileSync(process.execPath, ['--no-warnings', file], { stdio: 'inherit' }));
+    // spawn y no execFileSync: congelar el proceso (donde vive el servidor de prueba) dejaba sockets keep-alive
+    // vencidos a ambos lados y la siguiente petición recibía ECONNRESET
+    if (fs.existsSync(file)) await t(`regresión: ${script}`, () => new Promise((res, rej) =>
+      spawn(process.execPath, ['--no-warnings', file], { stdio: 'inherit' }).on('error', rej).on('close', c => c ? rej(new Error(`${script} terminó con código ${c}`)) : res())));
   }
   await t('codex: límites 5h/semanal leídos del rollout de la sesión', async () => {
     const home = path.join(TMP, 'codex-home'), day = path.join(home, 'sessions', '2026', '09', '26');
@@ -667,7 +670,6 @@ function gitRepo(name) {
   });
 
   // ---------- agente de campo remoto (worker.js en otro proceso) ----------
-  const { spawn } = require('node:child_process');
   let worker;
   const spawnWorker = token => spawn(process.execPath, ['--no-warnings', 'worker.js'], { cwd: __dirname, stdio: 'ignore',
     env: { ...process.env, OFICINA_URL: `http://127.0.0.1:${PORT}`, OFICINA_TOKEN: token, OFICINA_WORKER_DATA: path.join(TMP, 'wdata'), OFICINA_WORKER_ROOTS: TMP,
