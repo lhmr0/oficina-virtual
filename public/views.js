@@ -447,7 +447,7 @@ const estacion = {
       const rp = e.target.closest('[data-push]');
       if (rp) return act(() => post(`/api/folders/${rp.dataset.push}/push`), 'Push hecho').then(() => loadRepos(el), () => {});
       const rd = e.target.closest('[data-deploy]');
-      if (rd) return deployRepo(rd.dataset.deploy, rd.dataset.name).then(() => loadRepos(el));
+      if (rd) return deployRepo(rd.dataset.deploy, rd.dataset.name, rd.dataset.target).then(() => loadRepos(el));
       const tk = e.target.closest('#toggleKanbanBtn');
       if (tk) {
         const isCollapsed = $('#stationKanban', el).classList.toggle('collapsed');
@@ -515,13 +515,13 @@ function repoHTML(x) {
     <div class="run-meta">${sync}${x.dirty ? ` · <span style="color:var(--orange)">${x.dirty} sin commit</span>` : ''} · ${x.branches.filter(b => b.ahead).length} ramas pendientes</div>
     ${br}
     ${canEdit() ? `<div class="row" style="gap:4px">
-      <button type="button" class="btn sm" data-push="${f.id}" title="git pull --no-rebase + push de ${h(x.head)}: nunca pisa lo remoto">⇅ Push${x.ahead ? ` (${x.ahead})` : ''}</button>
-      ${x.deploy ? `<button type="button" class="btn sm y" data-deploy="${f.id}" data-name="${h(name)}" title="Despliega desde la carpeta base (${h(x.head)}), no desde una rama">🚀 Desplegar</button>` : ''}
+      ${x.upstream ? `<button type="button" class="btn sm" data-push="${f.id}" title="git pull --no-rebase + push de ${h(x.head)}: nunca pisa lo remoto">⇅ Push${x.ahead ? ` (${x.ahead})` : ''}</button>` : ''}
+      ${x.deploy ? `<button type="button" class="btn sm y" data-deploy="${f.id}" data-name="${h(name)}" data-target="${h(x.deploy.target)}" title="${h(x.deploy.cmd)}">🚀 Desplegar → ${h(x.deploy.target)}</button>` : '<small class="muted" title="Agrega el repo en &quot;deploy&quot; de worker.json">sin despliegue configurado</small>'}
     </div>` : ''}
   </div>`;
 }
-async function deployRepo(id, name) {
-  if (!await confirmBox(`¿Desplegar ${name}? Se despliega la rama base tal como está en la carpeta (haz push antes si corresponde).`, 'Desplegar', true)) return;
+async function deployRepo(id, name, target) {
+  if (!await confirmBox(`¿Desplegar ${name} en ${target}? Se despliega la rama base tal como está en la carpeta (haz push antes si corresponde).`, 'Desplegar', true)) return;
   holo('Desplegando…', name, { ms: 4000 });
   try {
     const r = await post(`/api/folders/${id}/deploy`);

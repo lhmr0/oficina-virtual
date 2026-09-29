@@ -18,8 +18,8 @@ function create(cfg) {
   const roots = (cfg.roots?.length ? cfg.roots : [os.homedir()]).map(r => canon(r));
   const runs = new Map(); // runId → proc
   const cantinaDir = cfg.cantina ? path.resolve(cfg.cantina) : null; // carpeta fija de las consultas rápidas en esta máquina
-  // cfg.deploy: { "<ruta repo>": "<comando>" } — solo se configura en la máquina, el servidor no puede mandar comandos arbitrarios
-  const deployCmd = r => Object.entries(cfg.deploy || {}).find(([p]) => canon(p).toLowerCase() === r.toLowerCase())?.[1];
+  // cfg.deploy: { "<ruta repo>": { cmd, target } } (o solo el comando) — se configura en la máquina, el servidor no puede mandar comandos arbitrarios
+  const deployCfg = r => { const v = Object.entries(cfg.deploy || {}).find(([p]) => canon(p).toLowerCase() === r.toLowerCase())?.[1]; return typeof v === 'string' ? { cmd: v } : v; };
 
   // ---------- rutas ----------
   function canon(p) { try { return fs.realpathSync.native(path.resolve(p)); } catch { return path.resolve(p); } }
@@ -204,7 +204,7 @@ function create(cfg) {
       const lines = s => (s || '').split(/\r?\n/).filter(Boolean);
       return {
         head, upstream: up, ahead, behind, dirty: lines(tryGit(r, 'status', '--porcelain')).length, log: lines(tryGit(r, 'log', '--oneline', '-5')),
-        deploy: !!deployCmd(r),
+        deploy: deployCfg(r) ? { target: deployCfg(r).target || 'servidor', cmd: deployCfg(r).cmd } : null,
         branches: branches.map(b => {
           const base = b.base || head;
           if (!tryGit(r, 'rev-parse', '--verify', '--quiet', b.branch)) return { ...b, missing: true };
@@ -229,7 +229,7 @@ function create(cfg) {
     },
     // despliega SIEMPRE desde la carpeta base (nunca desde un worktree): el comando vive en worker.json de esta máquina
     deploy: ({ repo }) => new Promise(res => {
-      const r = checkPath(repo), cmd = deployCmd(r);
+      const r = checkPath(repo), cmd = deployCfg(r)?.cmd;
       if (!cmd) return res({ error: 'Sin comando de despliegue para esta carpeta ("deploy" en worker.json)' });
       exec(cmd, { cwd: r, timeout: 20 * 60000, maxBuffer: 20 * 1024 * 1024, windowsHide: true },
         (e, out, err) => res({ ok: !e, code: e?.code ?? 0, output: (String(out) + String(err)).slice(-8000) }));

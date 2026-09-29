@@ -95,9 +95,8 @@ function shell() {
     <a href="#/kanban" data-nav="kanban">${ic('board')}<span>Kanban</span></a>
     <a href="#/cantina" data-nav="cantina">${ic('chat')}<span>Cantina</span></a>
     ${canEdit() ? `<button id="dNew" class="dock-y">${ic('plus')}<span>Tarea</span></button>` : ''}
-    ${S.boot?.ia && navigator.mediaDevices?.getUserMedia && window.MediaRecorder ? `<button id="dVoz" title="Órdenes por voz: crear tareas, preguntar a la Cantina, navegar">${ic('mic')}<span>Voz</span></button>` : ''}
+    ${canListen() ? `<button id="dVoz" data-vcmd="" title="Órdenes por voz. Con una tarea o chat abierto: aprueba, devuélvela porque…, pásala a Codex, responde…; en otra pantalla: crea una tarea, abre la cantina, busca…">${ic('mic')}<span>Voz</span></button>` : ''}
     <button id="dFind" title="Buscar y navegar (Ctrl+K)">${ic('search')}<span>Buscar</span><kbd>Ctrl K</kbd></button>
-    ${canEdit() && canListen() ? `<button data-vcmd="" data-icon="🎙" title="Orden por voz sobre la tarea abierta o el último aviso: aprueba, devuélvela porque…, pásala a Codex, responde…"><span class="mi">🎙</span><span>Voz</span></button>` : ''}
     <button class="bell" id="bellBtn">${ic('bell')}<span>Bandeja</span><span class="n" id="bellN" hidden></span></button>
   </nav>
   <div class="menu" id="meMenu" role="menu" hidden>
@@ -145,7 +144,8 @@ function shell() {
   $('#soundBtn').onclick = e => { S.sound = !S.sound; localStorage.setItem('ov_sound', S.sound ? '1' : '0'); e.currentTarget.setAttribute('aria-checked', S.sound); if (S.sound) beep('ok'); };
   $('#mMission')?.addEventListener('click', () => { toggleMenu(false); missionForm(); });
   $('#dNew')?.addEventListener('click', () => taskForm());
-  $('#dVoz')?.addEventListener('click', () => vozForm());
+  // un solo botón: con tarea/chat abierto lo atiende voz.js (data-vcmd); si no, órdenes generales
+  $('#dVoz')?.addEventListener('click', e => { if (!/#\/(tarea|cantina)\/\d/.test(location.hash)) { e.stopPropagation(); vozForm(); } });
   $('#dFind').onclick = openPalette;
   $('#bellBtn').onclick = toggleInbox;
   $('#resumeQ')?.addEventListener('click', () => post('/api/queue/resume').catch(fail));

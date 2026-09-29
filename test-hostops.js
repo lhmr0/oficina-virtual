@@ -138,6 +138,9 @@ async function main() {
     assert.equal(fs.readFileSync(path.join(other, 'a.txt'), 'utf8').trim(), 'tarea1','el remoto tiene lo de t1');
     assert.equal(fs.readFileSync(path.join(other, 'b.txt'), 'utf8').trim(), 'remoto','y conserva lo que ya estaba en remoto');
     assert.match((await ops.deploy({ repo: main1 })).error, /Sin comando/, 'sin "deploy" en la config no se ejecuta nada');
+    const conDeploy = create({ dataDir, deploy: { [main1]: { cmd: 'echo desplegado', target: 'VPS' } } }).ops;
+    assert.equal(conDeploy.repoStatus({ repo: main1 }).deploy.target, 'VPS', 'informa el destino del despliegue');
+    assert.match((await conDeploy.deploy({ repo: main1 })).output, /desplegado/, 'ejecuta el comando en la carpeta base');
 
     console.log('OK hostops');
   } finally {
