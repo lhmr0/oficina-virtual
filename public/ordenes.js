@@ -1,4 +1,4 @@
-// Intérprete de órdenes por voz de la Oficina Virtual.
+// Intérprete de órdenes por voz de la Oficina Virtual (módulo ordenes.js; vivió antes como public/voz.js, que ahora es la voz de los avisos).
 // Sin modelo: reconoce el vocabulario cerrado de la oficina (secciones, proyectos, agentes, áreas)
 // y devuelve una orden que la interfaz muestra para confirmar antes de ejecutar nada.
 // Módulo ES puro (sin DOM) para poder probarlo en Node desde test-frontend.js.

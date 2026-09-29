@@ -4,7 +4,7 @@ import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS
   machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML, micBtn, isDictated, WIN_LABELS, agentLimits, agentLimitsBadge, startRecording, stopRecording, isRecording, transcribir } from './core.js';
 import { sprite, agentSprite, userSprite, icon, ICON_NAMES } from './sprites.js';
 import { route, refreshSoon, loadBoot, setProject, applyTheme } from './app.js';
-import { parseVoz } from './voz.js';
+import { parseVoz } from './ordenes.js';
 
 const go = hash => { location.hash = hash; };
 const ACTIVE = ['en_curso', 'en_cola', 'esperando'];

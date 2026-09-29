@@ -60,7 +60,7 @@ async function main() {
   assert.equal(refreshedReplies[1].field.selectionEnd, 10);
   assert.equal(refreshedReplies[1].field.focused, true);
 
-  const { parseVoz } = await import('./public/voz.js');
+  const { parseVoz } = await import('./public/ordenes.js');
   const ctx = {
     projects: [{ id: 1, name: 'Oficina Virtual' }, { id: 2, name: 'Solo notas' }],
     agents: [{ id: 10, name: 'Claude' }, { id: 11, name: 'Codex' }],

@@ -22,7 +22,7 @@ por si más adelante se quiere dictado totalmente libre.
 1. **🎤 en el dock** (solo aparece si `OFICINA_IA_URL` está configurado y el navegador puede grabar).
 2. Pulsar → grabar; volver a pulsar → parar. El audio va a `POST /api/transcribe`, que lo reenvía al
    servicio de IA por una PC conectada (el VPS no ve la red interna; la PC sí).
-3. El texto se interpreta con `public/voz.js` (`parseVoz`) contra los proyectos, agentes y áreas reales.
+3. El texto se interpreta con `public/ordenes.js` (`parseVoz`) contra los proyectos, agentes y áreas reales.
 4. Se muestra una **tarjeta editable** con lo entendido y el botón de acción:
    - **Tarea** → proyecto, área, agente, título, instrucciones y «Ejecutar al crear».
    - **Chat** → agente, proyecto de contexto y mensaje → Cantina.
@@ -40,7 +40,7 @@ el agente Codex», «nueva tarea en Solo notas: comprar pan», «abre la cantina
 
 | Archivo | Cambio |
 |---|---|
-| `public/voz.js` | **Nuevo.** Intérprete de órdenes (puro, sin DOM): reglas y extracción de proyecto/agente/área/título. |
+| `public/ordenes.js` | **Nuevo.** Intérprete de órdenes (puro, sin DOM): reglas y extracción de proyecto/agente/área/título. |
 | `public/core.js` | Helpers reutilizables `startRecording`, `stopRecording`, `isRecording` y `transcribir`; el dictado de los cuadros de texto los reutiliza. |
 | `public/app.js` | Icono de micro, botón 🎤 en el dock y su cableado. |
 | `public/views.js` | Panel `vozForm` y tarjeta de confirmación `pintarOrden`. |
@@ -102,7 +102,7 @@ Sonnet 5.5 …» se interpretó como **Buscar** en vez de tarea. Causa: el inté
 en cualquier parte del texto y evaluaba «buscar» antes que «tarea», así que la palabra «encuentra»
 dentro de la frase activaba Buscar (y la tarjeta de búsqueda mostraba casi todo el dictado).
 
-Corregido en `public/voz.js`: el verbo de la orden se detecta **al inicio** de la frase (una orden
+Corregido en `public/ordenes.js`: el verbo de la orden se detecta **al inicio** de la frase (una orden
 puede mencionar «encuentra» o «consulta» por dentro), «tarea/misión» tiene prioridad y el título se
 acota a 90 caracteres y nunca queda vacío. La frase exacta de la captura queda como prueba de
 regresión en `test-frontend.js`.
@@ -152,3 +152,15 @@ merge conserva las dos funciones de voz y no se pierde el fix 2.
 
 Despliegue: el VPS corre el contenido de 48ba3af (solo mi función de voz, sin fix 2); la otra función
 de voz todavía no está desplegada. El script despliega el HEAD de este worktree (la rama).
+## Opción A aplicada (29/09): alinear con el layout de master
+
+- `git mv public/voz.js public/ordenes.js`: mi intérprete pasa a llamarse `ordenes.js` (como en
+  `master`), para no chocar con `public/voz.js`, que en master es la voz de los avisos
+  (`announce`/`comandos.js`).
+- `public/views.js`: el import de `parseVoz` ahora es `from './ordenes.js'`.
+- `test-frontend.js`: importa `./public/ordenes.js`.
+- `README.md` y este informe actualizados. Se anotó el renombrado en la cabecera del módulo.
+- `node --no-warnings test.js` -> TODO OK (FRONTEND TODO OK incluido).
+
+Con esto, al fusionar la rama en master, `voz.js` queda para la otra función y `ordenes.js` recibe mi
+versión completa (con el fix 2). Sin desplegar todavía: el usuario avisará.
