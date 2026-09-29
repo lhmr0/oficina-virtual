@@ -1,5 +1,6 @@
 // Arranque, login, shell, router, tiempo real (SSE) y bandeja de pendientes
-import { S, get, post, put, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme } from './core.js';
+import { S, get, post, put, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme, canListen, speak, voicePrefs } from './core.js';
+import { announce } from './voz.js';
 import { userSprite } from './sprites.js';
 import { VIEWS, taskForm, missionForm, approveDialog, vozForm } from './views.js';
 import { captureInputState, restoreInputState, captureReplyDrafts, restoreReplyDrafts } from './ui-state.js';
@@ -96,6 +97,7 @@ function shell() {
     ${canEdit() ? `<button id="dNew" class="dock-y">${ic('plus')}<span>Tarea</span></button>` : ''}
     ${S.boot?.ia && navigator.mediaDevices?.getUserMedia && window.MediaRecorder ? `<button id="dVoz" title="Órdenes por voz: crear tareas, preguntar a la Cantina, navegar">${ic('mic')}<span>Voz</span></button>` : ''}
     <button id="dFind" title="Buscar y navegar (Ctrl+K)">${ic('search')}<span>Buscar</span><kbd>Ctrl K</kbd></button>
+    ${canEdit() && canListen() ? `<button data-vcmd="" data-icon="🎙" title="Orden por voz sobre la tarea abierta o el último aviso: aprueba, devuélvela porque…, pásala a Codex, responde…"><span class="mi">🎙</span><span>Voz</span></button>` : ''}
     <button class="bell" id="bellBtn">${ic('bell')}<span>Bandeja</span><span class="n" id="bellN" hidden></span></button>
   </nav>
   <div class="menu" id="meMenu" role="menu" hidden>
@@ -267,6 +269,7 @@ function connectSSE() {
   on('notify', n => { notifyUI(n); inboxCount(); });
   on('permiso', p => {
     beep('consulta');
+    if (voicePrefs().read) speak(`Permiso solicitado: ${p.desc}. ¿Lo apruebas?`);
     holo('🔐 Permiso solicitado', p.desc, { ms: 0, link: p.task_id ? `#/tarea/${p.task_id}` : `#/cantina/${p.conv_id}`,
       actions: `<button class="btn sm g" data-perm="${h(p.request_id)}" data-allow="1">Aprobar</button><button class="btn sm r" data-perm="${h(p.request_id)}" data-allow="0">Denegar</button>` });
     desktop('Permiso solicitado', p.desc, p.task_id ? `#/tarea/${p.task_id}` : `#/cantina/${p.conv_id}`);
@@ -283,7 +286,8 @@ document.addEventListener('click', async e => {
 function notifyUI(n) {
   const kind = { consulta: 'consulta', fallo: 'error', cuota: 'error', revision: 'ok', permiso: 'consulta' }[n.kind] || 'notify';
   beep(kind);
-  holo(n.title, n.body, { link: n.link, err: ['fallo', 'cuota'].includes(n.kind), ms: ['consulta', 'cuota'].includes(n.kind) ? 15000 : 7000 });
+  const mic = announce(n); // lo lee en voz alta si está activado en Mi perfil y ofrece 🎤 Responder
+  holo(n.title, n.body, { link: n.link, err: ['fallo', 'cuota'].includes(n.kind), ms: ['consulta', 'cuota', 'revision'].includes(n.kind) ? 30000 : 7000, actions: mic || undefined });
   const prefs = S.boot.me.notif_prefs || {};
   if (prefs[n.kind] !== false) desktop(n.title, n.body, n.link);
 }

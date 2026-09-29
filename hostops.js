@@ -8,6 +8,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const https = require('node:https');
 
+// Claude CLI no tiene comando para listar modelos: IDs completos (sin alias sonnet/opus…, que duplicaban la lista). Actualizar al salir uno nuevo.
+const CLAUDE_MODELS = ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5'];
+
 // cfg: { dataDir, strict, roots[], cantina } — strict = agente de campo: solo CLIs conocidos y rutas bajo roots (más la carpeta de la Cantina)
 function create(cfg) {
   const dataDir = cfg.dataDir;
@@ -306,7 +309,7 @@ function create(cfg) {
         } catch {}
         return (await run(['--list-models'])).split(/\r?\n/).map(l => l.trim().split(/\s+/)[0]).filter(x => /^[\w.-]+\/[\w.-]+$/.test(x));
       }
-      if (adapter === 'claude') return ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'];
+      if (adapter === 'claude') return CLAUDE_MODELS;
       return [];
     },
     detectEfforts: async ({ adapter, exe, pre_args = [] }) => {
@@ -363,8 +366,7 @@ function create(cfg) {
         return res;
       }
       if (adapter === 'claude') {
-        const ms = ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'];
-        for (const m of ms) res[m] = ['low', 'medium', 'high', 'xhigh', 'max'];
+        for (const m of CLAUDE_MODELS) res[m] = ['low', 'medium', 'high', 'xhigh', 'max'];
         return res;
       }
       if (adapter === 'agy') {
@@ -506,13 +508,17 @@ $d = New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Console]::In.ReadT
   };
 
   // Servicio de IA del servidor interno (deploy/ia): la llamada sale de esta máquina, que sí ve la red interna
-  async function ia({ url, key }, route, body, ms) {
-    const r = await fetch(String(url).replace(/\/$/, '') + route, { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/octet-stream' }, body, signal: AbortSignal.timeout(ms) });
+  async function ia({ url, key }, route, body, ms, { type = 'application/octet-stream', raw = false } = {}) {
+    const r = await fetch(String(url).replace(/\/$/, '') + route, { method: body == null ? 'GET' : 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': type }, body, signal: AbortSignal.timeout(ms) });
+    if (raw && r.ok) return Buffer.from(await r.arrayBuffer());
     let j = null; try { j = JSON.parse(await r.text()); } catch {} // /convert antepone espacios mientras trabaja: JSON.parse los admite
     if (!r.ok || !j || j.error) throw new Error(j?.error || j?.detail || `servicio de IA: HTTP ${r.status}`);
     return j;
   }
   ops.transcribe = async ({ ia: cfg, audio }) => (await ia(cfg, '/transcribe', Buffer.from(audio, 'base64'), 120000)).text;
+  ops.voices = ({ ia: cfg }) => ia(cfg, '/voices', null, 15000);
+  // texto → voz (WAV en base64); la primera vez que se usa una voz el servicio descarga su modelo
+  ops.speak = async ({ ia: cfg, text, voice, speed }) => (await ia(cfg, '/speak', JSON.stringify({ text, voice, speed }), 180000, { type: 'application/json', raw: true })).toString('base64');
   // adjuntos PDF/Office → <adjunto>.md al lado (texto limpio para el agente). Un resultado por ref: null si no aplica
   ops.convertDocs = async ({ ia: cfg, cwd, refs }) => {
     const out = [];
@@ -565,4 +571,4 @@ $d = New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Console]::In.ReadT
   return { ops, spawnRun, canon, runs };
 }
 
-module.exports = { create };
+module.exports = { create, CLAUDE_MODELS };

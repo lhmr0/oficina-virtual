@@ -1,7 +1,7 @@
 // Vistas de la oficina
 import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS, PSTATUS, chip, agent, area, user, project, isAdmin, canEdit,
   agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
-  machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML, micBtn, isDictated, WIN_LABELS, agentLimits, agentLimitsBadge, startRecording, stopRecording, isRecording, transcribir } from './core.js';
+  machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML, micBtn, isDictated, voicePrefs, speak, stopSpeaking, WIN_LABELS, agentLimits, agentLimitsBadge, startRecording, stopRecording, isRecording, transcribir } from './core.js';
 import { sprite, agentSprite, userSprite, icon, ICON_NAMES } from './sprites.js';
 import { route, refreshSoon, loadBoot, setProject, applyTheme } from './app.js';
 import { parseVoz } from './ordenes.js';
@@ -901,6 +901,12 @@ const cantina = {
     $$('[data-c]', el).forEach(i => i.onclick = () => go('#/cantina/' + i.dataset.c));
     if (!cid) {
       bindPicker(el, 'nc');
+      if (S.voiceDraft) {
+        const draft = $('#ncText', el);
+        draft.value = S.voiceDraft;
+        draft.dataset.voz = '1';
+        S.voiceDraft = null;
+      }
       $('#ncBrowse', el).onclick = () => browseInto($('#ncFolder', el), $('#ncMachine', el)?.value);
       $('#ncProj', el).onchange = e => { const p = project(e.target.value); const f = p?.folders.find(x => x.is_default); if (f && !$('#ncFolder', el).value) $('#ncFolder', el).value = f.path; };
       $('#ncF', el).onsubmit = async e => {
@@ -1330,6 +1336,15 @@ const config = {
         <h3>Notificaciones de escritorio</h3>${NOTIF_KINDS.map(([k, l]) => `<label class="row"><input type="checkbox" name="n_${k}" ${prefs[k] !== false ? 'checked' : ''}> ${l}</label>`).join('')}
         <p class="muted">Permiso del navegador: ${'Notification' in window ? Notification.permission : 'no soportado'}. Si no hay pestañas abiertas, la oficina usa notificaciones de Windows.</p>
         <div class="row"><button class="btn y">Guardar</button>${'Notification' in window && Notification.permission !== 'granted' ? '<button class="btn" type="button" id="askN">Permitir notificaciones</button>' : ''}</div></form>
+        <div class="panel" style="margin-top:14px">
+          <h3>Voz de la oficina</h3>
+          <p class="muted">La voz y la lectura de avisos se guardan en este dispositivo. Para responder hablando, usa el micrófono del aviso o de la barra.</p>
+          <label class="l" for="voiceSel">Voz</label><select id="voiceSel"><option value="">Cargando voces…</option></select>
+          <label class="l" for="voiceSpeed">Velocidad: <output id="voiceSpeedValue"></output></label>
+          <input type="range" id="voiceSpeed" min="0.5" max="2" step="0.1">
+          <label class="row"><input type="checkbox" id="readNotif"> Leer avisos nuevos en voz alta</label>
+          <div class="row"><button class="btn" type="button" id="voiceTest">Probar voz</button><button class="btn ghost" type="button" id="voiceStop">Detener</button></div>
+        </div>
         <div class="panel" id="marcacionCard" style="margin-top:14px">
           <h3>Marcación (SICAPE)</h3>
           <p class="muted" id="marcarInfo">Ejecuta marcar_ahora.bat localmente en la PC del agente.</p>
@@ -1342,6 +1357,35 @@ const config = {
     }
     el.innerHTML = `<h1>Configuración</h1><div class="tabs">${tabs.map(([k, l]) => `<button data-ct="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>${body}`;
     if (tab === 'perfil') {
+      const voiceSel = $('#voiceSel', el), voiceSpeed = $('#voiceSpeed', el);
+      const vp = voicePrefs();
+      let chosenVoice = localStorage.getItem('ov_voice') || vp.voice;
+      voiceSpeed.value = vp.speed;
+      $('#voiceSpeedValue', el).value = `${vp.speed.toFixed(1)}×`;
+      $('#readNotif', el).checked = vp.read;
+      const fillVoices = serverVoices => {
+        if (!voiceSel.isConnected) return;
+        voiceSel.replaceChildren();
+        const addGroup = (label, voices) => {
+          if (!voices.length) return;
+          const group = document.createElement('optgroup'); group.label = label;
+          for (const [value, name] of voices) { const option = document.createElement('option'); option.value = value; option.textContent = name; group.append(option); }
+          voiceSel.append(group);
+        };
+        addGroup('Servidor', serverVoices.map(v => ['ia:' + v.id, v.label]));
+        addGroup('Navegador', (window.speechSynthesis?.getVoices() || []).filter(v => /^es/i.test(v.lang)).map(v => ['nav:' + v.name, `${v.name} (${v.lang})`]));
+        if (!voiceSel.options.length) { const option = document.createElement('option'); option.textContent = 'No hay voces disponibles'; option.value = ''; voiceSel.append(option); }
+        if ([...voiceSel.options].some(o => o.value === chosenVoice)) voiceSel.value = chosenVoice;
+      };
+      let serverVoices = [];
+      fillVoices(serverVoices);
+      if (S.boot?.ia) get('/api/voices').then(v => { serverVoices = Array.isArray(v) ? v : []; fillVoices(serverVoices); }).catch(() => fillVoices(serverVoices));
+      window.speechSynthesis?.addEventListener?.('voiceschanged', () => fillVoices(serverVoices), { once: true });
+      voiceSel.onchange = () => { chosenVoice = voiceSel.value; localStorage.setItem('ov_voice', chosenVoice); };
+      voiceSpeed.oninput = () => { localStorage.setItem('ov_voice_speed', voiceSpeed.value); $('#voiceSpeedValue', el).value = `${(+voiceSpeed.value).toFixed(1)}×`; };
+      $('#readNotif', el).onchange = e => localStorage.setItem('ov_read_notif', e.target.checked ? '1' : '0');
+      $('#voiceTest', el).onclick = () => speak('Hola. Soy la voz de tu oficina. Te avisaré cuando una tarea necesite tu decisión.', { voice: voiceSel.value, speed: +voiceSpeed.value });
+      $('#voiceStop', el).onclick = () => stopSpeaking();
       get('/api/me/marcacion').then(m => {
         const cons = $('#marcarConsole', el);
         const b = $('#btnMarcar', el);
