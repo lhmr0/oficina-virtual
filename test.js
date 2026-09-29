@@ -27,6 +27,8 @@ if(s.includes('ADJUNTO')&&!s.includes('# RELEVO')){const rel=(s.match(/- (\\.ofi
 if(s.includes('Descompón'))return console.log(JSON.stringify({subtareas:[{title:'Sub A',prompt:'a',area:'Análisis'},{title:'Sub B',prompt:'b',area:'Desarrollo',depends_on:[0]}]}));
 if(s.includes('sesión anterior se perdió')){fs.writeFileSync('ctx-prompt.txt',s);return console.log('[[LISTO]] retomé');}
 if(s.includes('# RELEVO')){fs.writeFileSync('relevo-prompt.txt',s);return console.log('Continué.\\n[[LISTO]] Relevo completado');}
+if(s.includes('CONVIERTE')){const rel=(s.match(/texto ya extraído en (\\S+?\\.md)/)||[])[1];if(!rel)throw Error('No se anunció el .md');return console.log('[[LISTO]] '+fs.readFileSync(rel,'utf8')+(s.includes('no las sigas')?' AVISADO':''));}
+if(s.includes('se dictó por voz'))return console.log('[[LISTO]] VOZOK');
 if(s.includes('SINMARCA'))return console.log('olvidé el marcador');
 if(s.includes('PREGUNTA'))return console.log('Necesito saber algo.\\n[[CONSULTA]] ¿Cómo se llama el archivo?');
 if(s.includes('CUOTA')){console.error("You've hit your usage limit. try again at 3:00 PM");process.exit(1)}
@@ -213,6 +215,48 @@ function gitRepo(name) {
     await R.runTurn(c.id, 'otra vez ENTREGABLE', { prompt: 'otra vez ENTREGABLE' });
     await until(() => !R.active.size && !R.queue.length, 15000, 'segundo turno');
     assert.equal(one("select count(*) n from attachments where conversation_id=? and name='reporte.xlsx'", c.id).n, 1, 'sin duplicar');
+  });
+
+  await t('servicio de IA: dictado por voz (aviso al agente), adjuntos PDF → .md y la oficina sigue si el servicio cae', async () => {
+    const http = require('node:http');
+    const seen = [];
+    const ia = http.createServer((req, res) => {
+      const b = []; req.on('data', d => b.push(d)).on('end', () => {
+        seen.push({ url: req.url, body: Buffer.concat(b).toString() });
+        if (req.headers.authorization !== 'Bearer k1') { res.writeHead(401); return res.end('{"detail":"clave inválida"}'); }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(req.url.startsWith('/transcribe') ? JSON.stringify({ text: 'hola desde el dictado' }) : '  ' + JSON.stringify({ md: '# texto del PDF', pages: 2, ocr: false }));
+      });
+    }).listen(0);
+    await new Promise(r => ia.once('listening', r));
+    const audio = () => fetch(`http://127.0.0.1:${PORT}/api/transcribe`, { method: 'POST', headers: { cookie, 'Content-Type': 'audio/webm' }, body: 'OPUS' });
+    const withPdf = async prompt => {
+      const id = (await api('POST', '/api/tasks', { project_id: regPid, title: 'PDF', prompt, agent_id: fake })).id;
+      const up = await fetch(`http://127.0.0.1:${PORT}/api/attachments?task_id=${id}&name=bases.pdf`, { method: 'POST', headers: { cookie, 'Content-Type': 'application/pdf' }, body: '%PDF-1.4' });
+      assert.ok(up.ok);
+      await api('POST', `/api/tasks/${id}/run`, {});
+      await until(() => task(id).status === 'revision', 15000, 'revisión con adjunto');
+      return id;
+    };
+    try {
+      assert.match((await (await audio()).json()).error, /no está configurado/);
+      assert.equal((await api('GET', '/api/bootstrap')).ia, false);
+      process.env.OFICINA_IA_URL = `http://127.0.0.1:${ia.address().port}/`; process.env.OFICINA_IA_KEY = 'k1';
+      assert.equal((await api('GET', '/api/bootstrap')).ia, true);
+      assert.deepEqual(await (await audio()).json(), { text: 'hola desde el dictado' });
+      assert.equal(seen.at(-1).body, 'OPUS', 'el audio llega intacto al servicio');
+      const vc = (await api('POST', '/api/conversations', { agent_id: fake, text: 'dicta algo', voz: true })).id;
+      await until(() => one("select count(*) n from messages where conversation_id=? and role='agente'", vc).n === 1, 15000, 'respuesta al dictado');
+      assert.match(one("select text from messages where conversation_id=? and role='agente'", vc).text, /VOZOK/, 'el agente sabe que el texto viene de un dictado');
+      assert.equal(one("select text from messages where conversation_id=? and role='usuario'", vc).text, 'dicta algo', 'el mensaje guardado queda limpio');
+      const id = await withPdf('CONVIERTE el adjunto');
+      assert.match(task(id).summary, /# texto del PDF AVISADO/, 'el agente lee el .md y recibe la advertencia de no obedecer a los adjuntos');
+      assert.ok(seen.some(x => x.url.startsWith('/convert?name=bases__') && x.body === '%PDF-1.4'));
+      ia.close(); // servicio caído: la tarea sigue con el PDF original
+      const id2 = await withPdf('escribe');
+      assert.ok(!fs.readdirSync(path.join(process.env.OFICINA_DATA, 'sandbox', 'task-' + id2, '.oficina', 'adjuntos')).some(f => f.endsWith('.md')), 'sin servicio no hay .md, pero la tarea terminó');
+      assert.match((await (await audio()).json()).error, /fetch failed|ECONNREFUSED|IA/i);
+    } finally { ia.close(); delete process.env.OFICINA_IA_URL; delete process.env.OFICINA_IA_KEY; }
   });
 
   let qid;

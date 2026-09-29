@@ -1,7 +1,7 @@
 // Vistas de la oficina
 import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS, PSTATUS, chip, agent, area, user, project, isAdmin, canEdit,
   agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
-  machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML, WIN_LABELS, agentLimits, agentLimitsBadge } from './core.js';
+  machines, machineName, defaultMachine, folderPicker, upload, attachmentsHTML, micBtn, isDictated, WIN_LABELS, agentLimits, agentLimitsBadge } from './core.js';
 import { sprite, agentSprite, userSprite, icon, ICON_NAMES } from './sprites.js';
 import { route, refreshSoon, loadBoot, setProject, applyTheme } from './app.js';
 
@@ -90,7 +90,7 @@ export async function taskForm(t = {}, preset = {}) {
       <div><label class="l">Plantilla</label><select id="tfTpl">${opts(S.boot.templates.map(x => [x.id, x.title]), '', '—')}</select></div>
     </div>
     <label class="l">Título</label><input name="title" required value="${h(t.title || preset.title || '')}">
-    <label class="l">Instrucciones para el agente</label><textarea name="prompt" rows="6">${h(t.prompt || preset.prompt || '')}</textarea>
+    <label class="l">Instrucciones para el agente ${micBtn('#tfPrompt')}</label><textarea name="prompt" id="tfPrompt" rows="6">${h(t.prompt || preset.prompt || '')}</textarea>
     <div class="field-row">
       <div><label class="l">Ejecuta</label><select name="executor" id="tfExec">${opts([['agente', 'Agente IA'], ['humano', 'Persona']], t.executor || 'agente')}</select></div>
       <div><label class="l">Carpeta</label><select name="folder_id" id="tfFolder">${opts(p.folders.map(f => [f.id, `${f.label}${f.is_git ? ' (git)' : ''}`]), t.id ? t.folder_id : (p.folders.find(f => f.is_default)?.id), 'Sin carpeta (sandbox)')}</select></div>
@@ -663,7 +663,7 @@ document.addEventListener('click', e => {
   if (c?.dataset.run) get(`/api/runs/${c.dataset.run}/log`).then(lg => { showLog(c, lg.log, true); c.scrollTop = 0; }, fail);
 });
 function messagesHTML(msgs) {
-  return msgs.map(m => `<div class="msg ${m.role} ${m.kind === 'consulta' ? 'consulta' : ''}"><div class="who">${m.role === 'agente' ? agentChip(m.agent_id, 1) : m.role === 'usuario' ? userChip(m.user_id) : 'SISTEMA'} · ${fmtDate(m.at)}${m.kind !== 'mensaje' ? ' · ' + h(m.kind) : ''}</div>${md(m.text)}</div>`).join('') || '<div class="empty">Sin mensajes</div>';
+  return msgs.map(m => `<div class="msg ${m.role} ${m.kind === 'consulta' ? 'consulta' : ''}"><div class="who">${m.role === 'agente' ? agentChip(m.agent_id, 1) : m.role === 'usuario' ? userChip(m.user_id) : 'SISTEMA'} · ${fmtDate(m.at)}${m.kind !== 'mensaje' ? ' · ' + h(m.kind) : ''}${m.role === 'agente' && window.speechSynthesis ? '<button type="button" class="btn sm ghost" data-say title="Leer en voz alta">🔊</button>' : ''}</div><div class="body">${md(m.text)}</div></div>`).join('') || '<div class="empty">Sin mensajes</div>';
 }
 function permsHTML(perms) {
   return perms.map(p => `<div class="perm"><b class="pixel" style="font-size:9px">🔐 PERMISO SOLICITADO</b><pre style="white-space:pre-wrap">${h(JSON.stringify(p.input, null, 1)).slice(0, 800)}</pre>
@@ -741,7 +741,7 @@ const tarea = {
       <div id="tabBody"></div>`;
     const body = $('#tabBody', el);
     const reply = () => `<form id="replyF" class="col-flex" style="margin-top:10px">${can ? `<textarea id="replyT" placeholder="${t.executor === 'humano' || !t.conversation_id ? 'Agregar nota…' : t.status === 'esperando' ? 'Responde al agente…' : 'Mensaje para el agente (reanuda la sesión)…'}" rows="3"></textarea>
-      <div class="row"><button class="btn y">${t.executor === 'humano' || !t.conversation_id ? 'Agregar nota' : 'Enviar al agente'}</button>${t.conversation_id && t.executor === 'agente' ? '<button class="btn ghost" id="noteB" type="button">Solo nota</button>' : ''}</div>` : ''}</form>`;
+      <div class="row"><button class="btn y">${t.executor === 'humano' || !t.conversation_id ? 'Agregar nota' : 'Enviar al agente'}</button>${micBtn('#replyT')}${t.conversation_id && t.executor === 'agente' ? '<button class="btn ghost" id="noteB" type="button">Solo nota</button>' : ''}</div>` : ''}</form>`;
     if (tab === 'consola') {
       const runId = S.taskRun?.[id] || x.runs[0]?.id;
       body.innerHTML = x.runs.length ? `<div class="row" style="justify-content:space-between;margin-bottom:6px">
@@ -786,7 +786,7 @@ const tarea = {
     $('#attIn', el)?.addEventListener('change', async e => { try { await uploadAll([...e.target.files], { task_id: id }); e.target.value = ''; holo('Adjuntado', 'Lo recibirá el agente en su próximo turno'); } catch (err) { fail(err); } });
     $('#replyF', el)?.addEventListener('submit', async e => {
       e.preventDefault(); const text = $('#replyT').value.trim(); if (!text) return;
-      try { await post(`/api/tasks/${id}/reply`, { text }); $('#replyT').value = ''; beep('ok'); refreshSoon(0); } catch (err) { fail(err); }
+      try { await post(`/api/tasks/${id}/reply`, { text, voz: isDictated($('#replyT')) }); $('#replyT').value = ''; beep('ok'); refreshSoon(0); } catch (err) { fail(err); }
     });
     $('#noteB', el)?.addEventListener('click', async () => { const text = $('#replyT').value.trim(); if (!text) return; await act(() => post(`/api/tasks/${id}/note`, { text })); $('#replyT').value = ''; refreshSoon(0); });
     const on = (sel, fn) => $(sel, el)?.addEventListener('click', fn);
@@ -872,7 +872,7 @@ const cantina = {
         <div><label class="l">Proyecto (contexto, opcional)</label><select name="project_id" id="ncProj">${opts(S.boot.projects.map(p => [p.id, p.name]), '', '—')}</select></div></div>
         <div class="field-row">${machineSel('name="machine_id" id="ncMachine"')}</div>
         <label class="l">Carpeta (vacío = carpeta de la Cantina)</label><div class="row" style="flex-wrap:nowrap"><input name="folder_path" id="ncFolder" placeholder="D:\\cantina"><button class="btn sm" type="button" id="ncBrowse">Examinar</button></div>
-        <label class="l">Mensaje</label><textarea name="text" id="ncText" rows="5" required></textarea>
+        <label class="l">Mensaje ${micBtn('#ncText')}</label><textarea name="text" id="ncText" rows="5" required></textarea>
         <label class="l">Adjuntos (opcional)</label><input type="file" id="ncFiles" multiple>
         <button class="btn y" style="margin-top:10px">Enviar a la cantina</button></form></div>`;
     } else {
@@ -888,7 +888,7 @@ const cantina = {
         ${x.attachments.length ? `<div style="margin-top:8px">${attachmentsHTML(x.attachments, canEdit())}</div>` : ''}
         <div class="chat" data-scroll="chat" style="margin-top:10px">${messagesHTML(x.messages)}</div>
         <div class="console" id="chatLive" style="height:160px" ${x.running ? '' : 'hidden'}></div>
-        ${canEdit() ? `<form id="crF" class="col-flex" style="margin-top:10px"><textarea id="crT" rows="3" placeholder="${c.status === 'esperando' ? 'Responde la consulta…' : 'Sigue la conversación…'}"></textarea><div class="row"><button class="btn y" ${x.running ? 'disabled' : ''}>Enviar</button><label class="btn ghost">📎 Adjuntar<input type="file" id="crFiles" multiple hidden></label><small id="crFilesN" class="muted"></small></div></form>` : ''}</div>`;
+        ${canEdit() ? `<form id="crF" class="col-flex" style="margin-top:10px"><textarea id="crT" rows="3" placeholder="${c.status === 'esperando' ? 'Responde la consulta…' : 'Sigue la conversación…'}"></textarea><div class="row"><button class="btn y" ${x.running ? 'disabled' : ''}>Enviar</button>${micBtn('#crT')}<label class="btn ghost">📎 Adjuntar<input type="file" id="crFiles" multiple hidden></label><small id="crFilesN" class="muted"></small></div></form>` : ''}</div>`;
       setTimeout(() => { const ch = $('.chat', el); if (ch) ch.scrollTop = ch.scrollHeight; });
       if (x.running && x.runs[0]) get(`/api/runs/${x.runs[0].id}/log`).then(lg => { const lv = $('#chatLive', el); if (lv) { lv.dataset.run = x.runs[0].id; showLog(lv, lg.log); lv.scrollTop = lv.scrollHeight; } });
     }
@@ -905,7 +905,7 @@ const cantina = {
         e.preventDefault(); const f = formData(e.target);
         try {
           const attachment_ids = await uploadAll([...$('#ncFiles', el).files], {});
-          const r2 = await post('/api/conversations', { ...f, agent_id: +f.agent_id, project_id: +f.project_id || null, machine_id: +f.machine_id || null, attachment_ids });
+          const r2 = await post('/api/conversations', { ...f, agent_id: +f.agent_id, project_id: +f.project_id || null, machine_id: +f.machine_id || null, attachment_ids, voz: isDictated($('#ncText', el)) });
           beep('ok'); go('#/cantina/' + r2.id);
         } catch (err) { fail(err); }
       };
@@ -915,7 +915,7 @@ const cantina = {
     $('#crFiles', el)?.addEventListener('change', e => { $('#crFilesN', el).textContent = [...e.target.files].map(f => f.name).join(', '); });
     $('#crF', el)?.addEventListener('submit', async e => {
       e.preventDefault(); const text = $('#crT').value.trim(); if (!text) return;
-      try { await uploadAll([...$('#crFiles', el).files], { conversation_id: cid }); await post(`/api/conversations/${cid}/reply`, { text }); $('#crT').value = ''; refreshSoon(0); } catch (err) { fail(err); }
+      try { await uploadAll([...$('#crFiles', el).files], { conversation_id: cid }); await post(`/api/conversations/${cid}/reply`, { text, voz: isDictated($('#crT')) }); $('#crT').value = ''; refreshSoon(0); } catch (err) { fail(err); }
     });
     on('#cAbort', () => act(() => post(`/api/conversations/${cid}/abort`)));
     on('#cRename', async () => { const v = await promptBox('Renombrar', 'Título', $('h2', el).textContent.replace('📌 ', '')); if (v) await act(() => put('/api/conversations/' + cid, { title: v })); });

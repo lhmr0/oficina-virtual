@@ -505,6 +505,28 @@ $d = New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Console]::In.ReadT
     return refs;
   };
 
+  // Servicio de IA del servidor interno (deploy/ia): la llamada sale de esta máquina, que sí ve la red interna
+  async function ia({ url, key }, route, body, ms) {
+    const r = await fetch(String(url).replace(/\/$/, '') + route, { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/octet-stream' }, body, signal: AbortSignal.timeout(ms) });
+    let j = null; try { j = JSON.parse(await r.text()); } catch {} // /convert antepone espacios mientras trabaja: JSON.parse los admite
+    if (!r.ok || !j || j.error) throw new Error(j?.error || j?.detail || `servicio de IA: HTTP ${r.status}`);
+    return j;
+  }
+  ops.transcribe = async ({ ia: cfg, audio }) => (await ia(cfg, '/transcribe', Buffer.from(audio, 'base64'), 120000)).text;
+  // adjuntos PDF/Office → <adjunto>.md al lado (texto limpio para el agente). Un resultado por ref: null si no aplica
+  ops.convertDocs = async ({ ia: cfg, cwd, refs }) => {
+    const out = [];
+    for (const ref of refs) {
+      if (!/^\.oficina\/adjuntos\/[^/\\]+\.(pdf|docx|xlsx|xls|pptx|html?)$/i.test(ref)) { out.push(null); continue; }
+      try {
+        const j = await ia(cfg, '/convert?name=' + encodeURIComponent(path.basename(ref)), fs.readFileSync(path.join(cwd, ref)), 1800000);
+        fs.writeFileSync(path.join(cwd, ref + '.md'), j.md);
+        out.push({ md: ref + '.md', pages: j.pages, ocr: j.ocr });
+      } catch (e) { out.push({ error: e.message }); }
+    }
+    return out;
+  };
+
   // Lanza un agente. onEvent({t:'out',line}|{t:'err',text}|{t:'exit',code,error})
   function spawnRun({ runId, exe, args = [], cwd, env = {}, stdin, keepOpen }, onEvent) {
     let e = resolveExe(exe), a = (args || []).map(expand);
