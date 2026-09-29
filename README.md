@@ -106,7 +106,7 @@ Para mantener actualizados automáticamente los 4 CLIs (`claude`, `codex`, `agy`
 ### 6. Servicio de IA local (opcional): dictado por voz y adjuntos → texto
 Contenedor `oficina-ia` en un servidor de la red interna (`deploy/ia/`, sin GPU):
 - **🎤 Dictado** en la Cantina, las respuestas y la tarea nueva (Whisper `large-v3-turbo`, español, ~0,4 s por segundo de audio). Al agente se le avisa que el texto viene de un dictado. **🔊** lee en voz alta las respuestas de los agentes (voz del navegador).
-- **🎤 Órdenes por voz** desde el dock inferior: crea tareas (proyecto, título, agente y área), lanza consultas a la Cantina, navega a una sección y busca en el historial. La orden se interpreta con reglas (`public/voz.js`) y se confirma en pantalla antes de ejecutar. Detalle en `ANALISIS-TAREA-32.md`.
+- **🎤 Órdenes por voz** desde el dock inferior: crea tareas (proyecto, título, agente y área), lanza consultas a la Cantina, navega a una sección y busca en el historial. La orden se interpreta con reglas (`public/ordenes.js`) y se confirma en pantalla antes de ejecutar. Detalle en `ANALISIS-TAREA-32.md`.
 - **Adjuntos PDF/Office → `<adjunto>.md`** (tablas incluidas; OCR en español para los escaneados), que el agente lee en vez del original.
 
 Instalar: copiar `deploy/ia` al servidor como `~/oficina-ia`, crear `secrets/api_key` y ejecutar `docker compose up -d --build`. En la oficina: `OFICINA_IA_URL=http://<servidor>:8010` y `OFICINA_IA_KEY=<clave>`. Las llamadas salen desde el agente de campo (la PC ve la red interna y el VPS no). Sin estas variables, la función queda apagada. Si el servicio cae, todo sigue como antes.

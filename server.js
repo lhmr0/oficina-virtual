@@ -534,14 +534,28 @@ r('GET', '/api/conversations/:id/md', 'observador', ({ params, res }) => {
 r('POST', '/api/permissions/:rid', 'operador', async ({ params, body, user }) => { await R.answerPermission(params.rid, !!body.allow, user.id); return { ok: true }; });
 
 // ---------- dictado por voz: el audio va al servicio de IA (Whisper) del servidor interno a través de una PC conectada ----------
+function iaMachine() {
+  need(R.iaCfg(), 'El servicio de voz no está configurado (OFICINA_IA_URL)');
+  const mid = [host.defaultMachine(), ...host.machines().map(m => m.id)].find(id => id && host.online(id));
+  need(mid, 'No hay ninguna máquina conectada para usar la voz');
+  return mid;
+}
 r('POST', '/api/transcribe', 'operador', async ({ req, body }) => {
-  need(R.iaCfg(), 'El dictado por voz no está configurado (OFICINA_IA_URL)');
+  const mid = iaMachine();
   need(body.length, 'Audio vacío');
   need(body.length <= 8e6, 'Audio demasiado largo (máx. ~10 min)');
-  const mid = [host.defaultMachine(), ...host.machines().map(m => m.id)].find(id => id && host.online(id));
-  need(mid, 'No hay ninguna máquina conectada para transcribir');
   return { text: await host.call(mid, 'transcribe', { ia: R.iaCfg(), audio: body.toString('base64'), mime: req.headers['content-type'] }) };
 }, { raw: true });
+// ---------- voces del servidor interno (Piper / Kokoro) para leer respuestas y avisos ----------
+r('GET', '/api/voices', 'observador', async () => host.call(iaMachine(), 'voices', { ia: R.iaCfg() }));
+r('POST', '/api/speak', 'observador', async ({ body, res }) => {
+  const mid = iaMachine();
+  need(String(body.text || '').trim(), 'Texto vacío');
+  const wav = Buffer.from(await host.call(mid, 'speak', { ia: R.iaCfg(), text: String(body.text).slice(0, 1500), voice: body.voice, speed: +body.speed || 1 }), 'base64');
+  res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+  res.end(wav);
+  return RAW;
+});
 
 // ---------- adjuntos (se entregan en .oficina/adjuntos de la carpeta de trabajo antes del turno) ----------
 const INLINE = /^(image\/(png|jpeg|gif|webp)|application\/pdf)$/;
@@ -755,7 +769,7 @@ function readBody(req, raw) {
 }
 const SEC_HEADERS = {
   'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'same-origin',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   ...(SECURE ? { 'Strict-Transport-Security': 'max-age=63072000; includeSubDomains' } : {}),
 };
 // rutas del agente de campo: autenticadas con su token, no con sesión de usuario

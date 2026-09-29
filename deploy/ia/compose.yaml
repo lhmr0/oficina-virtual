@@ -10,6 +10,7 @@ services:
     ports: ["0.0.0.0:8010:8010"]
     environment:
       IA_API_KEY_FILE: /run/secrets/api_key
+      CHATTERBOX_URL: http://chatterbox:8011/speak
       WHISPER_MODEL: ${WHISPER_MODEL:-large-v3-turbo}  # "small" es 3× más rápido y algo menos preciso
       IA_THREADS: "4"
       OMP_NUM_THREADS: "4"
@@ -19,5 +20,20 @@ services:
     cpus: 4
     mem_limit: 6g
     restart: unless-stopped
+  chatterbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.chatterbox
+    image: oficina-chatterbox-v3:1
+    volumes:
+      - chatterbox-cache:/cache
+    environment:
+      HF_HOME: /cache/hf
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+    cpus: 4
+    mem_limit: 12g
+    restart: unless-stopped
 volumes:
   ia-cache:
+  chatterbox-cache:
