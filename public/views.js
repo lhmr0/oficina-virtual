@@ -395,9 +395,9 @@ const estacion = {
           </div>
         </div>
         <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Repositorios y últimas ejecuciones">
-          <section class="repo-box" id="repoBox" hidden aria-label="Repositorios">
+          <section class="repo-box" id="repoBox" aria-label="Repositorios">
             <div class="station-aside-head"><b class="aside-title">⎇ Repositorios</b><button type="button" class="btn sm ghost" id="repoFetch" title="Traer el estado del remoto (git fetch)">⟳</button></div>
-            <div class="repo-body" id="repoBody"></div>
+            <div class="repo-body" id="repoBody"><div class="empty" style="padding:10px;font-size:11px">Cargando…</div></div>
           </section>
           <div class="station-aside-head">
             <b class="aside-title"><span class="dot ok"></span> Ejecuciones</b>
@@ -488,8 +488,7 @@ async function loadRepos(el, fetch = false) {
   if (fetch) body.innerHTML = '<div class="empty" style="padding:10px">Consultando remoto…</div>';
   const repos = await get(`/api/repos?fetch=${fetch ? 1 : 0}${S.project ? '&project_id=' + S.project : ''}`).catch(e => [{ folder: {}, error: e.message }]);
   if (!body.isConnected) return;
-  box.hidden = !repos.length;
-  body.innerHTML = repos.map(repoHTML).join('');
+  body.innerHTML = repos.map(repoHTML).join('') || `<div class="empty" style="padding:10px;font-size:11px">${S.project ? 'Este proyecto no tiene carpetas git.' : 'Ningún proyecto tiene carpetas git.'} Agrégalas en Proyecto → Carpetas.</div>`;
 }
 function repoHTML(x) {
   const f = x.folder, name = `${f.project_name || ''}${f.label ? ' · ' + f.label : ''}`;
