@@ -62,6 +62,7 @@ Principio rector: **el mapa comunica estado de un vistazo; las decisiones se tom
 | B7 | Cantina: «Últimas consultas» queda pegado o bajo la placa en la captura; el padding superior del desktop (`style.css:738`) no deja aire | Margen superior para `.room-info` dentro de `.stools` | bajo | S | hecha |
 | B8 | El Consejo con sesión previa muestra el resultado pero no ofrece acción; el estado vacío dice «Convoca uno» sin botón (`views.js:328-330`) | Botón «Convocar» en la sala, aunque toda la sala ya sea clicable | bajo | S | hecha |
 | B9 | «Más salas (2)» esconde Puente de Mando y Archivos dentro de un modal del mapa (`views.js:355, 591`); el número no dice si alguna sala oculta tiene actividad | Badge de actividad («1 en curso») en el botón; si hay áreas extra con tareas, avisar | bajo | S | hecha |
+| B10 | El pasillo (flechas, lámparas, droide) no parece una oficina y los agentes solo decían «Disponible/Trabajando». Cantina y Consejo ocupaban una fila entera del mapa con poca información | **Sala de agentes**: un puesto por agente con monitor del color de su estado, qué hace y en qué tarea («Espera tu respuesta · #4…», «En la Cantina · …», «Sin cuota · vuelve en 2 h») y barra de cuota; tu puesto muestra cuánto tienes por decidir y abre la Bandeja. Cantina y Consejo pasan a «Más salas» (siguen en el dock y el menú) | alto | M | hecha |
 
 ## C. Tablero Kanban
 
