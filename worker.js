@@ -1,6 +1,6 @@
 // Agente de campo: conecta ESTA PC con la oficina del VPS y ejecuta aquí agentes, git y archivos.
 // Conexión solo saliente (HTTPS): no hay que abrir puertos en la PC.
-// Config: worker.json junto a este archivo o variables OFICINA_URL / OFICINA_TOKEN / OFICINA_WORKER_ROOTS / OFICINA_WORKER_DATA / OFICINA_CANTINA.
+// Config: worker.json junto a este archivo ("deploy": {"<repo>": "<comando>"} habilita Desplegar) o variables OFICINA_URL / OFICINA_TOKEN / OFICINA_WORKER_ROOTS / OFICINA_WORKER_DATA / OFICINA_CANTINA.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -16,7 +16,7 @@ const CANTINA = process.env.OFICINA_CANTINA ?? file.cantina ?? 'D:/cantina'; // 
 if (!URL_ || !TOKEN) { console.error('Falta url/token: crea worker.json con {"url": "https://…", "token": "…"} (el token se genera en Configuración → Máquinas)'); process.exit(1); }
 fs.mkdirSync(path.join(DATA, 'sandbox'), { recursive: true });
 
-const H = create({ dataDir: DATA, strict: true, roots: ROOTS, cantina: CANTINA });
+const H = create({ dataDir: DATA, strict: true, roots: ROOTS, cantina: CANTINA, deploy: file.deploy });
 const auth = { Authorization: 'Bearer ' + TOKEN };
 const say = (...a) => console.log(new Date().toLocaleTimeString(), ...a);
 const sleep = ms => new Promise(r => setTimeout(r, ms));

@@ -842,3 +842,13 @@ dialog::backdrop { background: var(--dialog-backdrop); backdrop-filter: blur(3px
     max-height: 220px;
   }
 }
+
+/* Repositorios (encima de Ejecuciones) */
+.repo-box { flex: none; max-height: 55%; display: flex; flex-direction: column; border-bottom: 1px solid var(--line); }
+.repo-body { overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+.repo { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.repo .run-meta { font-size: 10px; color: var(--muted); }
+.repo-br { border-top: 1px dashed var(--line); padding-top: 4px; display: flex; flex-direction: column; gap: 2px; }
+.repo-br a { color: var(--text); text-decoration: none; font-size: 11px; }
+.repo-br a:hover { color: var(--yellow); }
+.repo-br .btn { align-self: flex-start; }

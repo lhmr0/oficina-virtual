@@ -672,6 +672,37 @@ r('POST', '/api/worktrees/clean', 'operador', async ({ body, user }) => {
   log(user.id, 'git', f.id, 'limpiar_worktree', { path: body.path });
   return { ok: true };
 });
+// ---------- Repositorios: ramas de tareas, fusión, push y despliegue desde la carpeta base ----------
+r('GET', '/api/repos', 'observador', async ({ query }) => {
+  const folders = all(`select f.*, p.name project_name, p.color from project_folders f join projects p on p.id=f.project_id
+    where f.is_git=1 and p.deleted_at is null ${query.project_id ? 'and p.id=?' : ''} order by p.name, f.id`, ...(query.project_id ? [+query.project_id] : []));
+  return Promise.all(folders.map(async f => {
+    const branches = all(`select id task_id, title, status, branch, base_branch base from tasks where folder_id=? and worktree_path is not null and branch is not null and deleted_at is null`, f.id);
+    try { return { folder: f, ...(await host.call(f.machine_id || host.defaultMachine(), 'repoStatus', { repo: f.path, fetch: query.fetch === '1', branches })) }; }
+    catch (e) { return { folder: f, error: e.message }; }
+  }));
+});
+const repoFolder = id => { const f = one('select * from project_folders where id=?', id); need(f?.is_git, 'Carpeta git inválida'); return f; };
+r('POST', '/api/folders/:id/push', 'operador', async ({ params, user }) => {
+  const f = repoFolder(+params.id);
+  const res = await host.call(f.machine_id || host.defaultMachine(), 'push', { repo: f.path });
+  if (res.error) throw new HttpError(409, res.error);
+  if (res.conflict) {
+    const nid = R.createTask({ project_id: f.project_id, folder_id: f.id, title: `Integrar cambios remotos en ${f.label || f.path}`, priority: 'alta',
+      prompt: `El remoto tiene commits que chocan con la rama base local. En tu carpeta ejecuta \`git pull --no-rebase\` desde el upstream de la rama base y resuelve los conflictos conservando los cambios de ambos lados (no descartes ninguno). Error de git:\n${res.conflict}` }, user.id);
+    throw new HttpError(409, `Conflicto con el remoto. Se creó la tarea #${nid} para resolverlo.`);
+  }
+  log(user.id, 'git', f.id, 'push', { head: res.head });
+  return res;
+});
+r('POST', '/api/folders/:id/deploy', 'operador', async ({ params, user }) => {
+  const f = repoFolder(+params.id);
+  const res = await host.call(f.machine_id || host.defaultMachine(), 'deploy', { repo: f.path });
+  if (res.error) throw new HttpError(409, res.error);
+  log(user.id, 'git', f.id, 'desplegar', { ok: res.ok, code: res.code });
+  notify(res.ok ? 'sistema' : 'fallo', `Despliegue ${res.ok ? 'terminado' : 'falló'}: ${f.label || f.path}`, res.output.slice(-300), '#/estacion');
+  return res;
+});
 r('POST', '/api/order66', 'admin', ({ user }) => ({ stopped: R.order66(user.id) }));
 r('POST', '/api/queue/resume', 'admin', ({ user }) => { R.resumeQueue(user.id); return { ok: true }; });
 r('POST', '/api/backup', 'admin', ({ user }) => { const f = S.backup(); log(user.id, 'sistema', null, 'respaldo', { f }); return { file: f }; });

@@ -30,6 +30,7 @@ Requisitos: Node 22+, git, y los CLIs de los agentes instalados y con sesión in
 1. Cada tarea con carpeta git corre en su propio **worktree** (`<repo>/.oficina-worktrees/task-N`, rama `oficina/task-N-…`), así varios agentes trabajan en paralelo sin pisarse. Sin git: corre en la carpeta (una tarea a la vez). Sin carpeta: en `data/sandbox/task-N`.
 2. El agente mantiene `.oficina/progreso.md` y termina cada turno con `[[CONSULTA]]` (te pregunta → notificación) o `[[LISTO]]` (pasa a Revisión).
 3. Al responder se **reanuda la misma sesión** del CLI. Al aprobar puedes fusionar la rama.
+   El agente **no** hace push ni despliega desde su rama (desplegar una rama pisaría lo que otras tareas ya integraron). Eso se hace en el panel **Repositorios** (encima de Ejecuciones en la Estación): cada repo git de cada proyecto con su rama base (↑/↓ respecto al remoto, cambios sin commit), las ramas de tareas pendientes (commits, archivos, si chocan con la base o tocan los mismos archivos que otra tarea), **Aprobar y fusionar**, **Push** (`pull --no-rebase` + push: nunca pisa lo remoto; si choca crea una tarea para resolverlo) y **Desplegar** desde la carpeta base. El comando de despliegue se define en la máquina, en `worker.json`: `"deploy": { "C:\\ruta\\repo": "bash C:/ruta/deploy.sh" }`.
 4. Si se agota la cuota: checkpoint git + snapshot de relevo; eliges quién continúa (o relevo automático por la cadena del área).
 5. Modo **supervisado** (Claude): cada permiso que pide aparece en vivo para aprobar/denegar.
 

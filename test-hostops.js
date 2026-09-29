@@ -117,6 +117,28 @@ async function main() {
     assert.throws(() => ops.readNewFile({ cwd: repo, name: '../outside.txt' }), /ruta|archivo/i, 'rechaza escapar del worktree');
     assert.deepEqual(ops.listNewFiles({ cwd: path.join(temp, 'no-existe') }), [], 'carpeta inexistente devuelve lista vacía');
 
+    // Repositorios: dos tareas tocan la misma línea → la segunda choca; push integra lo remoto sin perderlo
+    const g = (c, ...a) => execFileSync('git', ['-C', c, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const bare = path.join(temp, 'remoto.git'), main1 = path.join(temp, 'r1'), other = path.join(temp, 'r2');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]);
+    execFileSync('git', ['clone', '-q', bare, main1], { stdio: 'ignore' });
+    fs.writeFileSync(path.join(main1, 'a.txt'), 'uno\n'); g(main1, 'add', '-A'); g(main1, 'commit', '-qm', 'base'); g(main1, 'push', '-q', '-u', 'origin', 'HEAD:main');
+    for (const [b, txt] of [['t1', 'tarea1\n'], ['t2', 'tarea2\n']]) { g(main1, 'checkout', '-qb', b, 'main'); fs.writeFileSync(path.join(main1, 'a.txt'), txt); g(main1, 'commit', '-qam', b); }
+    g(main1, 'checkout', '-q', 'main');
+    let st = ops.repoStatus({ repo: main1, branches: [{ task_id: 1, branch: 't1' }, { task_id: 2, branch: 't2' }] });
+    assert.deepEqual(st.branches.map(b => b.conflicts.length), [0, 0], 'ambas ramas fusionan limpio contra main');
+    g(main1, 'merge', '-q', '--no-ff', '-m', 'm', 't1');
+    st = ops.repoStatus({ repo: main1, branches: [{ task_id: 2, branch: 't2' }] });
+    assert.deepEqual(st.branches[0].conflicts, ['a.txt'], 'tras fusionar t1, t2 choca en a.txt');
+    assert.equal(st.ahead, 2, 'main local va 2 commits adelante del remoto');
+    execFileSync('git', ['clone', '-q', bare, other], { stdio: 'ignore' });
+    fs.writeFileSync(path.join(other, 'b.txt'), 'remoto\n'); g(other, 'add', '-A'); g(other, 'commit', '-qm', 'otro'); g(other, 'push', '-q');
+    assert.ok(ops.push({ repo: main1 }).ok, 'push trae lo remoto y sube');
+    g(other, 'pull', '-q');
+    assert.equal(fs.readFileSync(path.join(other, 'a.txt'), 'utf8').trim(), 'tarea1','el remoto tiene lo de t1');
+    assert.equal(fs.readFileSync(path.join(other, 'b.txt'), 'utf8').trim(), 'remoto','y conserva lo que ya estaba en remoto');
+    assert.match((await ops.deploy({ repo: main1 })).error, /Sin comando/, 'sin "deploy" en la config no se ejecuta nada');
+
     console.log('OK hostops');
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });

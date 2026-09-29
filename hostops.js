@@ -1,7 +1,7 @@
 // Operaciones que se ejecutan EN LA MÁQUINA donde viven los archivos (esta PC):
 // git, carpetas, procesos de agentes, versiones. Las usa el servidor en modo local
 // y el agente de campo (worker.js) cuando la oficina corre en el VPS.
-const { spawn, execFile, execFileSync } = require('node:child_process');
+const { spawn, exec, execFile, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -18,6 +18,8 @@ function create(cfg) {
   const roots = (cfg.roots?.length ? cfg.roots : [os.homedir()]).map(r => canon(r));
   const runs = new Map(); // runId → proc
   const cantinaDir = cfg.cantina ? path.resolve(cfg.cantina) : null; // carpeta fija de las consultas rápidas en esta máquina
+  // cfg.deploy: { "<ruta repo>": "<comando>" } — solo se configura en la máquina, el servidor no puede mandar comandos arbitrarios
+  const deployCmd = r => Object.entries(cfg.deploy || {}).find(([p]) => canon(p).toLowerCase() === r.toLowerCase())?.[1];
 
   // ---------- rutas ----------
   function canon(p) { try { return fs.realpathSync.native(path.resolve(p)); } catch { return path.resolve(p); } }
@@ -192,6 +194,46 @@ function create(cfg) {
       tryGit(r, 'branch', '-d', branch);
       return { ok: true };
     },
+    // estado del repo base + ramas de tareas: commits, archivos y si chocan con la base (merge-tree no toca la carpeta)
+    repoStatus: ({ repo, fetch, branches = [] }) => {
+      const r = checkPath(repo);
+      if (fetch) tryGit(r, 'fetch', '--quiet');
+      const head = git(r, 'rev-parse', '--abbrev-ref', 'HEAD');
+      const up = tryGit(r, 'rev-parse', '--abbrev-ref', '@{u}');
+      const [behind, ahead] = up ? (tryGit(r, 'rev-list', '--left-right', '--count', `${up}...HEAD`) || '0 0').split(/\s+/).map(Number) : [null, null];
+      const lines = s => (s || '').split(/\r?\n/).filter(Boolean);
+      return {
+        head, upstream: up, ahead, behind, dirty: lines(tryGit(r, 'status', '--porcelain')).length, log: lines(tryGit(r, 'log', '--oneline', '-5')),
+        deploy: !!deployCmd(r),
+        branches: branches.map(b => {
+          const base = b.base || head;
+          if (!tryGit(r, 'rev-parse', '--verify', '--quiet', b.branch)) return { ...b, missing: true };
+          const [bBehind, bAhead] = (tryGit(r, 'rev-list', '--left-right', '--count', `${base}...${b.branch}`) || '0 0').split(/\s+/).map(Number);
+          let conflicts = [];
+          try { execFileSync('git', ['-C', r, 'merge-tree', '--write-tree', '--name-only', '--no-messages', base, b.branch], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); }
+          catch (e) { if (e.status === 1) conflicts = lines(String(e.stdout)).slice(1); }
+          return { ...b, ahead: bAhead, behind: bBehind, files: lines(tryGit(r, 'diff', '--name-only', `${base}...${b.branch}`)), conflicts };
+        }),
+      };
+    },
+    // trae lo remoto (merge, nunca rebase ni force) y sube la rama base: nada de lo ya publicado se pierde
+    push: ({ repo }) => {
+      const r = checkPath(repo);
+      if ((tryGit(r, 'status', '--porcelain') || '').trim()) return { error: 'La carpeta base tiene cambios sin commit' };
+      if (tryGit(r, 'rev-parse', '--abbrev-ref', '@{u}')) {
+        try { git(r, 'pull', '--no-rebase', '--no-edit'); }
+        catch (e) { tryGit(r, 'merge', '--abort'); return { conflict: String(e.stderr || e.message) }; }
+        git(r, 'push');
+      } else git(r, 'push', '-u', 'origin', 'HEAD');
+      return { ok: true, head: git(r, 'log', '--oneline', '-1') };
+    },
+    // despliega SIEMPRE desde la carpeta base (nunca desde un worktree): el comando vive en worker.json de esta máquina
+    deploy: ({ repo }) => new Promise(res => {
+      const r = checkPath(repo), cmd = deployCmd(r);
+      if (!cmd) return res({ error: 'Sin comando de despliegue para esta carpeta ("deploy" en worker.json)' });
+      exec(cmd, { cwd: r, timeout: 20 * 60000, maxBuffer: 20 * 1024 * 1024, windowsHide: true },
+        (e, out, err) => res({ ok: !e, code: e?.code ?? 0, output: (String(out) + String(err)).slice(-8000) }));
+    }),
     removeWorktree: ({ repo, path: p }) => { const r = checkPath(repo); if (!under(path.resolve(p), path.join(r, '.oficina-worktrees'))) throw new Error('Ruta inválida'); tryGit(r, 'worktree', 'remove', '--force', p); tryGit(r, 'worktree', 'prune'); return { ok: true }; },
     folderInfo: ({ path: p }) => {
       const exists = fs.existsSync(p);

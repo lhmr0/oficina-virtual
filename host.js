@@ -8,7 +8,8 @@ const { DATA, now, all, one, run, insert, update, bus, emit, log, setting } = re
 const H = require('./hostops');
 
 const LOCAL_EXEC = process.env.OFICINA_LOCAL_EXEC !== '0';
-const local = H.create({ dataDir: DATA, strict: false, cantina: process.env.OFICINA_CANTINA ?? (process.platform === 'win32' ? 'D:/cantina' : '') });
+const deployCfg = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'worker.json'), 'utf8')).deploy; } catch { return null; } })(); // mismo "deploy" que el agente de campo
+const local = H.create({ dataDir: DATA, strict: false, cantina: process.env.OFICINA_CANTINA ?? (process.platform === 'win32' ? 'D:/cantina' : ''), deploy: deployCfg });
 const PUBLIC_URL = (process.env.OFICINA_PUBLIC_URL || `http://127.0.0.1:${process.env.OFICINA_PORT || 4242}`).replace(/\/$/, '');
 
 if (LOCAL_EXEC && !one('select 1 from machines where is_local=1'))
@@ -48,7 +49,7 @@ async function call(mid, op, args = {}) {
     if (op === 'putFiles') return local.ops.putFiles(args, f => fs.readFileSync(attachmentFile(f.id)));
     return local.ops[op](args);
   }
-  return rpc(mid, op, args, op === 'convertDocs' ? 1800000 : op === 'detectModels' || op === 'merge' ? 180000 : 120000);
+  return rpc(mid, op, args, op === 'convertDocs' || op === 'deploy' ? 1800000 : ['detectModels', 'merge', 'push', 'repoStatus'].includes(op) ? 180000 : 120000);
 }
 
 // Lanza un proceso de agente; los eventos llegan a onEvent (local directo o remoto vía /api/worker/events)

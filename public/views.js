@@ -394,7 +394,11 @@ const estacion = {
             <div class="wing wing-bottom">${cantina}${consejo}</div>
           </div>
         </div>
-        <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Últimas ejecuciones">
+        <aside class="station-aside" id="stationAside" ${sideHidden ? 'hidden' : ''} aria-label="Repositorios y últimas ejecuciones">
+          <section class="repo-box" id="repoBox" hidden aria-label="Repositorios">
+            <div class="station-aside-head"><b class="aside-title">⎇ Repositorios</b><button type="button" class="btn sm ghost" id="repoFetch" title="Traer el estado del remoto (git fetch)">⟳</button></div>
+            <div class="repo-body" id="repoBody"></div>
+          </section>
           <div class="station-aside-head">
             <b class="aside-title"><span class="dot ok"></span> Ejecuciones</b>
             <div class="row" style="gap:4px">
@@ -433,9 +437,17 @@ const estacion = {
     </div>`;
 
     bindKanbanDrag(el, vis);
+    loadRepos(el);
 
     el.onclick = e => {
       if (e.target.closest('.kmove')) return;
+      if (e.target.closest('#repoFetch')) return loadRepos(el, true);
+      const rm = e.target.closest('[data-merge]');
+      if (rm) return approveDialog(tasks.find(t => t.id === +rm.dataset.merge));
+      const rp = e.target.closest('[data-push]');
+      if (rp) return act(() => post(`/api/folders/${rp.dataset.push}/push`), 'Push hecho').then(() => loadRepos(el), () => {});
+      const rd = e.target.closest('[data-deploy]');
+      if (rd) return deployRepo(rd.dataset.deploy, rd.dataset.name).then(() => loadRepos(el));
       const tk = e.target.closest('#toggleKanbanBtn');
       if (tk) {
         const isCollapsed = $('#stationKanban', el).classList.toggle('collapsed');
@@ -467,6 +479,55 @@ const estacion = {
     el.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('.kcard')) e.target.click(); };
   },
 };
+
+// ---------- Repositorios: estado de la rama base y de las ramas de cada tarea ----------
+// se carga aparte del mapa: consulta git en la máquina y puede tardar
+async function loadRepos(el, fetch = false) {
+  const box = $('#repoBox', el), body = $('#repoBody', el);
+  if (!box) return;
+  if (fetch) body.innerHTML = '<div class="empty" style="padding:10px">Consultando remoto…</div>';
+  const repos = await get(`/api/repos?fetch=${fetch ? 1 : 0}${S.project ? '&project_id=' + S.project : ''}`).catch(e => [{ folder: {}, error: e.message }]);
+  if (!body.isConnected) return;
+  box.hidden = !repos.length;
+  body.innerHTML = repos.map(repoHTML).join('');
+}
+function repoHTML(x) {
+  const f = x.folder, name = `${f.project_name || ''}${f.label ? ' · ' + f.label : ''}`;
+  if (x.error) return `<div class="repo"><b class="ellipsis">${h(name)}</b><small style="color:var(--red)">${h(x.error)}</small></div>`;
+  // archivos que tocan varias ramas pendientes: se fusionan bien si git no marca choque, pero conviene revisarlos juntos
+  const byFile = {};
+  for (const b of x.branches) for (const p of b.files || []) (byFile[p] ||= []).push(b.task_id);
+  const br = x.branches.map(b => {
+    const shared = [...new Set((b.files || []).flatMap(p => byFile[p].filter(id => id !== b.task_id)))];
+    const st = b.missing ? '<span class="muted">rama borrada</span>'
+      : !b.ahead ? '<span class="muted">ya integrada</span>'
+      : b.conflicts.length ? `<span style="color:var(--red)" title="${h(b.conflicts.join('\n'))}">⚠ choca (${b.conflicts.length})</span>`
+      : '<span style="color:var(--green)">✔ fusionable</span>';
+    return `<div class="repo-br">
+      <a href="#/tarea/${b.task_id}" class="ellipsis" title="${h(b.branch)}">#${b.task_id} ${h(b.title)}</a>
+      <div class="run-meta">${STATUS[b.status] || h(b.status)} · ${b.ahead || 0} commits · ${(b.files || []).length} arch · ${st}${b.behind ? ` · ${b.behind} atrás` : ''}${shared.length ? ` · <span style="color:var(--orange)" title="Tocan los mismos archivos">↔ #${shared.join(', #')}</span>` : ''}</div>
+      ${canEdit() && b.ahead && ['revision', 'esperando'].includes(b.status) ? `<button type="button" class="btn sm g" data-merge="${b.task_id}">Aprobar y fusionar</button>` : ''}
+    </div>`;
+  }).join('');
+  const sync = x.upstream ? `↑${x.ahead} ↓${x.behind}` : 'sin remoto';
+  return `<div class="repo" style="border-left:3px solid ${h(f.color || 'var(--line)')}">
+    <div class="row" style="justify-content:space-between;gap:4px"><b class="ellipsis" title="${h(f.path)}">${h(name)}</b><code title="${h(x.log.join('\n'))}">${h(x.head)}</code></div>
+    <div class="run-meta">${sync}${x.dirty ? ` · <span style="color:var(--orange)">${x.dirty} sin commit</span>` : ''} · ${x.branches.filter(b => b.ahead).length} ramas pendientes</div>
+    ${br}
+    ${canEdit() ? `<div class="row" style="gap:4px">
+      <button type="button" class="btn sm" data-push="${f.id}" title="git pull --no-rebase + push de ${h(x.head)}: nunca pisa lo remoto">⇅ Push${x.ahead ? ` (${x.ahead})` : ''}</button>
+      ${x.deploy ? `<button type="button" class="btn sm y" data-deploy="${f.id}" data-name="${h(name)}" title="Despliega desde la carpeta base (${h(x.head)}), no desde una rama">🚀 Desplegar</button>` : ''}
+    </div>` : ''}
+  </div>`;
+}
+async function deployRepo(id, name) {
+  if (!await confirmBox(`¿Desplegar ${name}? Se despliega la rama base tal como está en la carpeta (haz push antes si corresponde).`, 'Desplegar', true)) return;
+  holo('Desplegando…', name, { ms: 4000 });
+  try {
+    const r = await post(`/api/folders/${id}/deploy`);
+    modal(`<h2>${r.ok ? '✔ Despliegue terminado' : '✖ Despliegue falló'}</h2><small>${h(name)}</small><div class="console" style="height:300px">${h(r.output)}</div><button class="btn ghost" value="c">Cerrar</button>`);
+  } catch (e) { fail(e); }
+}
 
 // ficha rápida del agente (en móvil no hay hover para ver estado y cuota)
 function agentCard(a, tasks, busy) {

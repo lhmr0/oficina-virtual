@@ -20,7 +20,9 @@ const RULES_CHAT = 'Esta oficina es un centro de comandos de proyectos y tambié
 const VOZ = '(Este mensaje se dictó por voz y se transcribió automáticamente: puede tener errores de transcripción. Interpreta la intención; si algo clave es ambiguo, pregunta antes de actuar. Responde breve y claro.)';
 // servicio de IA del servidor interno (deploy/ia): voz → texto y adjuntos → texto. Sin OFICINA_IA_URL queda apagado
 const iaCfg = () => process.env.OFICINA_IA_URL ? { url: process.env.OFICINA_IA_URL, key: process.env.OFICINA_IA_KEY || '' } : null;
-const REMINDER = '(Recuerda: termina con [[LISTO]] y un resumen si terminaste, o con [[CONSULTA]] y la pregunta si necesitas una decisión.)';
+// varias tareas trabajan el mismo repo en ramas propias: si una despliega su rama, pisa en el servidor lo que otra ya integró
+const WORKTREE_RULE = '## Git\nTrabajas en tu propia rama (worktree), en paralelo con otras tareas del mismo repositorio. NO hagas push, merge a la rama principal ni despliegues desde esta carpeta: desplegar tu rama borraría en el servidor lo que otras tareas ya integraron. Haz tus commits aquí; al aprobar, la oficina fusiona tu rama y el usuario hace push y despliega desde el panel Repositorios. Si la tarea pide desplegar, déjalo indicado en tu resumen.';
+const REMINDER ='(Recuerda: termina con [[LISTO]] y un resumen si terminaste, o con [[CONSULTA]] y la pregunta si necesitas una decisión.)';
 // estado que hooks/herramientas del usuario dejan en cada carpeta (solo afecta archivos sin versionar)
 const DEFAULT_EXCLUDE = ['.ijfw/', '.serena/', '/AGENTS.md', '/CLAUDE.md'];
 
@@ -613,6 +615,7 @@ function taskPrompt(t, extra = '') {
     `# Tarea #${t.id}: ${t.title}${area ? ` (Área: ${area.name})` : ''}`, t.prompt || '',
     deps.length ? `# Resultado de tareas previas\n${deps.map(d => `## #${d.id} ${d.title}\n${d.summary || '(sin resumen)'}`).join('\n\n')}` : '',
     t.review_comment ? `# Comentario del revisor (corrige esto)\n${t.review_comment}` : '',
+    folderOf(t)?.is_git && folderOf(t).use_worktrees ? WORKTREE_RULE : '',
     extra].filter(Boolean).join('\n\n');
 }
 
@@ -778,7 +781,7 @@ async function approveTask(taskId, userId, { merge = false } = {}) {
     if (r.error) throw new Error(r.error);
     if (r.conflict) {
       const nid = createTask({ project_id: t.project_id, area_id: t.area_id, folder_id: t.folder_id, title: `Resolver conflicto al fusionar tarea #${t.id}`,
-        prompt: `Fusiona la rama ${t.branch} en ${t.base_branch} resolviendo los conflictos. Error de git:\n${r.conflict}`, agent_id: t.agent_id, priority: 'alta' }, userId);
+        prompt: `Tu rama parte de ${t.base_branch} ya actualizada. En tu carpeta ejecuta \`git merge ${t.branch}\` y resuelve los conflictos conservando los cambios de ambos lados (no descartes lo que otras tareas ya integraron). Al aprobar esta tarea la oficina fusiona el resultado. Error de git:\n${r.conflict}`, agent_id: t.agent_id, priority: 'alta' }, userId);
       notify('fallo', `Conflicto al fusionar tarea #${t.id}`, `Se creó la tarea #${nid} para resolverlo.`, `#/tarea/${nid}`);
       throw new Error(`Conflicto al fusionar. Se creó la tarea #${nid} para resolverlo.`);
     }
