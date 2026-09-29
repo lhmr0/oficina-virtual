@@ -801,9 +801,20 @@ function gitRepo(name) {
 
     // Probar detectModelEfforts en hostops
     const clModelEfforts = await H.ops.detectModelEfforts({ adapter: 'claude', exe: 'claude' });
-    assert.ok(clModelEfforts['sonnet']?.includes('high'));
+    assert.ok(clModelEfforts['claude-sonnet-5-5']?.includes('high'));
+    assert.deepEqual(await H.ops.detectModels({ adapter: 'claude', exe: 'claude' }), require('./hostops').CLAUDE_MODELS);
     const agyModelEfforts = await H.ops.detectModelEfforts({ adapter: 'agy', exe: 'agy' });
     assert.deepEqual(agyModelEfforts['gemini-3.8-flash-high'], ['high']);
+
+    // Claude: la migración quita alias/IDs viejos (duplicados) y deja Sonnet 5.5; conserva lo agregado a mano
+    const cl = one("select id from agents where key='claude'");
+    update('agents', cl.id, { models: JSON.stringify(['sonnet', 'claude-sonnet-5', 'opus', 'mi-modelo']), model_efforts: JSON.stringify({ sonnet: ['low'], 'mi-modelo': ['high'] }), default_model: 'sonnet' });
+    require('./db').migrateClaudeModels();
+    const cl2 = one("select models, model_efforts, default_model, prices from agents where id=?", cl.id);
+    assert.deepEqual(JSON.parse(cl2.models), [...require('./hostops').CLAUDE_MODELS, 'mi-modelo']);
+    assert.deepEqual(JSON.parse(cl2.model_efforts), { 'mi-modelo': ['high'] });
+    assert.equal(cl2.default_model, 'claude-sonnet-5-5');
+    assert.deepEqual(JSON.parse(cl2.prices)['claude-sonnet-5-5'], [2, 10, 0.2]);
 
     // Probar actualizar-modelos.js con una base de datos de prueba
     const { collectAgentData, syncAgentsToDb } = require('./actualizar-modelos');

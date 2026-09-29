@@ -8,6 +8,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const https = require('node:https');
 
+// Claude CLI no tiene comando para listar modelos: IDs completos (sin alias sonnet/opus…, que duplicaban la lista). Actualizar al salir uno nuevo.
+const CLAUDE_MODELS = ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5'];
+
 // cfg: { dataDir, strict, roots[], cantina } — strict = agente de campo: solo CLIs conocidos y rutas bajo roots (más la carpeta de la Cantina)
 function create(cfg) {
   const dataDir = cfg.dataDir;
@@ -306,7 +309,7 @@ function create(cfg) {
         } catch {}
         return (await run(['--list-models'])).split(/\r?\n/).map(l => l.trim().split(/\s+/)[0]).filter(x => /^[\w.-]+\/[\w.-]+$/.test(x));
       }
-      if (adapter === 'claude') return ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'];
+      if (adapter === 'claude') return CLAUDE_MODELS;
       return [];
     },
     detectEfforts: async ({ adapter, exe, pre_args = [] }) => {
@@ -363,8 +366,7 @@ function create(cfg) {
         return res;
       }
       if (adapter === 'claude') {
-        const ms = ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'];
-        for (const m of ms) res[m] = ['low', 'medium', 'high', 'xhigh', 'max'];
+        for (const m of CLAUDE_MODELS) res[m] = ['low', 'medium', 'high', 'xhigh', 'max'];
         return res;
       }
       if (adapter === 'agy') {
@@ -569,4 +571,4 @@ $d = New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Console]::In.ReadT
   return { ops, spawnRun, canon, runs };
 }
 
-module.exports = { create };
+module.exports = { create, CLAUDE_MODELS };
