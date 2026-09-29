@@ -257,9 +257,22 @@ document.addEventListener('click', async e => {
   if (text && ta) { ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + text; ta.dataset.voz = '1'; ta.focus(); }
 });
 
-// Voz para leer (por dispositivo, en Mi perfil): 'ia:<id>' = servidor interno (Piper/Kokoro), 'nav:<nombre>' = voz del navegador
-export const voicePrefs = () => ({ voice: localStorage.getItem('ov_voice') || (S.boot?.ia ? 'ia:piper-claude' : ''),
+// Voz para leer (por dispositivo, en Mi perfil): 'ia:<id>' = servidor interno, 'nav:<nombre>' = voz del navegador
+export const voicePrefs = () => ({ voice: localStorage.getItem('ov_voice') || (S.boot?.ia ? 'ia:chatterbox-latam' : ''),
   speed: +localStorage.getItem('ov_voice_speed') || 1, read: localStorage.getItem('ov_read_notif') === '1' });
+export function splitSpeechText(text, limit = 180) {
+  const chunks = [];
+  while (text.length > limit) {
+    const part = text.slice(0, limit);
+    const pause = [...part.matchAll(/[.!?;:]\s+/g)].at(-1);
+    const space = part.lastIndexOf(' ');
+    const cut = pause && pause.index >= limit / 2 ? pause.index + pause[0].length : space >= limit / 2 ? space + 1 : limit;
+    chunks.push(text.slice(0, cut).trim());
+    text = text.slice(cut).trim();
+  }
+  if (text) chunks.push(text);
+  return chunks;
+}
 let audio = null;
 let speechRequest = null, speechSeq = 0;
 export function stopSpeaking() { speechSeq++; speechRequest?.abort(); speechRequest = null; if (audio) { audio.pause(); audio = null; } window.speechSynthesis?.cancel(); }
@@ -271,17 +284,21 @@ export async function speak(text, prefs = voicePrefs()) {
   if (!text) return;
   if (prefs.voice.startsWith('ia:') && S.boot?.ia) {
     try {
-      const controller = speechRequest = new AbortController();
-      const r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal, body: JSON.stringify({ text: text.slice(0, 1500), voice: prefs.voice.slice(3), speed: prefs.speed }) });
-      if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Error ${r.status}`);
-      const blob = await r.blob();
-      if (seq !== speechSeq) return;
-      speechRequest = null;
-      const a = audio = new Audio(URL.createObjectURL(blob));
-      const ended = new Promise(res => { a.onended = a.onpause = res; });
-      await a.play();
-      await ended;
-      URL.revokeObjectURL(a.src); if (audio === a) audio = null;
+      const chunks = prefs.voice === 'ia:chatterbox-latam' ? splitSpeechText(text.slice(0, 1500)) : [text.slice(0, 1500)];
+      for (const chunk of chunks) {
+        if (seq !== speechSeq) return;
+        const controller = speechRequest = new AbortController();
+        const r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal, body: JSON.stringify({ text: chunk, voice: prefs.voice.slice(3), speed: prefs.speed }) });
+        if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Error ${r.status}`);
+        const blob = await r.blob();
+        if (seq !== speechSeq) return;
+        speechRequest = null;
+        const a = audio = new Audio(URL.createObjectURL(blob));
+        const ended = new Promise(res => { a.onended = a.onpause = res; });
+        await a.play();
+        await ended;
+        URL.revokeObjectURL(a.src); if (audio === a) audio = null;
+      }
       return;
     } catch (err) {
       if (seq !== speechSeq || err.name === 'AbortError') return;

@@ -2,11 +2,11 @@
 #   POST /transcribe            audio (webm/ogg/wav/mp3…) → {"text"}            Whisper (faster-whisper, CPU)
 #   POST /convert?name=x.pdf    PDF/DOCX/XLSX/PPTX/HTML → {"md", "pages", "ocr"}   (PDF escaneado → OCR en español)
 #   GET  /voices                → voces de texto a voz disponibles
-#   POST /speak                 {"text", "voice", "speed"} → audio WAV   (Piper o Kokoro, locales)
+#   POST /speak                 {"text", "voice", "speed"} → audio WAV   (Piper/Kokoro locales o Chatterbox interno)
 #   GET  /health
 # Laya (detector de inyección) se probó y se descartó: marcaba como sospechoso casi todo documento formal (tarea #29).
 # Todo exige Authorization: Bearer <clave> (IA_API_KEY_FILE). La oficina lo llama desde la PC (agente de campo).
-import hashlib, io, json, os, pathlib, threading, time, urllib.request, wave
+import hashlib, io, json, math, os, pathlib, threading, time, urllib.error, urllib.request, wave
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
@@ -18,6 +18,7 @@ WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_PROMPT = os.environ.get("WHISPER_PROMPT", "Oficina Virtual: tarea, proyecto, Cantina, Consejo Jedi, Puente de Mando, Kanban, "
                                 "Claude, Codex, Antigravity, CommandCode, agente, desplegar, VPS, worktree, commit, push, sij_ws, Laya.")
 THREADS = int(os.environ.get("IA_THREADS", "4"))
+CHATTERBOX_URL = os.environ.get("CHATTERBOX_URL")
 
 app = FastAPI()
 _whisper, _wlock, _plock = None, threading.Lock(), threading.Lock()
@@ -66,6 +67,7 @@ PIPER = {"piper-claude": ("Claude · México (Piper)", "es_MX/claude/high/es_MX-
          "piper-ald": ("Ald · México (Piper)", "es_MX/ald/medium/es_MX-ald-medium"),
          "piper-sharvard": ("Sharvard · España (Piper)", "es_ES/sharvard/medium/es_ES-sharvard-medium")}
 KOKORO = {"kokoro-dora": ("Dora (Kokoro)", "ef_dora"), "kokoro-alex": ("Alex (Kokoro)", "em_alex"), "kokoro-santa": ("Santa (Kokoro)", "em_santa")}
+CHATTERBOX = {"chatterbox-latam": ("Latinoamérica (Chatterbox V3 · lenta en CPU)", None)}
 VOICES = CACHE / "voces"; VOICES.mkdir(exist_ok=True)
 _voices, _tlock = {}, threading.Lock()
 
@@ -96,7 +98,25 @@ def voice(vid):
 @app.get("/voices")
 def voices(req: Request):
     auth(req)
-    return [{"id": k, "label": v[0]} for k, v in {**PIPER, **KOKORO}.items()]
+    return [{"id": k, "label": v[0]} for k, v in {**PIPER, **KOKORO, **CHATTERBOX}.items()]
+
+
+def synthesize_chatterbox(text, speed):
+    # En CPU una frase corta ya tarda decenas de segundos; limitarla evita agotar el RPC de campo.
+    if len(text) > 180:
+        raise HTTPException(400, "Chatterbox admite hasta 180 caracteres por aviso")
+    if not CHATTERBOX_URL:
+        raise HTTPException(503, "el servicio Chatterbox no está configurado")
+    data = json.dumps({"text": text, "speed": speed}).encode()
+    request = urllib.request.Request(CHATTERBOX_URL, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=105) as response:
+            wav = response.read(10_000_001)
+        if len(wav) > 10_000_000 or not wav.startswith(b"RIFF") or wav[8:12] != b"WAVE":
+            raise HTTPException(503, "respuesta de voz Chatterbox inválida")
+        return wav
+    except (urllib.error.URLError, OSError, TimeoutError) as error:
+        raise HTTPException(503, "la voz Chatterbox no está disponible") from error
 
 
 def synthesize(text, vid, speed):
@@ -124,9 +144,14 @@ async def speak(req: Request):
         speed = min(max(float(b.get("speed") or 1), 0.5), 2)
     except (TypeError, ValueError):
         raise HTTPException(400, "velocidad inválida")
+    if not math.isfinite(speed):
+        raise HTTPException(400, "velocidad inválida")
     if not text:
         raise HTTPException(400, "texto vacío")
-    wav = await run_in_threadpool(synthesize, text, vid, speed)
+    if vid in CHATTERBOX:
+        wav = await run_in_threadpool(synthesize_chatterbox, text, speed)
+    else:
+        wav = await run_in_threadpool(synthesize, text, vid, speed)
     return Response(wav, media_type="audio/wav")
 
 

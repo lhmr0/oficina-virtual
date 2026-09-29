@@ -1,0 +1,7 @@
+# Ambos servicios comparten este contexto: enviar solo archivos de construcción.
+**
+!Dockerfile
+!Dockerfile.chatterbox
+!app.py
+!chatterbox_service.py
+!referencia-latam.wav
