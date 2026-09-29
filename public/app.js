@@ -1,7 +1,7 @@
 // Arranque, login, shell, router, tiempo real (SSE) y bandeja de pendientes
 import { S, get, post, put, h, $, $$, holo, fail, beep, agentChip, chip, ago, isAdmin, canEdit, project, opts, linkLabels, applyTheme } from './core.js';
 import { userSprite } from './sprites.js';
-import { VIEWS, taskForm, missionForm, approveDialog } from './views.js';
+import { VIEWS, taskForm, missionForm, approveDialog, vozForm } from './views.js';
 import { captureInputState, restoreInputState, captureReplyDrafts, restoreReplyDrafts } from './ui-state.js';
 
 const app = document.getElementById('app');
@@ -67,6 +67,7 @@ const ICONS = {
   rocket: '<path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2M9 13l2 2M14 4c3-1 6-1 6-1s0 3-1 6l-7 7-5-5z"/><circle cx="15" cy="9" r="1.5"/>',
   moon: '<path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/>',
   sound: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/>',
+  mic: '<rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 17.5V21M8 21h8"/>',
   logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l-5-5 5-5M5 12h11"/>',
 };
 const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
@@ -93,6 +94,7 @@ function shell() {
     <a href="#/kanban" data-nav="kanban">${ic('board')}<span>Kanban</span></a>
     <a href="#/cantina" data-nav="cantina">${ic('chat')}<span>Cantina</span></a>
     ${canEdit() ? `<button id="dNew" class="dock-y">${ic('plus')}<span>Tarea</span></button>` : ''}
+    ${S.boot?.ia && navigator.mediaDevices?.getUserMedia && window.MediaRecorder ? `<button id="dVoz" title="Órdenes por voz: crear tareas, preguntar a la Cantina, navegar">${ic('mic')}<span>Voz</span></button>` : ''}
     <button id="dFind" title="Buscar y navegar (Ctrl+K)">${ic('search')}<span>Buscar</span><kbd>Ctrl K</kbd></button>
     <button class="bell" id="bellBtn">${ic('bell')}<span>Bandeja</span><span class="n" id="bellN" hidden></span></button>
   </nav>
@@ -141,6 +143,7 @@ function shell() {
   $('#soundBtn').onclick = e => { S.sound = !S.sound; localStorage.setItem('ov_sound', S.sound ? '1' : '0'); e.currentTarget.setAttribute('aria-checked', S.sound); if (S.sound) beep('ok'); };
   $('#mMission')?.addEventListener('click', () => { toggleMenu(false); missionForm(); });
   $('#dNew')?.addEventListener('click', () => taskForm());
+  $('#dVoz')?.addEventListener('click', () => vozForm());
   $('#dFind').onclick = openPalette;
   $('#bellBtn').onclick = toggleInbox;
   $('#resumeQ')?.addEventListener('click', () => post('/api/queue/resume').catch(fail));

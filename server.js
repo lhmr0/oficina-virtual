@@ -350,7 +350,8 @@ r('GET', '/api/tasks/:id/diff', 'observador', async ({ params }) => {
 r('POST', '/api/tasks', 'operador', ({ body, user }) => {
   need(body.title?.trim() && body.project_id, 'Título y proyecto requeridos');
   if (body.folder_id) need(one('select 1 from project_folders where id=? and project_id=?', +body.folder_id, +body.project_id), 'La carpeta no pertenece al proyecto');
-  const id = R.createTask({ ...body, title: body.title.trim() }, user.id);
+  const prompt = body.voz && body.prompt ? `${body.prompt}\n\n${R.VOZ}` : body.prompt;
+  const id = R.createTask({ ...body, prompt, title: body.title.trim() }, user.id);
   if (body.run && body.executor !== 'humano') R.runTask(id, user.id).catch(e => notify('fallo', `No se pudo ejecutar #${id}`, e.message, `#/tarea/${id}`));
   return { id };
 });

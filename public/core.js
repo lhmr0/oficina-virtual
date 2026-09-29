@@ -220,31 +220,42 @@ export const formData = el => Object.fromEntries([...el.querySelectorAll('[name]
 export const micBtn = sel => S.boot?.ia && navigator.mediaDevices?.getUserMedia && window.MediaRecorder ? `<button type="button" class="btn ghost" data-mic="${sel}" title="Dictar por voz (pulsa otra vez para terminar)">🎤</button>` : '';
 export const isDictated = ta => { const v = ta?.dataset.voz === '1'; if (ta) delete ta.dataset.voz; return v; };
 let recording = null;
+// graba del micrófono; al parar entrega el audio a onStop. Lanza si el navegador no concede permiso.
+export async function startRecording(onStop) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const chunks = [], rec = new MediaRecorder(stream);
+  rec.ondataavailable = ev => ev.data.size && chunks.push(ev.data);
+  rec.onstop = () => { stream.getTracks().forEach(t => t.stop()); recording = null; onStop(new Blob(chunks, { type: rec.mimeType || 'audio/webm' })); };
+  rec.start(); recording = rec;
+  return rec;
+}
+export const stopRecording = () => { const r = recording; if (r) r.stop(); return r; };
+export const isRecording = () => recording;
+// audio → texto con Whisper (servicio de IA del servidor interno, a través del agente de campo)
+export async function transcribir(blob) {
+  const r = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(j?.error || `Error ${r.status}`);
+  return j?.text || '';
+}
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-mic]'); if (!b) return;
   e.preventDefault();
-  if (recording) return recording.stop(); // segundo clic: termina y transcribe
+  if (isRecording()) return stopRecording(); // segundo clic: termina y transcribe
   const sel = b.dataset.mic; if (!document.querySelector(sel)) return;
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { return fail('No se pudo usar el micrófono: revisa el permiso del navegador'); }
-  const chunks = [], rec = new MediaRecorder(stream);
-  rec.ondataavailable = ev => ev.data.size && chunks.push(ev.data);
-  rec.onstop = async () => {
-    stream.getTracks().forEach(t => t.stop()); recording = null;
-    // la vista pudo re-renderizarse mientras hablabas: se buscan de nuevo el botón y el textarea
-    const btn = () => document.querySelector(`[data-mic="${sel}"]`) || b;
-    Object.assign(btn(), { textContent: '⏳', disabled: true }); btn().classList.remove('r');
-    try {
-      const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-      const r = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
-      const j = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(j?.error || `Error ${r.status}`);
-      const ta = document.querySelector(sel);
-      if (j.text && ta) { ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + j.text; ta.dataset.voz = '1'; ta.focus(); }
-      else if (!j.text) holo('No se entendió el audio', 'Intenta hablar más cerca del micrófono.');
-    } catch (err) { fail(err); } finally { Object.assign(btn(), { textContent: '🎤', disabled: false }); }
-  };
-  rec.start(); recording = rec;
+  try {
+    await startRecording(async blob => {
+      // la vista pudo re-renderizarse mientras hablabas: se buscan de nuevo el botón y el textarea
+      const btn = () => document.querySelector(`[data-mic="${sel}"]`) || b;
+      Object.assign(btn(), { textContent: '⏳', disabled: true }); btn().classList.remove('r');
+      try {
+        const text = await transcribir(blob);
+        const ta = document.querySelector(sel);
+        if (text && ta) { ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + text; ta.dataset.voz = '1'; ta.focus(); }
+        else if (!text) holo('No se entendió el audio', 'Intenta hablar más cerca del micrófono.');
+      } catch (err) { fail(err); } finally { Object.assign(btn(), { textContent: '🎤', disabled: false }); }
+    });
+  } catch { return fail('No se pudo usar el micrófono: revisa el permiso del navegador'); }
   b.textContent = '⏹'; b.classList.add('r');
 });
 document.addEventListener('click', e => {
