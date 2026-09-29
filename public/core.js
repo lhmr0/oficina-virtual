@@ -215,44 +215,83 @@ export function promptBox(title, label, value = '', multiline) {
 }
 export const formData = el => Object.fromEntries([...el.querySelectorAll('[name]')].map(i => [i.name, i.type === 'checkbox' ? i.checked : i.value]));
 
-// ---------- voz: 🎤 dicta en un textarea (Whisper en el servidor interno) y 🔊 lee en voz alta (voz del navegador) ----------
+// ---------- voz: 🎤 dicta (Whisper en el servidor interno) y 🔊 lee en voz alta (voz del servidor o del navegador) ----------
 // micBtn('#id') junto al textarea; al enviar, voz: isDictated(ta) avisa al agente que el texto viene de un dictado
-export const micBtn = sel => S.boot?.ia && navigator.mediaDevices?.getUserMedia && window.MediaRecorder ? `<button type="button" class="btn ghost" data-mic="${sel}" title="Dictar por voz (pulsa otra vez para terminar)">🎤</button>` : '';
+export const canListen = () => !!(S.boot?.ia && navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+export const micBtn = sel => canListen() ? `<button type="button" class="btn ghost" data-mic="${sel}" title="Dictar por voz (pulsa otra vez para terminar)">🎤</button>` : '';
 export const isDictated = ta => { const v = ta?.dataset.voz === '1'; if (ta) delete ta.dataset.voz; return v; };
+export function paintMic(b, st) { // st: rec | busy | idle
+  const t = b.querySelector('.mi') || b;
+  t.textContent = st === 'rec' ? '⏹' : st === 'busy' ? '⏳' : (b.dataset.icon || '🎤');
+  b.disabled = st === 'busy'; b.classList.toggle('r', st === 'rec');
+}
 let recording = null;
+// Graba hasta el siguiente clic en cualquier 🎤 y devuelve lo transcrito ('' si no se entendió; null si falló o si este clic solo detuvo la grabación)
+export async function listen(onState = () => {}) {
+  if (recording) { recording.stop(); return null; }
+  stopSpeaking();
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { fail('No se pudo usar el micrófono: revisa el permiso del navegador'); return null; }
+  const chunks = [], rec = new MediaRecorder(stream);
+  rec.ondataavailable = ev => ev.data.size && chunks.push(ev.data);
+  const stopped = new Promise(res => { rec.onstop = res; });
+  rec.start(); recording = rec; onState('rec');
+  await stopped;
+  stream.getTracks().forEach(t => t.stop()); recording = null; onState('busy');
+  try {
+    const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+    const r = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
+    const j = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(j?.error || `Error ${r.status}`);
+    if (!j.text) holo('No se entendió el audio', 'Intenta hablar más cerca del micrófono.');
+    return j.text || '';
+  } catch (err) { fail(err); return null; } finally { onState('idle'); }
+}
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-mic]'); if (!b) return;
   e.preventDefault();
-  if (recording) return recording.stop(); // segundo clic: termina y transcribe
   const sel = b.dataset.mic; if (!document.querySelector(sel)) return;
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { return fail('No se pudo usar el micrófono: revisa el permiso del navegador'); }
-  const chunks = [], rec = new MediaRecorder(stream);
-  rec.ondataavailable = ev => ev.data.size && chunks.push(ev.data);
-  rec.onstop = async () => {
-    stream.getTracks().forEach(t => t.stop()); recording = null;
-    // la vista pudo re-renderizarse mientras hablabas: se buscan de nuevo el botón y el textarea
-    const btn = () => document.querySelector(`[data-mic="${sel}"]`) || b;
-    Object.assign(btn(), { textContent: '⏳', disabled: true }); btn().classList.remove('r');
-    try {
-      const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-      const r = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
-      const j = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(j?.error || `Error ${r.status}`);
-      const ta = document.querySelector(sel);
-      if (j.text && ta) { ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + j.text; ta.dataset.voz = '1'; ta.focus(); }
-      else if (!j.text) holo('No se entendió el audio', 'Intenta hablar más cerca del micrófono.');
-    } catch (err) { fail(err); } finally { Object.assign(btn(), { textContent: '🎤', disabled: false }); }
-  };
-  rec.start(); recording = rec;
-  b.textContent = '⏹'; b.classList.add('r');
+  // la vista pudo re-renderizarse mientras hablabas: se buscan de nuevo el botón y el textarea
+  const text = await listen(st => paintMic(document.querySelector(`[data-mic="${sel}"]`) || b, st));
+  const ta = document.querySelector(sel);
+  if (text && ta) { ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + text; ta.dataset.voz = '1'; ta.focus(); }
 });
+
+// Voz para leer (por dispositivo, en Mi perfil): 'ia:<id>' = servidor interno (Piper/Kokoro), 'nav:<nombre>' = voz del navegador
+export const voicePrefs = () => ({ voice: localStorage.getItem('ov_voice') || (S.boot?.ia ? 'ia:piper-claude' : ''),
+  speed: +localStorage.getItem('ov_voice_speed') || 1, read: localStorage.getItem('ov_read_notif') === '1' });
+let audio = null;
+export function stopSpeaking() { if (audio) { audio.pause(); audio = null; } window.speechSynthesis?.cancel(); }
+export const isSpeaking = () => !!audio || !!window.speechSynthesis?.speaking;
+export async function speak(text, prefs = voicePrefs()) {
+  stopSpeaking();
+  text = String(text || '').replace(/\[\[\w+\]\]|[*_`#>]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!text) return;
+  if (prefs.voice.startsWith('ia:') && S.boot?.ia) {
+    try {
+      const r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text.slice(0, 1500), voice: prefs.voice.slice(3), speed: prefs.speed }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Error ${r.status}`);
+      const a = audio = new Audio(URL.createObjectURL(await r.blob()));
+      const ended = new Promise(res => { a.onended = a.onpause = res; });
+      await a.play();
+      await ended;
+      URL.revokeObjectURL(a.src); if (audio === a) audio = null;
+      return;
+    } catch (err) {
+      audio = null;
+      if (err.name === 'NotAllowedError') return; // el navegador no deja sonar hasta que toques la página una vez
+    } // si el servidor no responde, lee la voz del navegador
+  }
+  if (!window.speechSynthesis) return;
+  const u = new SpeechSynthesisUtterance(text); u.lang = 'es-ES'; u.rate = prefs.speed;
+  const v = speechSynthesis.getVoices().find(x => 'nav:' + x.name === prefs.voice) || speechSynthesis.getVoices().find(x => /^es/i.test(x.lang));
+  if (v) { u.voice = v; u.lang = v.lang; }
+  await new Promise(res => { u.onend = u.onerror = res; speechSynthesis.speak(u); });
+}
 document.addEventListener('click', e => {
-  const b = e.target.closest('[data-say]'); if (!b || !window.speechSynthesis) return;
-  if (speechSynthesis.speaking) return speechSynthesis.cancel();
-  const txt = b.closest('.msg')?.querySelector('.body')?.innerText.replace(/\[\[\w+\]\]/g, '') || '';
-  const u = new SpeechSynthesisUtterance(txt); u.lang = 'es-ES';
-  speechSynthesis.speak(u);
+  const b = e.target.closest('[data-say]'); if (!b) return;
+  if (isSpeaking()) return stopSpeaking();
+  speak(b.closest('.msg')?.querySelector('.body')?.innerText || '');
 });
 
 // ---------- hologramas (toasts) ----------

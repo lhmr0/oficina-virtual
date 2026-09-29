@@ -1,12 +1,14 @@
 # Servicio de IA local para la Oficina Virtual (corre en el servidor interno, no en el VPS):
 #   POST /transcribe            audio (webm/ogg/wav/mp3…) → {"text"}            Whisper (faster-whisper, CPU)
 #   POST /convert?name=x.pdf    PDF/DOCX/XLSX/PPTX/HTML → {"md", "pages", "ocr"}   (PDF escaneado → OCR en español)
+#   GET  /voices                → voces de texto a voz disponibles
+#   POST /speak                 {"text", "voice", "speed"} → audio WAV   (Piper o Kokoro, locales)
 #   GET  /health
 # Laya (detector de inyección) se probó y se descartó: marcaba como sospechoso casi todo documento formal (tarea #29).
 # Todo exige Authorization: Bearer <clave> (IA_API_KEY_FILE). La oficina lo llama desde la PC (agente de campo).
-import hashlib, io, json, os, pathlib, threading, time
+import hashlib, io, json, os, pathlib, threading, time, urllib.request, wave
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 KEY = pathlib.Path(os.environ["IA_API_KEY_FILE"]).read_text().strip()
 CACHE = pathlib.Path(os.environ.get("IA_CACHE", "/cache")); CACHE.mkdir(parents=True, exist_ok=True)
@@ -54,6 +56,68 @@ async def transcribe(req: Request):
         segs, info = whisper().transcribe(io.BytesIO(audio), language="es", initial_prompt=WHISPER_PROMPT, vad_filter=True, beam_size=5)
         text = " ".join(s.text.strip() for s in segs).strip()
     return {"text": text, "seconds": round(info.duration, 1), "ms": int((time.time() - t0) * 1000)}
+
+
+# ---------- texto → voz: Piper (~0,5 s por frase) y Kokoro (~3 s, más natural según la voz); modelos descargados al primer uso ----------
+PIPER = {"piper-claude": ("Claude · México (Piper)", "es_MX/claude/high/es_MX-claude-high"),
+         "piper-daniela": ("Daniela · Argentina (Piper)", "es_AR/daniela/high/es_AR-daniela-high"),
+         "piper-davefx": ("Dave · España (Piper)", "es_ES/davefx/medium/es_ES-davefx-medium"),
+         "piper-ald": ("Ald · México (Piper)", "es_MX/ald/medium/es_MX-ald-medium"),
+         "piper-sharvard": ("Sharvard · España (Piper)", "es_ES/sharvard/medium/es_ES-sharvard-medium")}
+KOKORO = {"kokoro-dora": ("Dora (Kokoro)", "ef_dora"), "kokoro-alex": ("Alex (Kokoro)", "em_alex"), "kokoro-santa": ("Santa (Kokoro)", "em_santa")}
+VOICES = CACHE / "voces"; VOICES.mkdir(exist_ok=True)
+_voices, _tlock = {}, threading.Lock()
+
+
+def fetch(url, dest):
+    if not dest.exists():
+        tmp = dest.with_suffix(".tmp"); urllib.request.urlretrieve(url, tmp); tmp.rename(dest)
+    return str(dest)
+
+
+def voice(vid):
+    if vid not in _voices:
+        if vid in PIPER:
+            from piper import PiperVoice
+            base, p = "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/", PIPER[vid][1]
+            name = p.split("/")[-1]
+            fetch(base + p + ".onnx.json", VOICES / (name + ".onnx.json"))
+            _voices[vid] = PiperVoice.load(fetch(base + p + ".onnx", VOICES / (name + ".onnx")))
+        elif vid in KOKORO:
+            from kokoro_onnx import Kokoro
+            rel = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
+            _voices[vid] = Kokoro(fetch(rel + "kokoro-v1.0.onnx", VOICES / "kokoro-v1.0.onnx"), fetch(rel + "voices-v1.0.bin", VOICES / "voices-v1.0.bin"))
+        else:
+            raise HTTPException(400, "voz desconocida: " + vid)
+    return _voices[vid]
+
+
+@app.get("/voices")
+def voices(req: Request):
+    auth(req)
+    return [{"id": k, "label": v[0]} for k, v in {**PIPER, **KOKORO}.items()]
+
+
+@app.post("/speak")
+async def speak(req: Request):
+    auth(req)
+    b = await req.json()
+    text, vid, speed = str(b.get("text", ""))[:1500].strip(), b.get("voice") or "piper-claude", min(max(float(b.get("speed") or 1), 0.5), 2)
+    if not text:
+        raise HTTPException(400, "texto vacío")
+    buf = io.BytesIO()
+    with _tlock:
+        v = voice(vid)
+        with wave.open(buf, "wb") as wf:
+            if vid in PIPER:
+                from piper import SynthesisConfig
+                v.synthesize_wav(text, wf, syn_config=SynthesisConfig(length_scale=1 / speed))
+            else:
+                import numpy as np
+                a, sr = v.create(text, voice=KOKORO[vid][1], speed=speed, lang="es")
+                wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(sr)
+                wf.writeframes((np.clip(a, -1, 1) * 32767).astype("<i2").tobytes())
+    return Response(buf.getvalue(), media_type="audio/wav")
 
 
 OFFICE = {".docx", ".xlsx", ".xls", ".pptx", ".html", ".htm"}
