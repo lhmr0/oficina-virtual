@@ -17,6 +17,68 @@ function form(url, text) {
 }
 
 async function main() {
+  const settings = new Map();
+  globalThis.localStorage = {
+    getItem: key => settings.has(key) ? settings.get(key) : null,
+    setItem: (key, value) => settings.set(key, String(value)),
+    removeItem: key => settings.delete(key),
+  };
+  globalThis.document = {
+    documentElement: { setAttribute() {} },
+    getElementById: () => null,
+    addEventListener() {},
+  };
+  const { S, voicePrefs, splitSpeechText, speak, stopSpeaking } = await import('./public/core.js');
+  assert.equal(voicePrefs().voice, '', 'sin servidor de IA no se elige una voz remota');
+  S.boot = { ia: true };
+  assert.equal(voicePrefs().voice, 'ia:chatterbox-latam', 'Chatterbox es la voz predeterminada con IA');
+  localStorage.setItem('ov_voice', 'ia:piper-claude');
+  assert.equal(voicePrefs().voice, 'ia:piper-claude', 'se conserva la voz guardada por el usuario');
+  localStorage.setItem('ov_voice', 'nav:voz elegida');
+  assert.equal(voicePrefs().voice, 'nav:voz elegida', 'también se conserva una voz del navegador');
+  localStorage.removeItem('ov_voice');
+
+  const longText = ('Una frase completa para probar las pausas. Otra frase con palabras largas; ').repeat(6).trim();
+  const chunks = splitSpeechText(longText);
+  assert.ok(chunks.length > 1 && chunks.every(chunk => chunk.length <= 180));
+  assert.equal(chunks.join(' '), longText, 'la partición no pierde palabras');
+  assert.deepEqual(splitSpeechText('a'.repeat(181)).map(chunk => chunk.length), [180, 1]);
+
+  const requests = [];
+  let played = 0, autoEnd = true, currentAudio;
+  globalThis.window = { speechSynthesis: { cancel() {} } };
+  globalThis.fetch = async (_, options) => {
+    requests.push(JSON.parse(options.body));
+    return { ok: true, blob: async () => ({}) };
+  };
+  const createObjectURL = URL.createObjectURL, revokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = () => 'blob:voz';
+  URL.revokeObjectURL = () => {};
+  globalThis.Audio = class {
+    constructor(src) { this.src = src; currentAudio = this; }
+    async play() { played++; if (autoEnd) queueMicrotask(() => this.onended()); }
+    pause() { this.onpause?.(); }
+  };
+  await speak(longText, { voice: 'ia:chatterbox-latam', speed: 1 });
+  assert.equal(requests.length, chunks.length, 'se pide un WAV por fragmento en orden');
+  assert.deepEqual(requests.map(request => request.text), chunks);
+  assert.equal(played, chunks.length, 'se reproducen todos los fragmentos');
+  requests.length = 0;
+  autoEnd = false;
+  currentAudio = null;
+  const reading = speak(longText, { voice: 'ia:chatterbox-latam', speed: 1 });
+  while (!currentAudio || currentAudio.onpause == null) await new Promise(resolve => setImmediate(resolve));
+  stopSpeaking();
+  await reading;
+  assert.equal(requests.length, 1, 'detener la voz impide pedir los fragmentos restantes');
+  requests.length = 0;
+  autoEnd = true;
+  await speak(longText, { voice: 'ia:piper-claude', speed: 1 });
+  assert.equal(requests.length, 1, 'las otras voces conservan una sola solicitud');
+  assert.equal(requests[0].text, longText);
+  URL.createObjectURL = createObjectURL;
+  URL.revokeObjectURL = revokeObjectURL;
+
   const ui = await import('./public/ui-state.js').catch(() => null);
   assert.ok(ui, 'public/ui-state.js must expose reusable draft state helpers');
   const { captureInputState, restoreInputState, captureReplyDrafts, restoreReplyDrafts } = ui;
@@ -60,7 +122,7 @@ async function main() {
   assert.equal(refreshedReplies[1].field.selectionEnd, 10);
   assert.equal(refreshedReplies[1].field.focused, true);
 
-  const { parseVoz } = await import('./public/voz.js');
+  const { parseVoz } = await import('./public/ordenes.js');
   const ctx = {
     projects: [{ id: 1, name: 'Oficina Virtual' }, { id: 2, name: 'Solo notas' }],
     agents: [{ id: 10, name: 'Claude' }, { id: 11, name: 'Codex' }],
@@ -92,6 +154,19 @@ async function main() {
   assert.equal(dictadoLargo.proyecto_id, 1);
   assert.equal(dictadoLargo.agente_id, 10);
   assert.ok(dictadoLargo.titulo.length > 0 && dictadoLargo.titulo.length <= 90, 'título acotado y no vacío');
+  const { parseCommand, notifPhrase, ctxFromLink } = await import('./public/comandos.js');
+  const review = ctxFromLink('#/tarea/29', 'revision');
+  assert.deepEqual(review, { task: 29, conv: null, kind: 'revision', link: '#/tarea/29' });
+  assert.deepEqual(parseCommand('aprueba la 29', review), { action: 'approve', task: 29, conv: null, merge: false });
+  assert.deepEqual(parseCommand('sí', review), { action: 'approve', task: 29, conv: null, merge: false });
+  assert.deepEqual(parseCommand('devuélvela porque falta la prueba', review), { action: 'return', task: 29, conv: null, text: 'falta la prueba' });
+  assert.deepEqual(parseCommand('pásala a Codex', review), { action: 'handoff', task: 29, conv: null, agent: 'codex' });
+  assert.deepEqual(parseCommand('después', review), { action: 'none' });
+  assert.deepEqual(parseCommand('repite', review), { action: 'repeat' });
+  assert.deepEqual(parseCommand('responde en la tarea 30: ya está listo', review), { action: 'reply', task: 30, conv: null, text: 'ya está listo' });
+  assert.deepEqual(parseCommand('Necesito revisar la 2', ctxFromLink('#/cantina/7', 'consulta')), { action: 'reply', task: null, conv: 7, text: 'Necesito revisar la 2' });
+  assert.deepEqual(parseCommand('Idea nueva', {}), { action: 'chat', text: 'Idea nueva' });
+  assert.match(notifPhrase({ kind: 'revision', title: 'Tarea 29 lista', body: 'Revisar cambios' }), /¿La apruebas, la devuelves/);
 
   console.log('FRONTEND TODO OK');
 }

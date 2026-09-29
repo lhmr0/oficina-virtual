@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+# El modelo V3 necesita PyTorch CPU y su propio límite de memoria (12 GiB).
+RUN apt-get update && apt-get install -y --no-install-recommends git libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir 'git+https://github.com/resemble-ai/chatterbox.git@5de7a54aa4e5e2baadb0182dde554908b48b85c2' \
+       'fastapi==0.115.*' 'uvicorn==0.32.*'
+ENV HF_HOME=/cache/hf PYTHONUNBUFFERED=1
+RUN useradd --uid 10003 --create-home voz && mkdir -p /cache && chown voz /cache
+USER voz
+WORKDIR /app
+COPY --chown=voz:voz chatterbox_service.py referencia-latam.wav ./
+CMD ["uvicorn", "chatterbox_service:app", "--host", "0.0.0.0", "--port", "8011"]
