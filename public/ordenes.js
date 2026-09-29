@@ -1,4 +1,4 @@
-// Intérprete de órdenes por voz de la Oficina Virtual.
+// Intérprete de órdenes por voz de la Oficina Virtual (módulo ordenes.js; vivió antes como public/voz.js, que ahora es la voz de los avisos).
 // Sin modelo: reconoce el vocabulario cerrado de la oficina (secciones, proyectos, agentes, áreas)
 // y devuelve una orden que la interfaz muestra para confirmar antes de ejecutar nada.
 // Módulo ES puro (sin DOM) para poder probarlo en Node desde test-frontend.js.
@@ -9,7 +9,7 @@ export const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036
 const GLUE = new Set(('crea crear creame agrega agregar agregame anade anadir programa programar genera generar ' +
   'nueva nuevo una uno unas la el los las tarea tareas mision misiones en al a de del para por con que lo haga haz hazme ' +
   'quiero necesito proyecto busca buscar buscame encuentra encontrar favor asignada asignado encargado responsable sobre acerca dime decir dile preguntale pregunta preguntar ' +
-  'consulta consultar pide pedir muestrame muestra abre abrir ve ir vamos llevame entra entrar pon ponme cantina rapida')
+  'consulta consultar pide pedir muestrame muestra abre abrir ve ir vamos llevame entra entrar pon ponme cantina rapida y sea')
   .split(/\s+/).filter(Boolean).map(norm));
 
 // Muletillas que introducen el título ("titulada X", "llamada X"…)
@@ -73,6 +73,50 @@ function limpiar(resto) {
   return words.join(' ').trim();
 }
 
+// enlaces que sobran en los bordes de un título o descripción (no son palabras de contenido)
+const FUNC = new Set(('la el los las un una unos unas de del al a en con para por que lo le les se su sus mi tu y o u e ' +
+  'sea es son esta estan').split(/\s+/).map(norm));
+
+// quita enlaces de los bordes, conserva la puntuación interior y trata : ; como separadores
+function limpiarBordes(s) {
+  let t = String(s).replace(/[:;]+/g, ' ').replace(/^[\s.,;:!?¿¡"«»()\-]+/, '').replace(/[\s.,;:]+$/, '').replace(/\s+/g, ' ').trim();
+  const words = t.split(' ').filter(w => w && !/^[^\w]+$/.test(w));
+  while (words.length && (FUNC.has(norm(words[0])) || MARCA.has(norm(words[0])))) words.shift();
+  while (words.length && (FUNC.has(norm(words[words.length - 1])) || MARCA.has(norm(words[words.length - 1])))) words.pop();
+  return words.join(' ');
+}
+// quita los verbos de la orden del principio (crea una tarea en el proyecto…)
+function quitarComandos(t) {
+  const words = String(t).replace(/\s+/g, ' ').trim().split(' ');
+  while (words.length && (GLUE.has(norm(words[0])) || MARCA.has(norm(words[0])))) words.shift();
+  return words.join(' ');
+}
+const acotar = t => t.length > 90 ? t.slice(0, 90).replace(/\s+\S*$/, '').trim() : t;
+const cortaCorte = t => { const tn = norm(t); for (const m of CORTE) { const i = tn.indexOf(m); if (i >= 0) return t.slice(0, i); } return t; };
+
+// separa título y descripción del dictado: marcadores explícitos o primera frase
+function separar(resto) {
+  const p = preparar(resto), rn = p.n;
+  const titM = /(?:con el |el )?titulo(?:\s+(?:en|es|esa|sea|sera|seria|de))?\s*/.exec(rn);
+  const descM = /(?:la\s+)?descripcion(?:\s+(?:sea|es|sera|seria|de|del|que))?\s*/.exec(rn);
+  const en = i => p.map[i] ?? p.src.length;
+  const mismo = (a, b) => norm(a) === norm(b);
+  if (titM) {
+    const titulo = limpiarBordes(cortaCorte(p.src.slice(en(titM.index + titM[0].length), descM ? en(descM.index) : p.src.length)));
+    let desc = descM ? limpiarBordes(p.src.slice(en(descM.index + descM[0].length))) : '';
+    if (!desc || mismo(desc, titulo)) desc = '';
+    return { titulo: acotar(titulo), descripcion: acotar(desc) };
+  }
+  const contenido = limpiarBordes(cortaCorte(quitarComandos(resto)));
+  const m = /(?<!\d)[.!?](?=\s|$)/.exec(contenido);
+  if (m) {
+    const titulo = limpiarBordes(contenido.slice(0, m.index + 1));
+    const desc = limpiarBordes(contenido.slice(m.index + 1));
+    if (titulo.length > 3 && desc.length > 3) return { titulo: acotar(titulo), descripcion: acotar(desc) };
+  }
+  return { titulo: acotar(contenido), descripcion: '' };
+}
+
 // el verbo de la orden se busca AL INICIO (una orden puede mencionar "encuentra", "consulta"… dentro)
 const PRE = '^(por favor |porfa |eh |oye |hola )*';
 const IR = new RegExp(PRE + '(abre|abrir|ve|ir|vamos|muestrame|muestra|llevame|entra|entrar|pon|ponme)\\b');
@@ -89,7 +133,7 @@ export function parseVoz(texto, ctx = {}) {
   const resto = () => { let out = ''; for (let i = 0; i < src.length; i++) if (!del[i]) out += src[i]; return out; };
 
   const o = { accion: null, transcripcion: String(texto ?? '').trim(), proyecto_id: null, agente_id: null, area_id: null,
-    titulo: '', texto: '', destino: null, destinoNombre: '', confianza: 0 };
+    titulo: '', descripcion: '', texto: '', destino: null, destinoNombre: '', confianza: 0 };
 
   // el nombre (más largo) que aparezca en el dictado
   const mejor = (lista, nombres) => {
@@ -118,9 +162,9 @@ export function parseVoz(texto, ctx = {}) {
   if (/\bcantina\b/.test(n) && !TAREA.test(n)) { o.accion = 'chat'; o.texto = limpiar(resto()) || o.transcripcion; o.confianza = o.agente_id ? 0.9 : 0.6; return o; }
   if (TAREA.test(n) || CREAR.test(arranque)) {
     o.accion = 'tarea'; o.prompt = o.transcripcion;
-    let t = limpiar(resto());
-    if (t.length > 90) t = t.slice(0, 90).replace(/\s+\S*$/, '').trim();
-    o.titulo = t || o.transcripcion.slice(0, 90);
+    const s = separar(resto());
+    o.titulo = s.titulo || acotar(limpiarBordes(resto())) || o.transcripcion.slice(0, 90);
+    o.descripcion = s.descripcion;
     o.confianza = o.proyecto_id ? 0.9 : 0.5; return o;
   }
   if (CHAT.test(arranque)) { o.accion = 'chat'; o.texto = limpiar(resto()) || o.transcripcion; o.confianza = o.agente_id ? 0.9 : 0.6; return o; }

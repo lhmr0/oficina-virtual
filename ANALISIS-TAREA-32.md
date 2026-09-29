@@ -112,3 +112,91 @@ voz», «crea una tarea en el proyecto X titulada Y para el agente Z») se resue
 **orden larga y libre** como este dictado real deja un título que hay que editar a mano. Ese es
 justamente el caso donde un LLM local (o mandar el texto a un agente) aportaría valor. La tarjeta de
 confirmación evita que una interpretación errónea se ejecute sola.
+## Segunda captura: campos del formulario y reparto título/descripción
+
+Observado: al crear una tarea por voz, la tarjeta mostraba solo proyecto/área/agente/título/
+instrucciones y «Ejecutar al crear», sin el resto de campos del formulario real (plantilla, carpeta,
+prioridad, fecha límite, ejecutor, dependencias, adjuntos, modo, modelo/esfuerzo); y el título
+absorbía parte de la descripción.
+
+Corregido:
+- La orden de tarea ya no usa una tarjeta propia: abre el **formulario real «Nueva tarea»**
+  (`taskForm`) con proyecto, área, agente, título e instrucciones prellenados y la marca de voz. Así
+  aparecen todos los campos y la experiencia es la de siempre.
+- El intérprete separa título y descripción: reconoce «con el título … / la descripción sea …» y, si no
+  hay marcadores, usa la primera frase como título (acotado a 90 caracteres) y el resto como
+  descripción (antes tropezaba con decimales tipo «5.5»).
+## Verificación tras el push (integración en master) — hallazgo importante
+
+Estado verificado:
+- Rama `oficina/task-32-ordenar` (HEAD 72c4631): árbol limpio y **con todo** (fix 1 «tarea vs
+  buscar» + fix 2 «formulario completo + título/descripción»). `node --no-warnings test.js` -> TODO OK.
+- No hay remotos git (`git remote -v` vacío): el «push» es la integración interna de la oficina en
+  `master`.
+- `master` (27e78bf) integró las tareas #29/#33/#34 y, al resolver el conflicto, **renombró mi
+  intérprete** `public/voz.js` -> `public/ordenes.js` y dejó el nombre `public/voz.js` para OTRA
+  función de voz (avisos hablados: `announce`/responder hablando, con `public/comandos.js`).
+
+Consecuencia (el punto que pediste verificar):
+- `master:public/ordenes.js` es mi intérprete **en la versión de 48ba3af**: trae el fix 1
+  (`const arranque`) pero **NO** el fix 2 (no tiene `separar` ni `descripcion`).
+- `master:public/views.js` sigue con la tarjeta mínima de tarea (sin `taskForm` completo ni marca
+  `voz`). Es decir: en `master` **persiste lo que reportaste** (faltan campos y mal reparto
+  título/descripción).
+- Si se fusiona mi rama tal cual, habrá conflicto en `public/voz.js` (yo lo tengo ahí; master lo usa
+  para la otra función) y el fix 2 no entrará solo: hay que llevarlo a `public/ordenes.js`.
+
+Recomendación: alinear la rama con el layout de `master` (mi intérprete como `public/ordenes.js` y
+`voz.js` reservado para la otra función) y apuntar el import de `views.js` a `ordenes.js`. Así el
+merge conserva las dos funciones de voz y no se pierde el fix 2.
+
+Despliegue: el VPS corre el contenido de 48ba3af (solo mi función de voz, sin fix 2); la otra función
+de voz todavía no está desplegada. El script despliega el HEAD de este worktree (la rama).
+## Opción A aplicada (29/09): alinear con el layout de master
+
+- `git mv public/voz.js public/ordenes.js`: mi intérprete pasa a llamarse `ordenes.js` (como en
+  `master`), para no chocar con `public/voz.js`, que en master es la voz de los avisos
+  (`announce`/`comandos.js`).
+- `public/views.js`: el import de `parseVoz` ahora es `from './ordenes.js'`.
+- `test-frontend.js`: importa `./public/ordenes.js`.
+- `README.md` y este informe actualizados. Se anotó el renombrado en la cabecera del módulo.
+- `node --no-warnings test.js` -> TODO OK (FRONTEND TODO OK incluido).
+
+Con esto, al fusionar la rama en master, `voz.js` queda para la otra función y `ordenes.js` recibe mi
+versión completa (con el fix 2). Sin desplegar todavía: el usuario avisará.
+## Conflicto al fusionar con master (verificado 29/09)
+
+Reproducido con `git merge-tree` y con un `git merge --no-commit` (abortado después). Al fusionar la
+rama con `master` chocan exactamente **dos** archivos:
+
+- `public/ordenes.js` — add/add + colisión de renombrado. `master` tiene una copia de mi intérprete en
+  la versión de `48ba3af`; la rama trae el renombrado voz.js→ordenes.js con el fix 2. **El de la rama
+  es superconjunto**: sólo añade `FUNC`/`limpiarBordes`/`separar`/`descripcion` (+50/-6). Resolución:
+  quedarse con el de la rama.
+- `test-frontend.js` — contenido. `master` añadió pruebas de su función de voz (`core.speak`,
+  `comandos.js`) y ya importa `./public/ordenes.js`; la rama añadió la regresión de título/descripción.
+  Resolución: conservar las dos (mismo import `./public/ordenes.js`).
+
+Todo lo demás auto-fusiona (views.js, app.js, core.js, server.js, README, ANALISIS). La función de voz
+de avisos vive en `public/voz.js` en `master` y se conserva. Receta:
+
+```
+git merge master
+git checkout --ours public/ordenes.js      # mi versión (superconjunto)
+# test-frontend.js: dejar el bloque de pruebas de master + mis 3 asserts (import a ordenes.js)
+git add public/ordenes.js test-frontend.js
+git commit
+```
+## Merge resuelto (29/09)
+
+Se ejecutó `git merge master` en la rama y se resolvieron los dos conflictos:
+- `public/ordenes.js`: versión de la rama (con el fix 2). Ojo: el auto-merge dejó marcadores anidados
+  por la colisión de renombrado; se rehízo con `git checkout HEAD -- public/ordenes.js`.
+- `public/voz.js`: se restauró la versión de master (función de voz de avisos). El auto-merge la había
+  BORRADO por la colisión del renombrado; se recuperó con `git checkout master -- public/voz.js`.
+- `test-frontend.js`: combinadas las pruebas de master (voz/chatterbox, comandos) con la regresión de
+  título/descripción de la rama.
+
+Commit de merge: **022452b**. Verificado: `node --no-warnings test.js` -> TODO OK; `master` es ahora
+ancestro de la rama y `git merge-tree master HEAD` no reporta conflictos -> al fusionar en master será
+**fast-forward** (5 commits). Sin desplegar todavía.

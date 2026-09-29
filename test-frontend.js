@@ -154,6 +154,11 @@ async function main() {
   assert.equal(dictadoLargo.proyecto_id, 1);
   assert.equal(dictadoLargo.agente_id, 10);
   assert.ok(dictadoLargo.titulo.length > 0 && dictadoLargo.titulo.length <= 90, 'título acotado y no vacío');
+  // regresión (2ª captura): separar "con el título X y la descripción Y"
+  const conTituloYDesc = parseVoz('crear una tarea con el título en consulta de agente y la descripción sea de que se debe consultar los agentes diariamente.', ctx);
+  assert.equal(conTituloYDesc.accion, 'tarea');
+  assert.equal(conTituloYDesc.titulo, 'consulta de agente', 'el título no debe incluir la descripción');
+  assert.match(conTituloYDesc.descripcion, /debe consultar los agentes diariamente/, 'la descripción queda aparte del título');
   const { parseCommand, notifPhrase, ctxFromLink } = await import('./public/comandos.js');
   const review = ctxFromLink('#/tarea/29', 'revision');
   assert.deepEqual(review, { task: 29, conv: null, kind: 'revision', link: '#/tarea/29' });
