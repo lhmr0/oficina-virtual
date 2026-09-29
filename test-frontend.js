@@ -86,6 +86,12 @@ async function main() {
   assert.equal(tareaVoz2.proyecto_id, 2);
   assert.equal(tareaVoz2.titulo, 'comprar pan');
   assert.equal(parseVoz('hola qué tal', ctx).accion, null, 'sin orden reconocible');
+  // regresión (captura de pantalla del usuario): una tarea larga que menciona "encuentra"/"consulta" no debe caer en Buscar
+  const dictadoLargo = parseVoz('Crea una tarea en el proyecto Oficina Virtual, donde vas a consultar por qué es que en Claude, por ejemplo, no se encuentra el modelo Sonnet 5.5, pese a que en el CLI sí está.', ctx);
+  assert.equal(dictadoLargo.accion, 'tarea', 'la palabra "encuentra" dentro de una orden de tarea no debe confundir el intérprete');
+  assert.equal(dictadoLargo.proyecto_id, 1);
+  assert.equal(dictadoLargo.agente_id, 10);
+  assert.ok(dictadoLargo.titulo.length > 0 && dictadoLargo.titulo.length <= 90, 'título acotado y no vacío');
 
   console.log('FRONTEND TODO OK');
 }

@@ -95,3 +95,20 @@ al servidor. Queda como mejora futura.
 - `test-frontend.js` cubre el intérprete con ejemplos reales; `test.js` comprueba que una tarea
   creada con `voz: true` recibe el aviso de dictado.
 - El botón solo aparece con el servicio de IA configurado; sin él, la oficina queda igual que antes.
+## Comportamiento observado en la captura (prueba real) y corrección
+
+En la captura, el dictado «Crea una tarea en el proyecto Oficina Virtual … no se encuentra el modelo
+Sonnet 5.5 …» se interpretó como **Buscar** en vez de tarea. Causa: el intérprete buscaba los verbos
+en cualquier parte del texto y evaluaba «buscar» antes que «tarea», así que la palabra «encuentra»
+dentro de la frase activaba Buscar (y la tarjeta de búsqueda mostraba casi todo el dictado).
+
+Corregido en `public/voz.js`: el verbo de la orden se detecta **al inicio** de la frase (una orden
+puede mencionar «encuentra» o «consulta» por dentro), «tarea/misión» tiene prioridad y el título se
+acota a 90 caracteres y nunca queda vacío. La frase exacta de la captura queda como prueba de
+regresión en `test-frontend.js`.
+
+Conclusión actualizada: las órdenes cortas y bien formadas («abre la cantina», «busca dictado por
+voz», «crea una tarea en el proyecto X titulada Y para el agente Z») se resuelven bien con reglas; una
+**orden larga y libre** como este dictado real deja un título que hay que editar a mano. Ese es
+justamente el caso donde un LLM local (o mandar el texto a un agente) aportaría valor. La tarjeta de
+confirmación evita que una interpretación errónea se ejecute sola.
