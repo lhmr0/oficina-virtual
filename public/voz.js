@@ -73,10 +73,13 @@ function limpiar(resto) {
   return words.join(' ').trim();
 }
 
-const IR = /\b(abre|abrir|ve|ir|vamos|muestrame|muestra|llevame|entra|entrar|pon|ponme)\b/;
-const BUSCAR = /\b(busca|buscame|buscar|encuentra|encontrar)\b/;
-const CHAT = /\b(pregunta|preguntale|preguntar|consulta|consultar|dile|decir|pide|pedir)\b/;
-const TAREA = /\b(tarea|tareas|mision|misiones|crea|crear|creame|agrega|agregar|agregame|anade|anadir|programa|programar|genera|generar)\b/;
+// el verbo de la orden se busca AL INICIO (una orden puede mencionar "encuentra", "consulta"… dentro)
+const PRE = '^(por favor |porfa |eh |oye |hola )*';
+const IR = new RegExp(PRE + '(abre|abrir|ve|ir|vamos|muestrame|muestra|llevame|entra|entrar|pon|ponme)\\b');
+const BUSCAR = new RegExp(PRE + '(busca|buscame|buscar|encuentra|encontrar)\\b');
+const CHAT = new RegExp(PRE + '(pregunta|preguntale|preguntar|consulta|consultar|dile|decir|pide|pedir)\\b');
+const CREAR = new RegExp(PRE + '(crea|crear|creame|agrega|agregar|agregame|anade|anadir|programa|programar|genera|generar|haz|hazme|necesito|quiero)\\b');
+const TAREA = /\btareas?\b|\bmision(es)?\b/;
 // texto + { projects, areas, agents } → orden lista para confirmar
 export function parseVoz(texto, ctx = {}) {
   const projects = ctx.projects || [], areas = ctx.areas || [], agents = ctx.agents || [];
@@ -110,11 +113,17 @@ export function parseVoz(texto, ctx = {}) {
     if (i >= 0 && (!sec || norm(k).length > sec.len)) sec = { len: norm(k).length, nom, hash, k };
   }
 
-  if (sec && IR.test(n)) { o.accion = 'ir'; o.destino = sec.hash; o.destinoNombre = sec.nom; o.confianza = 1; return o; }
-  if (BUSCAR.test(n)) { o.accion = 'buscar'; o.texto = limpiar(resto()) || o.transcripcion; o.confianza = 0.8; return o; }
-  if ((sec && sec.k === 'cantina') || CHAT.test(n)) {
-    o.accion = 'chat'; o.texto = limpiar(resto()) || o.transcripcion; o.confianza = o.agente_id ? 0.9 : 0.6; return o;
+  const arranque = n.replace(/^[\s,.;:!?¿¡"«»()-]+/, '');
+  if (sec && IR.test(arranque)) { o.accion = 'ir'; o.destino = sec.hash; o.destinoNombre = sec.nom; o.confianza = 1; return o; }
+  if (/\bcantina\b/.test(n) && !TAREA.test(n)) { o.accion = 'chat'; o.texto = limpiar(resto()) || o.transcripcion; o.confianza = o.agente_id ? 0.9 : 0.6; return o; }
+  if (TAREA.test(n) || CREAR.test(arranque)) {
+    o.accion = 'tarea'; o.prompt = o.transcripcion;
+    let t = limpiar(resto());
+    if (t.length > 90) t = t.slice(0, 90).replace(/\s+\S*$/, '').trim();
+    o.titulo = t || o.transcripcion.slice(0, 90);
+    o.confianza = o.proyecto_id ? 0.9 : 0.5; return o;
   }
-  if (TAREA.test(n)) { o.accion = 'tarea'; o.titulo = limpiar(resto()); o.prompt = o.transcripcion; o.confianza = o.proyecto_id ? 0.9 : 0.5; return o; }
+  if (CHAT.test(arranque)) { o.accion = 'chat'; o.texto = limpiar(resto()) || o.transcripcion; o.confianza = o.agente_id ? 0.9 : 0.6; return o; }
+  if (BUSCAR.test(arranque)) { o.accion = 'buscar'; o.texto = limpiar(resto()) || o.transcripcion; o.confianza = 0.8; return o; }
   return o;
 }
