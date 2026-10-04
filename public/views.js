@@ -359,7 +359,7 @@ const estacion = {
     const zone = `<section class="agents-zone" aria-label="Sala de agentes">
       <div class="plaque">${icon('radar', 2.5)}<b>Sala de agentes</b><small>${S.boot.agents.filter(a => busy.has(a.id)).length} de ${S.boot.agents.filter(a => a.enabled).length} trabajando</small>
         <span class="zone-legend" aria-hidden="true">? espera tu respuesta · ! lista para revisión · … en cola · Zz sin cuota</span>
-        <button type="button" class="btn sm right" id="btnMoreRooms" title="${h([...otherAreas.map(a => a.alias), 'Cantina', 'Consejo Jedi', 'Puente de Mando', 'Archivos Jedi'].join(', '))}">Más salas <span class="n">${otherAreas.length + 4}</span>${otherActive + live.length ? ` · ${otherActive + live.length} activas` : ''}</button></div>
+        <button type="button" class="btn sm right" id="btnMoreRooms" title="${h([...otherAreas.map(a => a.alias), 'Cantina', 'Consejo Jedi', 'Puente de Mando', ...(canEdit() ? ['Control del PC'] : []), 'Archivos Jedi'].join(', '))}">Más salas <span class="n">${otherAreas.length + (canEdit() ? 5 : 4)}</span>${otherActive + live.length ? ` · ${otherActive + live.length} activas` : ''}</button></div>
       <div class="ws-row">
         ${deco(ZONE_DECO[0])}
         <button type="button" class="ws ws-me" id="wsMe" title="Tu puesto: abre la Bandeja">
@@ -641,6 +641,7 @@ function otherRoomsModal(vis, busy, otherAreas, live, lastCouncil) {
       ${card('data-go-modal="#/cantina"', '#ffe81f', 'cantina', 'Cantina', 'Consultas rápidas', `<div class="card-meta">${live.length ? `<b>${live.length}</b> consultas activas: ${live.map(c => h(c.title)).slice(0, 2).join(', ')}` : 'Nadie en la barra'}</div>`)}
       ${card('data-go-modal="#/consejo"', '#b98cff', 'holocron', 'Consejo Jedi', 'Propuestas de mejora', `<div class="card-meta">${lastCouncil ? `Última sesión ${ago(lastCouncil.at)} · ${lastCouncil.aceptadas}/${lastCouncil.propuestas} aceptadas` : 'Aún no se ha reunido'}</div>`)}
       ${card('data-go-modal="#/puente"', '#4fc3f7', 'radar', 'Puente de Mando', 'Estado y límites de agentes', `<div class="consoles">${S.boot.agents.map(a => `<span title="${h(a.name)}">${sprite('console', lamp(a), 2.5)}</span>`).join('')}</div>`)}
+      ${canEdit() ? card('data-go-modal="#/pc"', '#00e5ff', 'radar', 'Control del PC', 'zer0 en tiempo real', '<div class="card-meta">Sesión paso a paso, capturas y aprobación remota.</div>') : ''}
       ${card('data-go-modal="#/archivos"', '#8c97c9', 'holocron', 'Archivos Jedi', 'Historial y ejecuciones', '<div class="card-meta">Chats, tareas, ejecuciones, relevos y bitácora.</div>')}
     </div>
     <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn ghost" value="c">Cerrar</button></div>`);
@@ -1366,13 +1367,24 @@ const config = {
     const tab = tabs.find(t => t[0] === r.args[0]) ? r.args[0] : tabs[0][0];
     let body = '';
     if (tab === 'maquinas') {
-      const ms = await get('/api/machines');
+      const [ms, pcs] = await Promise.all([get('/api/machines'), get('/api/pc')]);
       body = `<p class="muted">Una máquina es donde se ejecutan los agentes y viven los archivos. Si la oficina corre en el VPS, conecta tu PC con el <b>agente de campo</b>: sale hacia el VPS por HTTPS (no abre puertos) y ejecuta aquí Claude, Codex, git y archivos.</p>
-        <div class="panel table-wrap"><table class="grid"><tr><th>Máquina</th><th>Tipo</th><th>Estado</th><th>Equipo</th><th>Visto</th><th></th></tr>
+        <div class="panel table-wrap"><table class="grid"><tr><th>Máquina (agente de campo)</th><th>Tipo</th><th>Estado</th><th>Equipo</th><th>Visto</th><th></th></tr>
         ${ms.map(m => `<tr><td><b>${h(m.name)}</b>${m.is_default ? ' ★ por defecto' : ''}</td><td>${m.is_local ? 'este servidor' : 'agente de campo'}</td><td><span class="dot ${m.online ? 'ok' : 'bad'}"></span> ${m.online ? 'conectada' : 'desconectada'}</td>
           <td>${h(m.info?.hostname || '-')}<br><small>${h((m.info?.roots || []).join(', '))}</small></td><td>${ago(m.last_seen)}</td>
-          <td>${m.is_default ? '' : `<button class="btn sm y" data-mdef="${m.id}">Por defecto</button>`}<button class="btn sm ghost" data-mren="${m.id}">Renombrar</button>${m.is_local ? '' : `<button class="btn sm r" data-mdel="${m.id}">Eliminar</button>`}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Sin máquinas</td></tr>'}</table></div>
-        <form class="panel" id="newMachine" style="margin-top:12px"><h3>Conectar una PC (agente de campo)</h3><label class="l">Nombre</label><input name="name" required placeholder="PC de la oficina"><button class="btn y" style="margin-top:10px">Generar token</button></form>`;
+          <td>${m.is_default ? '' : `<button class="btn sm y" data-mdef="${m.id}">Por defecto</button>`}<button class="btn sm ghost" data-mren="${m.id}">Renombrar</button>${m.is_local ? '' : `<button class="btn sm r" data-mdel="${m.id}">Eliminar</button>`}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Sin agentes de campo</td></tr>'}</table></div>
+        <h3 style="margin-top:16px">Máquinas zer0 (Windows)</h3>
+        <p class="muted">Máquinas con zer0 conectado para control remoto visual paso a paso desde la oficina.</p>
+        <div class="panel table-wrap"><table class="grid"><tr><th>Máquina</th><th>Estado</th><th>Equipo</th><th>Visto</th><th></th></tr>
+        ${pcs.map(p => `<tr><td><b>${h(p.name)}</b></td><td><span class="dot ${p.online ? 'ok' : 'bad'}"></span> ${p.online ? 'conectada' : 'desconectada'}</td>
+          <td>${h(p.info?.hostname || '-')}</td><td>${ago(p.last_seen)}</td>
+          <td><a class="btn sm y" href="#/pc/${p.id}">Controlar</a><button class="btn sm ghost" data-mren="${p.id}">Renombrar</button><button class="btn sm r" data-mdel="${p.id}">Eliminar</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Sin máquinas zer0 registradas</td></tr>'}</table></div>
+        <form class="panel" id="newMachine" style="margin-top:16px"><h3>Conectar una PC</h3>
+          <div class="field-row">
+            <div><label class="l">Tipo</label><select name="kind"><option value="worker">Agente de campo</option><option value="zer0">zer0 (Windows)</option></select></div>
+            <div><label class="l">Nombre</label><input name="name" required placeholder="PC de la oficina"></div>
+          </div>
+          <button class="btn y" style="margin-top:10px">Generar token</button></form>`;
     } else if (tab === 'agentes') {
       const list = await get('/api/agents');
       body = list.map(a => `<form class="panel agent-card" data-agent="${a.id}" style="--c:${a.color};margin-bottom:14px">
@@ -1546,12 +1558,23 @@ const config = {
           holo('Agente guardado'); await loadBoot();
         } else if (fm.id === 'newMachine') {
           const m = await post('/api/machines', f);
-          const cfg = JSON.stringify({ url: location.origin, token: m.token, roots: ['C:\\Users\\TU_USUARIO'] }, null, 2);
-          modal(`<h2>Token de la máquina "${h(f.name)}"</h2><p class="panel r">Cópialo ahora: <b>no se vuelve a mostrar</b>. Quien lo tenga puede ejecutar agentes en esa PC.</p>
-            <label class="l">worker.json (junto a worker.js en la PC)</label><textarea rows="7" readonly>${h(cfg)}</textarea>
-            <p class="muted">En "roots" pon las carpetas donde el agente puede trabajar. Luego en la PC: <code>node worker.js</code> (o instalar-agente.ps1 para que arranque solo).</p>
-            <button class="btn ghost" value="c">Listo</button>`);
-          return loadBoot();
+          if (f.kind === 'zer0') {
+            modal(`<h2>Token para zer0: "${h(f.name)}"</h2>
+              <p class="panel r">Cópialo ahora: <b>no se vuelve a mostrar</b>. Se usa para conectar zer0 a la Oficina Virtual.</p>
+              <label class="l">URL de la oficina</label><input readonly value="${h(location.origin)}">
+              <label class="l" style="margin-top:8px">Token de la máquina</label><textarea rows="2" readonly>${h(m.token)}</textarea>
+              <p class="muted">Abre zer0 en Windows, ve a «Oficina Virtual», pega la URL y este token, y pulsa «Conectar».</p>
+              <div class="row" style="margin-top:10px"><a class="btn y" href="#/pc/${m.id}" data-close>Ir a Control del PC</a><button class="btn ghost" value="c">Listo</button></div>`);
+          } else {
+            const cfg = JSON.stringify({ url: location.origin, token: m.token, roots: ['C:\\Users\\TU_USUARIO'] }, null, 2);
+            modal(`<h2>Token de la máquina "${h(f.name)}"</h2><p class="panel r">Cópialo ahora: <b>no se vuelve a mostrar</b>. Quien lo tenga puede ejecutar agentes en esa PC.</p>
+              <label class="l">worker.json (junto a worker.js en la PC)</label><textarea rows="7" readonly>${h(cfg)}</textarea>
+              <p class="muted">En "roots" pon las carpetas donde el agente puede trabajar. Luego en la PC: <code>node worker.js</code> (o instalar-agente.ps1 para que arranque solo).</p>
+              <button class="btn ghost" value="c">Listo</button>`);
+          }
+          await loadBoot();
+          route(true);
+          return;
         } else if (fm.id === 'newAg') { await post('/api/agents', f); await loadBoot(); route(true); }
         else if (fm.dataset.area) { await put('/api/areas/' + fm.dataset.area, { name: f.name, alias: f.alias, icon: f.icon, color: f.color, room: f.room, default_agent_id: +f.default_agent_id || null, auto_fallback: f.auto_fallback, fallback_chain: list(f.chain).map(k => S.boot.agents.find(a => a.key === k)?.id).filter(Boolean) }); holo('Área guardada'); await loadBoot(); }
         else if (fm.id === 'newArea') { await post('/api/areas', f); await loadBoot(); route(true); }
@@ -1640,7 +1663,465 @@ const config = {
   },
 };
 
-export const VIEWS = { estacion, proyectos, kanban, repos, tarea, cantina, consejo, archivos, puente, config };
+// ===================== CONTROL DEL PC (zer0) =====================
+let pcTimer = null;
+const pcProposalTimes = new Map();
+
+// ponytail: agrupación O(N) lineal de eventos por stepId; techo de 200 eventos por sesión en el servidor
+function groupPcSteps(events) {
+  const steps = [];
+  let currentStep = null;
+  let anonIndex = 1;
+
+  for (const ev of events) {
+    if (!ev || !ev.type?.startsWith('step.')) continue;
+    const stepId = ev.data?.stepId;
+    if (stepId) {
+      currentStep = steps.find(s => s.stepId === stepId);
+      if (!currentStep) {
+        const last = steps[steps.length - 1];
+        if (last && !last.stepId) {
+          last.stepId = stepId;
+          currentStep = last;
+        } else {
+          currentStep = { stepId, num: steps.length + 1 };
+          steps.push(currentStep);
+        }
+      }
+    } else {
+      if (ev.type === 'step.captured') {
+        currentStep = { stepId: null, num: steps.length + 1 };
+        steps.push(currentStep);
+      } else if (!currentStep) {
+        currentStep = { stepId: 'step-' + (anonIndex++), num: steps.length + 1 };
+        steps.push(currentStep);
+      }
+    }
+
+    if (ev.type === 'step.captured') {
+      currentStep.captured = ev;
+      if (ev.frameId) currentStep.beforeFrameId = ev.frameId;
+    } else if (ev.type === 'step.proposal') {
+      currentStep.proposal = ev;
+      currentStep.tool = ev.data?.tool;
+      currentStep.summary = ev.data?.summary;
+    } else if (ev.type === 'step.approved') {
+      currentStep.decision = 'approved';
+      currentStep.approved = ev;
+    } else if (ev.type === 'step.rejected') {
+      currentStep.decision = 'rejected';
+      currentStep.rejected = ev;
+    } else if (ev.type === 'step.expired') {
+      currentStep.decision = 'expired';
+      currentStep.expired = ev;
+    } else if (ev.type === 'step.result') {
+      currentStep.result = ev;
+      if (ev.frameId) currentStep.afterFrameId = ev.frameId;
+      currentStep.ok = ev.data?.ok;
+      currentStep.resultMessage = ev.data?.message;
+    }
+  }
+
+  steps.forEach((s, idx) => {
+    if (!s.stepId) s.stepId = 'st-' + (idx + 1);
+  });
+  return steps;
+}
+
+const pc = {
+  refreshOn: ['pc.event', 'machine.status'],
+  event(type, d, cur) {
+    if (type === 'pc.event') {
+      const curId = cur?.args?.[0] ? +cur.args[0] : S.pcId;
+      if (!curId || d.machine === curId) return 'refresh';
+      return 'handled';
+    }
+    if (type === 'machine.status') return 'refresh';
+  },
+  async render(el, r) {
+    if (!canEdit()) {
+      el.innerHTML = '<div class="panel r" style="margin:20px">Acceso restringido: se requiere rol de operador o administrador.</div>';
+      return;
+    }
+
+    const pcs = await get('/api/pc');
+    if (!pcs || !pcs.length) {
+      el.innerHTML = `<div class="row"><h1 style="margin:0">Control del PC (zer0)</h1></div>
+        <div class="panel r" style="margin-top:16px">
+          <h3>No hay PCs con zer0 registrados</h3>
+          <p>Crea una máquina de tipo zer0 en <a href="#/config/maquinas">Configuración → Máquinas</a> para conectar un PC con Windows.</p>
+        </div>`;
+      return;
+    }
+
+    const mid = +r.args[0] || S.pcId || pcs[0].id;
+    S.pcId = mid;
+    const curPc = pcs.find(p => p.id === mid) || pcs[0];
+
+    let st = null;
+    if (curPc.online) {
+      try { st = await get('/api/pc/' + curPc.id + '/status'); } catch {}
+    }
+
+    let sess = null;
+    if (isAdmin()) {
+      try { sess = await get('/api/pc/' + curPc.id + '/session'); } catch {}
+    }
+
+    const oc = st?.officeControl || st?.payload?.officeControl || {};
+    const busy = !!(st?.busy || (sess && sess.state === 'active'));
+    const admin = isAdmin();
+
+    // Avisos si falta permiso en zer0
+    const avisos = [];
+    if (!oc.enabled) {
+      avisos.push('Control desde oficina desactivado. Actívalo en la ventana de zer0 en Windows para poder iniciar sesiones.');
+    }
+    if (oc.enabled && !oc.sendFrames) {
+      avisos.push('Envío de capturas desactivado. Actívalo en la ventana de zer0 en Windows si deseas ver la pantalla.');
+    }
+    if (oc.enabled && !oc.remoteApproval) {
+      avisos.push('Aprobación remota desactivada. Actívalo en la ventana de zer0 en Windows para aprobar acciones desde aquí.');
+    }
+
+    const events = sess?.events || [];
+    const steps = groupPcSteps(events);
+    const lastDone = [...events].reverse().find(e => e.type === 'session.done');
+    const isSessionActive = sess && sess.state === 'active';
+    const isDisconnected = !curPc.online;
+
+    // Interruptores
+    const ctrlText = oc.enabled
+      ? `Control desde oficina: activo${oc.expiresAt ? ' hasta ' + (fmtDate(oc.expiresAt).split(' ')[1] || fmtDate(oc.expiresAt)) : ''}`
+      : 'Control desde oficina: apagado';
+    const framesText = oc.sendFrames ? 'Capturas: activo' : 'Capturas: apagado';
+    const apprText = oc.remoteApproval ? 'Aprobación remota: activo' : 'Aprobación remota: apagado';
+
+    const selectorHtml = pcs.length > 1
+      ? `<select id="pcSel" aria-label="Elegir PC">${pcs.map(p => `<option value="${p.id}" ${p.id === curPc.id ? 'selected' : ''}>${h(p.name)} (${p.online ? 'en línea' : 'desconectado'})</option>`).join('')}</select>`
+      : `<b class="lbl-up" style="font-size:1.1em">${h(curPc.name)}</b>`;
+
+    let timelineHtml = '';
+    if (!sess) {
+      timelineHtml = '<div class="empty">Sin sesiones registradas en este PC.</div>';
+    } else {
+      let pendingStep = null;
+      const stepsHtml = steps.map(s => {
+        const isPending = s.proposal && !s.decision && !s.result && isSessionActive;
+        if (isPending) pendingStep = s;
+
+        let stChip = '';
+        if (s.result) {
+          stChip = `<span class="chip ${s.ok ? 'st-completada' : 'st-fallida'}">${s.ok ? 'Resultado: OK' : 'Resultado: Falló'}</span>`;
+        } else if (s.decision === 'approved') {
+          stChip = '<span class="chip st-en_curso">Aprobada · ejecutando...</span>';
+        } else if (s.decision === 'rejected') {
+          stChip = '<span class="chip st-bloqueada">Rechazada</span>';
+        } else if (s.decision === 'expired') {
+          stChip = '<span class="chip st-pausada_cuota">Caducada</span>';
+        } else if (s.proposal) {
+          stChip = '<span class="chip st-esperando">Esperando aprobación</span>';
+        } else {
+          stChip = '<span class="chip st-en_curso">Capturando...</span>';
+        }
+
+        const beforeImg = s.beforeFrameId
+          ? `<a href="/api/pc/${curPc.id}/frame/${s.beforeFrameId}" target="_blank" rel="noopener"><img src="/api/pc/${curPc.id}/frame/${s.beforeFrameId}" alt="Captura antes" style="width:100%;max-height:280px;object-fit:contain;background:#000;border-radius:4px;border:1px solid var(--line);display:block"></a>`
+          : '<div class="panel r" style="text-align:center;padding:20px 8px"><small class="muted">Capturas no compartidas</small></div>';
+
+        const afterImg = s.afterFrameId
+          ? `<a href="/api/pc/${curPc.id}/frame/${s.afterFrameId}" target="_blank" rel="noopener"><img src="/api/pc/${curPc.id}/frame/${s.afterFrameId}" alt="Captura después" style="width:100%;max-height:280px;object-fit:contain;background:#000;border-radius:4px;border:1px solid var(--line);display:block"></a>`
+          : (s.result ? '<div class="panel r" style="text-align:center;padding:20px 8px"><small class="muted">Capturas no compartidas</small></div>' : '');
+
+        return `<div class="panel" style="margin-bottom:12px;border-left:4px solid ${isPending ? 'var(--yellow)' : s.result ? (s.ok ? 'var(--green)' : 'var(--red)') : 'var(--line)'}">
+          <div class="row" style="margin-bottom:6px">
+            <b>Paso #${s.num} · <code style="font-size:0.9em">${h(s.stepId)}</code></b>
+            <span class="right">${stChip}</span>
+          </div>
+
+          ${s.proposal ? `<div style="margin:8px 0;padding:8px;background:rgba(255,255,255,0.03);border-radius:4px">
+            <div><b>Herramienta:</b> <code>${h(s.tool || 'acción')}</code></div>
+            <div style="margin-top:4px"><b>Propuesta:</b> <span>${h(s.summary || '—')}</span></div>
+          </div>` : ''}
+
+          ${isPending ? `<div class="panel y" style="margin:10px 0">
+            <div class="row">
+              <b>Confirmar acción para ejecutar en Windows:</b>
+              <span class="right" id="pcCountdown" style="font-weight:bold;color:var(--yellow)">60 s restantes</span>
+            </div>
+            <div style="margin:6px 0"><code>${h(s.tool || '')}: ${h(s.summary || '')}</code></div>
+            ${!oc.remoteApproval ? '<p class="muted t-warn" style="margin:6px 0">⚠ La aprobación remota está desactivada en el PC. Debe aprobarse en la ventana de zer0 en Windows.</p>' : ''}
+            <div class="row" style="margin-top:10px">
+              <button class="btn y" id="pcApprove" data-step="${h(s.stepId)}" ${!admin || !oc.remoteApproval ? 'disabled' : ''}>Aprobar acción</button>
+              <button class="btn r" id="pcReject" data-step="${h(s.stepId)}" ${!admin || !oc.remoteApproval ? 'disabled' : ''}>Rechazar acción</button>
+            </div>
+          </div>` : ''}
+
+          ${s.result ? `<div style="margin:6px 0">
+            <span class="chip ${s.ok ? 'st-completada' : 'st-fallida'}">${s.ok ? '✔ Acción ejecutada' : '✘ Falló'}</span>
+            ${s.resultMessage ? `<span style="margin-left:6px">${h(s.resultMessage)}</span>` : ''}
+          </div>` : ''}
+
+          <div class="field-row" style="margin-top:10px;gap:10px">
+            <div><small class="muted" style="display:block;margin-bottom:4px">Pantalla ANTES de la acción</small>${beforeImg}</div>
+            ${afterImg ? `<div><small class="muted" style="display:block;margin-bottom:4px">Pantalla DESPUÉS de la acción</small>${afterImg}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+
+      let sessionStatusBadge = '';
+      if (sess.state === 'active') {
+        sessionStatusBadge = isDisconnected ? '<span class="chip r">PC desconectado</span>' : '<span class="chip st-en_curso">En curso</span>';
+      } else if (sess.state === 'stopped') {
+        sessionStatusBadge = `<span class="chip r">Detenida${sess.reason ? ': ' + h(sess.reason) : ''}</span>`;
+      } else if (sess.state === 'done') {
+        sessionStatusBadge = `<span class="chip g">Finalizada${sess.reason ? ': ' + h(sess.reason) : ''}</span>`;
+      }
+
+      timelineHtml = `
+        <div class="row" style="margin-bottom:10px;align-items:center">
+          <div><b>Sesión:</b> <code style="font-size:0.9em">${h(sess.id)}</code></div>
+          <div class="right">${sessionStatusBadge}</div>
+        </div>
+        ${lastDone ? `<div class="panel ${lastDone.data?.reason === 'completed' ? 'g' : 'r'}" style="margin-bottom:12px">
+          <b>Sesión finalizada:</b> razón <code>${h(lastDone.data?.reason || 'terminada')}</code>${lastDone.data?.message ? ` · ${h(lastDone.data.message)}` : ''}
+        </div>` : ''}
+        ${isDisconnected && isSessionActive ? '<div class="panel r" style="margin-bottom:12px"><b>PC desconectado:</b> la máquina perdió la conexión con la oficina durante la sesión.</div>' : ''}
+        <div class="pc-steps">${stepsHtml || '<div class="empty">Iniciando sesión...</div>'}</div>
+      `;
+    }
+
+    el.innerHTML = `
+      <div class="row" style="align-items:center;margin-bottom:12px">
+        <h1 style="margin:0">Control del PC (zer0)</h1>
+        <div class="grow" style="margin-left:12px">${selectorHtml}</div>
+        <div class="row right" style="gap:8px">
+          <button class="btn r" id="pcStop" title="Detener sesión y acciones inmediatamente">Detener</button>
+        </div>
+      </div>
+
+      <!-- Panel de estado del PC -->
+      <div class="panel ${curPc.online ? '' : 'r'}" style="margin-bottom:14px">
+        <div class="row" style="align-items:center">
+          <span class="dot ${curPc.online ? 'ok' : 'bad'}"></span>
+          <b>${curPc.online ? 'PC conectado' : 'PC desconectado'}</b>
+          ${curPc.info?.hostname ? `· <code>${h(curPc.info.hostname)}</code>` : ''}
+          <small class="muted">· visto ${ago(curPc.last_seen)}</small>
+          <span class="right">
+            ${curPc.online ? `<span class="chip ${busy ? 'st-en_curso' : 'st-completada'}">${busy ? 'Ocupada' : 'Libre'}</span>` : '<span class="chip r">Desconectado</span>'}
+            ${curPc.online && st ? `<span class="chip ${st.actionsStopped ? 'st-fallida' : 'st-completada'}">${st.actionsStopped ? 'Acciones detenidas (Stop)' : 'Acciones habilitadas'}</span>` : ''}
+          </span>
+        </div>
+
+        ${curPc.online ? `
+          <div class="row" style="gap:8px;margin-top:10px">
+            <span class="chip ${oc.enabled ? 'st-completada' : 'st-bloqueada'}">${h(ctrlText)}</span>
+            <span class="chip ${oc.sendFrames ? 'st-completada' : 'st-bloqueada'}">${h(framesText)}</span>
+            <span class="chip ${oc.remoteApproval ? 'st-completada' : 'st-bloqueada'}">${h(apprText)}</span>
+          </div>
+          ${avisos.length ? `<div class="panel r" style="margin-top:10px">${avisos.map(a => `<div>⚠ ${h(a)}</div>`).join('')}</div>` : ''}
+        ` : `
+          <div class="panel r" style="margin-top:10px">
+            <b>PC desconectado:</b> abre zer0 en Windows para reconectar este equipo a la oficina.
+          </div>
+        `}
+      </div>
+
+      <!-- Formularios de sesión y pregunta -->
+      ${admin ? `
+        <form class="panel" id="pcSessionForm" style="margin-bottom:14px">
+          <h3>Iniciar sesión de control</h3>
+          <div class="field-row">
+            <div>
+              <label class="l">Motor</label>
+              <select name="engine">
+                ${opts([['claude', 'Claude'], ['codex', 'Codex'], ['agy', 'Antigravity (agy)'], ['commandcode', 'CommandCode']], 'claude')}
+              </select>
+            </div>
+            <div>
+              <label class="l">Modelo (opcional)</label>
+              <input name="model" placeholder="claude-3-5-sonnet, etc.">
+            </div>
+            <div>
+              <label class="l">Máx. pasos (1–10)</label>
+              <input type="number" name="maxSteps" min="1" max="10" value="8">
+            </div>
+          </div>
+          <label class="l">Instrucción ${micBtn('#pcInst')}</label>
+          <textarea id="pcInst" name="instruction" rows="3" required maxlength="4000" placeholder="Escribe lo que zer0 debe hacer en el PC..."></textarea>
+          <div class="row" style="margin-top:10px;align-items:center">
+            <button class="btn y" id="pcBtnStart" ${!curPc.online || busy ? 'disabled' : ''}>Iniciar sesión</button>
+            ${!curPc.online ? '<small class="muted t-warn">PC desconectado</small>' : ''}
+            ${curPc.online && busy ? '<small class="muted t-warn">PC ocupado con otra sesión o consulta</small>' : ''}
+            ${curPc.online && !oc.enabled ? '<small class="muted t-warn">Activa «Permitir control desde oficina» en Windows</small>' : ''}
+          </div>
+        </form>
+
+        <details class="panel" style="margin-bottom:14px">
+          <summary class="lbl-up" style="cursor:pointer">Pregunta rápida (ask)</summary>
+          <form id="pcAskForm" style="margin-top:10px">
+            <div class="field-row">
+              <div>
+                <label class="l">Motor</label>
+                <select name="engine">
+                  ${opts([['claude', 'Claude'], ['codex', 'Codex'], ['agy', 'Antigravity (agy)'], ['commandcode', 'CommandCode']], 'claude')}
+                </select>
+              </div>
+              <div>
+                <label class="l">Modelo (opcional)</label>
+                <input name="model" placeholder="opcional">
+              </div>
+            </div>
+            <label class="l">Pregunta ${micBtn('#pcAskText')}</label>
+            <textarea id="pcAskText" name="text" rows="2" required maxlength="12000" placeholder="Consulta rápida a zer0..."></textarea>
+            <label class="row" style="margin-top:6px"><input type="checkbox" name="includeScreen"> Incluir captura de pantalla</label>
+            <div class="row" style="margin-top:10px">
+              <button class="btn y" id="pcBtnAsk" ${!curPc.online || busy ? 'disabled' : ''}>Preguntar</button>
+            </div>
+            <div id="pcAskResult" style="margin-top:10px" hidden></div>
+          </form>
+        </details>
+      ` : '<div class="panel" style="margin-bottom:14px"><small class="muted">Solo administradores pueden iniciar sesiones o hacer consultas.</small></div>'}
+
+      <!-- Línea de tiempo de la sesión -->
+      <h2>Línea de tiempo de la sesión</h2>
+      <div id="pcTimeline">${timelineHtml}</div>
+    `;
+
+    // ponytail: cuenta atrás de 60 s local en el cliente; si se desfasa del PC, zer0 rechaza con 422 el step vencido
+    clearInterval(pcTimer);
+    const cdEl = $('#pcCountdown', el);
+    if (cdEl && steps.some(s => s.proposal && !s.decision && !s.result && isSessionActive)) {
+      const pendingS = steps.find(s => s.proposal && !s.decision && !s.result && isSessionActive);
+      if (!pcProposalTimes.has(pendingS.stepId)) {
+        pcProposalTimes.set(pendingS.stepId, Date.now());
+      }
+      const updateCd = () => {
+        const elapsed = Math.floor((Date.now() - pcProposalTimes.get(pendingS.stepId)) / 1000);
+        const rem = Math.max(0, 60 - elapsed);
+        const curCd = $('#pcCountdown', el);
+        if (!curCd) { clearInterval(pcTimer); return; }
+        if (rem <= 0) {
+          clearInterval(pcTimer);
+          curCd.textContent = 'Caducado (60 s)';
+          curCd.style.color = 'var(--red)';
+          const bApp = $('#pcApprove', el), bRej = $('#pcReject', el);
+          if (bApp) bApp.disabled = true;
+          if (bRej) bRej.disabled = true;
+        } else {
+          curCd.textContent = `${rem} s restantes`;
+        }
+      };
+      updateCd();
+      pcTimer = setInterval(updateCd, 1000);
+    }
+
+    const sel = $('#pcSel', el);
+    if (sel) sel.onchange = e => go('#/pc/' + e.target.value);
+
+    const btnStop = $('#pcStop', el);
+    if (btnStop) {
+      btnStop.onclick = async () => {
+        btnStop.disabled = true;
+        try {
+          await post(`/api/pc/${curPc.id}/stop`);
+          holo('PC detenido', 'Se solicitó detener la sesión y acciones', { err: true });
+          refreshSoon(0);
+        } catch (err) {
+          fail(err);
+          btnStop.disabled = false;
+        }
+      };
+    }
+
+    const sessF = $('#pcSessionForm', el);
+    if (sessF) {
+      sessF.onsubmit = async e => {
+        e.preventDefault();
+        const f = formData(sessF);
+        const bStart = $('#pcBtnStart', sessF);
+        if (bStart) { bStart.disabled = true; bStart.textContent = 'Iniciando…'; }
+        try {
+          const body = {
+            instruction: f.instruction.trim(),
+            engine: f.engine,
+            maxSteps: +f.maxSteps || 8
+          };
+          if (f.model?.trim()) body.model = f.model.trim();
+          await post(`/api/pc/${curPc.id}/session`, body);
+          holo('Sesión iniciada', 'zer0 está ejecutando la instrucción');
+          refreshSoon(0);
+        } catch (err) {
+          fail(err);
+          if (bStart) { bStart.disabled = false; bStart.textContent = 'Iniciar sesión'; }
+        }
+      };
+    }
+
+    const askF = $('#pcAskForm', el);
+    if (askF) {
+      askF.onsubmit = async e => {
+        e.preventDefault();
+        const f = formData(askF);
+        const bAsk = $('#pcBtnAsk', askF);
+        if (bAsk) { bAsk.disabled = true; bAsk.textContent = 'Consultando…'; }
+        try {
+          const body = {
+            text: f.text.trim(),
+            engine: f.engine,
+            includeScreen: !!f.includeScreen
+          };
+          if (f.model?.trim()) body.model = f.model.trim();
+          const rAsk = await post(`/api/pc/${curPc.id}/ask`, body);
+          const out = $('#pcAskResult', askF);
+          if (out) {
+            out.hidden = false;
+            const txt = rAsk.message || (rAsk.payload ? JSON.stringify(rAsk.payload, null, 2) : 'OK');
+            out.innerHTML = `<div class="panel"><b>Respuesta de zer0:</b><div style="white-space:pre-wrap;margin-top:4px">${h(txt)}</div></div>`;
+          }
+        } catch (err) {
+          fail(err);
+        } finally {
+          if (bAsk) { bAsk.disabled = false; bAsk.textContent = 'Preguntar'; }
+        }
+      };
+    }
+
+    el.onclick = async e => {
+      const bApp = e.target.closest('#pcApprove');
+      if (bApp && !bApp.disabled) {
+        bApp.disabled = true;
+        const stepId = bApp.dataset.step;
+        try {
+          await post(`/api/pc/${curPc.id}/approve`, { sessionId: sess.id, stepId, decision: 'approve' });
+          holo('Acción aprobada', 'Enviada al PC');
+          refreshSoon(0);
+        } catch (err) {
+          fail(err);
+          bApp.disabled = false;
+        }
+        return;
+      }
+
+      const bRej = e.target.closest('#pcReject');
+      if (bRej && !bRej.disabled) {
+        bRej.disabled = true;
+        const stepId = bRej.dataset.step;
+        try {
+          await post(`/api/pc/${curPc.id}/approve`, { sessionId: sess.id, stepId, decision: 'reject' });
+          holo('Acción rechazada', 'Enviada al PC');
+          refreshSoon(0);
+        } catch (err) {
+          fail(err);
+          bRej.disabled = false;
+        }
+        return;
+      }
+    };
+  }
+};
+
+export const VIEWS = { estacion, proyectos, kanban, repos, tarea, cantina, consejo, archivos, puente, config, pc };
 
 
 // ---------- órdenes por voz desde el dock: dictar → interpretar → confirmar → ejecutar ----------

@@ -35,6 +35,10 @@ const SECCIONES = [
   ['estacion', 'Estación', '#/estacion'],
   ['mapa', 'Estación', '#/estacion'],
   ['oficina', 'Estación', '#/estacion'],
+  ['control del pc', 'Control del PC', '#/pc'],
+  ['control de pc', 'Control del PC', '#/pc'],
+  ['pc', 'Control del PC', '#/pc'],
+  ['zer0', 'Control del PC', '#/pc'],
 ];
 
 const borde = c => !c || !/[a-z0-9]/.test(c);

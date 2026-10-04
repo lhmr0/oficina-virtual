@@ -52,8 +52,8 @@ export function setProject(id) {
   localStorage.setItem('ov_project', S.project || '');
   const s = $('#projSel'); if (s) s.value = S.project || '';
 }
-const MENU = [['proyectos', 'Proyectos', 'folder'], ['kanban', 'Kanban', 'board'], ['repos', 'Repositorios', 'branch'],['cantina', 'Cantina', 'chat'], ['consejo', 'Consejo Jedi', 'council'], ['archivos', 'Archivos Jedi', 'archive'], ['puente', 'Puente de Mando', 'gauge'], ['config', 'Configuración', 'gear']];
-const WIDE = ['proyectos', 'kanban', 'consejo', 'archivos', 'puente', 'config'];
+const MENU = [['proyectos', 'Proyectos', 'folder'], ['kanban', 'Kanban', 'board'], ['repos', 'Repositorios', 'branch'],['cantina', 'Cantina', 'chat'], ['consejo', 'Consejo Jedi', 'council'], ['archivos', 'Archivos Jedi', 'archive'], ['puente', 'Puente de Mando', 'gauge'], ['pc', 'Control del PC', 'monitor'], ['config', 'Configuración', 'gear']];
+const WIDE = ['proyectos', 'kanban', 'consejo', 'archivos', 'puente', 'pc', 'config'];
 function shell() {
   const me = S.boot.me;
   app.innerHTML = `
@@ -85,7 +85,7 @@ function shell() {
     <a role="menuitem" href="#/config/perfil">${ic('user')}Mi perfil</a>
     ${canEdit() ? `<button role="menuitem" id="mMission">${ic('rocket')}Nueva misión</button>` : ''}
     <div class="menu-sep">Secciones</div>
-    ${MENU.filter(([k]) => k !== 'config' || isAdmin()).map(([k, l, i]) => `<a role="menuitem" href="#/${k}" data-nav="${k}">${ic(i)}${l}</a>`).join('')}
+    ${MENU.filter(([k]) => k === 'config' ? isAdmin() : k === 'pc' ? canEdit() : true).map(([k, l, i]) => `<a role="menuitem" href="#/${k}" data-nav="${k}">${ic(i)}${l}</a>`).join('')}
     <div class="menu-sep">Preferencias</div>
     <button role="menuitemcheckbox" id="themeBtn" aria-checked="${S.theme !== 'blanco'}">${ic('moon')}Tema oscuro<span class="switch"></span></button>
     <button role="menuitemcheckbox" id="soundBtn" aria-checked="${S.sound}">${ic('sound')}Sonido<span class="switch"></span></button>
@@ -254,6 +254,7 @@ function connectSSE() {
   on('agent.status', d => { reboot(); pass('agent.status', d); });
   on('project.updated', () => reboot());
   on('machine.status', d => { reboot(); pass('machine.status', d); });
+  on('pc.event', d => pass('pc.event', d));
   on('queue', d => { S.boot.queue_paused = d.paused; $('#qpaused').hidden = !d.paused; });
   on('notify', n => { notifyUI(n); inboxCount(); });
   on('permiso', p => {
