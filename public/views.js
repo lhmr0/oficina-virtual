@@ -1377,7 +1377,7 @@ const config = {
         <p class="muted">Máquinas con zer0 conectado para control remoto visual paso a paso desde la oficina.</p>
         <div class="panel table-wrap"><table class="grid"><tr><th>Máquina</th><th>Estado</th><th>Equipo</th><th>Visto</th><th></th></tr>
         ${pcs.map(p => `<tr><td><b>${h(p.name)}</b></td><td><span class="dot ${p.online ? 'ok' : 'bad'}"></span> ${p.online ? 'conectada' : 'desconectada'}</td>
-          <td>${h(p.info?.hostname || '-')}</td><td>${ago(p.last_seen)}</td>
+          <td>${h((p.info?.host || p.info?.hostname) || '-')}</td><td>${ago(p.last_seen)}</td>
           <td><a class="btn sm y" href="#/pc/${p.id}">Controlar</a><button class="btn sm ghost" data-mren="${p.id}">Renombrar</button><button class="btn sm r" data-mdel="${p.id}">Eliminar</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Sin máquinas zer0 registradas</td></tr>'}</table></div>
         <form class="panel" id="newMachine" style="margin-top:16px"><h3>Conectar una PC</h3>
           <div class="field-row">
@@ -1905,7 +1905,7 @@ const pc = {
         <div class="row" style="align-items:center">
           <span class="dot ${curPc.online ? 'ok' : 'bad'}"></span>
           <b>${curPc.online ? 'PC conectado' : 'PC desconectado'}</b>
-          ${curPc.info?.hostname ? `· <code>${h(curPc.info.hostname)}</code>` : ''}
+          ${(curPc.info?.host || curPc.info?.hostname) ? `· <code>${h(curPc.info.host || curPc.info.hostname)}</code>` : ''}
           <small class="muted">· visto ${ago(curPc.last_seen)}</small>
           <span class="right">
             ${curPc.online ? `<span class="chip ${busy ? 'st-en_curso' : 'st-completada'}">${busy ? 'Ocupada' : 'Libre'}</span>` : '<span class="chip r">Desconectado</span>'}
