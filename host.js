@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { DATA, now, all, one, run, insert, update, bus, emit, log, setting } = require('./db');
 const H = require('./hostops');
+const pc = require('./pc');
 
 const LOCAL_EXEC = process.env.OFICINA_LOCAL_EXEC !== '0';
 const deployCfg = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'worker.json'), 'utf8')).deploy; } catch { return null; } })(); // mismo "deploy" que el agente de campo
@@ -50,7 +51,12 @@ async function call(mid, op, args = {}) {
     if (op === 'putFiles') return local.ops.putFiles(args, f => fs.readFileSync(attachmentFile(f.id)));
     return local.ops[op](args);
   }
-  return rpc(mid, op, args, op === 'convertDocs' || op === 'deploy' ? 1800000 : ['detectModels', 'merge', 'push', 'repoStatus'].includes(op) ? 180000 : 120000);
+  const ms = op === 'convertDocs' || op === 'deploy' ? 1800000
+    : op === 'zer0.ask' ? 600000
+    : ['detectModels', 'merge', 'push', 'repoStatus'].includes(op) ? 180000
+    : ['zer0.status', 'zer0.stop', 'zer0.session.start', 'zer0.session.stop', 'zer0.approve'].includes(op) ? 30000
+    : 120000;
+  return rpc(mid, op, args, ms);
 }
 
 // Lanza un proceso de agente; los eventos llegan a onEvent (local directo o remoto vía /api/worker/events)
@@ -114,6 +120,7 @@ function attachStream(m, req, res) {
       for (const [id, p] of pending) if (p.mid === m.id) { clearTimeout(p.timer); pending.delete(id); p.reject(new Error('La máquina se desconectó')); }
       log(null, 'maquina', m.id, 'desconectada');
       emit('machine.status', { id: m.id, online: false });
+      pc.stopSession(m.id, 'PC desconectado');
     }
   });
 }

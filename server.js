@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { db, DATA, PORT, now, all, one, run, J, insert, update, bus, emit, log, notify, setting, setSetting } = require('./db');
 const host = require('./host');
+const pc = require('./pc');
 const R = require('./runner');
 const S = require('./status');
 const C = require('./council');
@@ -301,6 +302,109 @@ r('PUT', '/api/machines/:id', 'admin', ({ params, body, user }) => {
 });
 r('DELETE', '/api/machines/:id', 'admin', ({ params, user }) => { update('machines', +params.id, { deleted_at: now(), token_hash: null }); log(user.id, 'maquina', +params.id, 'eliminar'); emit('machine.status', { id: +params.id }); return { ok: true }; });
 r('GET', '/api/machines/:id/ls', 'operador', ({ params, query }) => host.call(+params.id || host.defaultMachine(), 'listDir', { path: query.path || null }));
+
+// ---------- PC (zer0) ----------
+r('GET', '/api/pc', 'observador', () => host.machineList('zer0').map(m => ({ id: m.id, name: m.name, online: m.online, last_seen: m.last_seen, info: m.info, kind: m.kind })));
+
+r('GET', '/api/pc/:id/status', 'operador', async ({ params }) => {
+  const mid = +params.id;
+  const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
+  need(host.online(mid), 'PC no conectado', 409);
+  const res = await host.call(mid, 'zer0.status', {});
+  if (res && res.ok === false) throw new HttpError(422, res.message || 'Error de estado');
+  return res.payload || res;
+});
+
+const ASK_KEYS = new Set(['text', 'engine', 'model', 'includeScreen']);
+r('POST', '/api/pc/:id/ask', 'admin', async ({ params, body, user }) => {
+  const mid = +params.id;
+  const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
+  for (const k of Object.keys(body)) need(ASK_KEYS.has(k), 'Campo no permitido: ' + k, 400);
+  need(typeof body.text === 'string' && body.text.length >= 1 && body.text.length <= 12000, 'Texto requerido (1..12000 caracteres)', 400);
+  need(typeof body.engine === 'string' && ['agy', 'claude', 'codex', 'commandcode'].includes(body.engine), 'Motor inválido', 400);
+  if (body.model !== undefined && body.model !== null) need(typeof body.model === 'string' && body.model.length <= 200, 'Modelo inválido', 400);
+  if (body.includeScreen !== undefined) need(typeof body.includeScreen === 'boolean', 'includeScreen debe ser booleano', 400);
+  need(host.online(mid), 'PC no conectado', 409);
+  need(pc.acquire(mid, 'ask'), 'PC ocupado con otra consulta o sesión', 409);
+  try {
+    const res = await host.call(mid, 'zer0.ask', { text: body.text, engine: body.engine, model: body.model ?? null, includeScreen: !!body.includeScreen });
+    if (res && res.ok === false) throw new HttpError(422, res.message || 'Error en zer0');
+    log(user.id, 'pc', mid, 'ask', { engine: body.engine, len: body.text.length });
+    return res || { ok: true };
+  } finally {
+    pc.release(mid, 'ask');
+  }
+});
+
+const SESSION_KEYS = new Set(['instruction', 'engine', 'model', 'maxSteps']);
+r('POST', '/api/pc/:id/session', 'admin', async ({ params, body, user }) => {
+  const mid = +params.id;
+  const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
+  for (const k of Object.keys(body)) need(SESSION_KEYS.has(k), 'Campo no permitido: ' + k, 400);
+  need(typeof body.instruction === 'string' && body.instruction.length >= 1 && body.instruction.length <= 4000, 'Instrucción requerida (1..4000 caracteres)', 400);
+  need(typeof body.engine === 'string' && ['agy', 'claude', 'codex', 'commandcode'].includes(body.engine), 'Motor inválido', 400);
+  if (body.model !== undefined && body.model !== null) need(typeof body.model === 'string' && body.model.length <= 200, 'Modelo inválido', 400);
+  const maxSteps = body.maxSteps !== undefined ? body.maxSteps : 8;
+  need(Number.isInteger(maxSteps) && maxSteps >= 1 && maxSteps <= 10, 'maxSteps debe ser un entero entre 1 y 10', 400);
+  need(host.online(mid), 'PC no conectado', 409);
+  need(pc.acquire(mid, 'session'), 'PC ocupado con otra consulta o sesión', 409);
+  const sessionId = crypto.randomUUID();
+  pc.startSession(mid, user.id, sessionId);
+  try {
+    const res = await host.call(mid, 'zer0.session.start', { sessionId, instruction: body.instruction, engine: body.engine, model: body.model ?? null, maxSteps });
+    if (res && res.ok === false) {
+      pc.clearSession(mid);
+      throw new HttpError(422, res.message || 'Sesión rechazada por el PC');
+    }
+    log(user.id, 'pc', mid, 'session', { sessionId, engine: body.engine, len: body.instruction.length, maxSteps });
+    return { sessionId };
+  } catch (e) {
+    pc.clearSession(mid);
+    throw e;
+  }
+});
+
+r('GET', '/api/pc/:id/session', 'admin', ({ params }) => {
+  const mid = +params.id;
+  const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
+  return pc.getSession(mid);
+});
+
+r('GET', '/api/pc/:id/frame/:frameId', 'admin', ({ params, res }) => {
+  const mid = +params.id;
+  const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
+  const buf = pc.frame(mid, params.frameId);
+  need(buf, 'Frame no encontrado', 404);
+  res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
+  res.end(buf);
+  return RAW;
+});
+
+const APPROVE_KEYS = new Set(['sessionId', 'stepId', 'decision']);
+r('POST', '/api/pc/:id/approve', 'admin', async ({ params, body, user }) => {
+  const mid = +params.id;
+  const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
+  for (const k of Object.keys(body)) need(APPROVE_KEYS.has(k), 'Campo no permitido: ' + k, 400);
+  need(typeof body.sessionId === 'string' && body.sessionId.length > 0, 'sessionId requerido', 400);
+  need(typeof body.stepId === 'string' && body.stepId.length > 0, 'stepId requerido', 400);
+  need(['approve', 'reject'].includes(body.decision), 'decision debe ser "approve" o "reject"', 400);
+  need(host.online(mid), 'PC no conectado', 409);
+  const res = await host.call(mid, 'zer0.approve', { sessionId: body.sessionId, stepId: body.stepId, decision: body.decision });
+  if (res && res.ok === false) throw new HttpError(422, res.message || 'Aprobación rechazada');
+  log(user.id, 'pc', mid, 'approve', { sessionId: body.sessionId, stepId: body.stepId, decision: body.decision });
+  return res || { ok: true };
+});
+
+r('POST', '/api/pc/:id/stop', 'operador', async ({ params, user }) => {
+  const mid = +params.id;
+  const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
+  if (host.online(mid)) {
+    await host.call(mid, 'zer0.stop', {}).catch(() => {});
+  }
+  pc.stopSession(mid, 'Detenido por usuario');
+  log(user.id, 'pc', mid, 'stop');
+  return { ok: true };
+});
 
 // ---------- tareas ----------
 const taskRow = t => t && { ...t, depends_on: J(t.depends_on, []) };
@@ -836,6 +940,7 @@ async function handleWorker(req, res, url) {
   if (req.method === 'POST' && p === 'hello') return json(host.hello(m, await readBody(req)));
   if (req.method === 'POST' && p === 'reply') return json(host.reply(m, await readBody(req)));
   if (req.method === 'POST' && p === 'events') return json(host.events(m, (await readBody(req)).events));
+  if (req.method === 'POST' && p === 'pc-event') return json(pc.ingest(m, await readBody(req)));
   const at = /^attachments\/(\d+)$/.exec(p);
   if (req.method === 'GET' && at) { const f = one('select * from attachments where id=?', +at[1]); if (!f) { res.writeHead(404); return res.end(); } res.writeHead(200, { 'Content-Type': 'application/octet-stream' }); return fs.createReadStream(path.join(DATA, 'attachments', f.stored)).pipe(res); }
   res.writeHead(404); res.end();
@@ -851,7 +956,11 @@ function sse(req, res, user) {
 async function handle(req, res) {
   const url = new URL(req.url, 'http://x');
   for (const [k, v] of Object.entries(SEC_HEADERS)) res.setHeader(k, v);
-  if (url.pathname.startsWith('/api/worker/')) return handleWorker(req, res, url).catch(e => { if (!res.headersSent) res.writeHead(400); res.end(String(e.message)); });
+  if (url.pathname.startsWith('/api/worker/')) return handleWorker(req, res, url).catch(e => {
+    const code = e.code >= 400 && e.code < 600 ? e.code : 400;
+    if (!res.headersSent) res.writeHead(code);
+    res.end(String(e.message));
+  });
   if (url.pathname.startsWith('/api/')) {
     const user = userOf(req);
     if (url.pathname === '/api/events') { if (!user) { res.writeHead(401); return res.end(); } return sse(req, res, user); }
