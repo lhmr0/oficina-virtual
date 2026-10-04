@@ -287,7 +287,11 @@ r('DELETE', '/api/folders/:id', 'operador', ({ params, user }) => {
 });
 // ---------- máquinas (agentes de campo) ----------
 r('GET', '/api/machines', 'observador', () => host.machineList());
-r('POST', '/api/machines', 'admin', ({ body, user }) => { need(body.name?.trim(), 'Nombre requerido'); return host.createMachine(body.name.trim(), user.id); });
+r('POST', '/api/machines', 'admin', ({ body, user }) => {
+  need(body.name?.trim(), 'Nombre requerido');
+  const kind = body.kind === 'zer0' ? 'zer0' : 'worker';
+  return host.createMachine(body.name.trim(), user.id, kind);
+});
 r('PUT', '/api/machines/:id', 'admin', ({ params, body, user }) => {
   const m = host.machine(+params.id); need(m, 'No existe', 404);
   if (body.name) update('machines', m.id, { name: body.name });
@@ -825,8 +829,9 @@ const SEC_HEADERS = {
 async function handleWorker(req, res, url) {
   const m = host.authWorker(req);
   if (!m) { res.writeHead(401); return res.end('token inválido'); }
-  const json = x => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(x ?? null)); };
   const p = url.pathname.slice('/api/worker/'.length);
+  if (m.kind === 'zer0' && !['stream', 'hello', 'reply', 'pc-event'].includes(p)) { res.writeHead(403); return res.end('no permitido'); }
+  const json = x => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(x ?? null)); };
   if (req.method === 'GET' && p === 'stream') return host.attachStream(m, req, res);
   if (req.method === 'POST' && p === 'hello') return json(host.hello(m, await readBody(req)));
   if (req.method === 'POST' && p === 'reply') return json(host.reply(m, await readBody(req)));

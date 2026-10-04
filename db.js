@@ -93,6 +93,7 @@ addCol('conversations', 'usage_cum', 'text'); // último uso acumulado que infor
 addCol('runs', 'tokens_cache', 'integer default 0');
 addCol('runs', 'first_out_at', 'text'); // primera salida del CLI: arranque/autenticación vs trabajo
 addCol('areas', 'room', 'text'); // sala del mapa: doc | dev | ana | '' (solo en "Más salas"); antes se deducía del nombre
+addCol('machines', 'kind', "text default 'worker'");
 db.exec(`update areas set room = case when lower(name) like '%doc%' then 'doc' when lower(name) like '%desarr%' then 'dev' when lower(name) like '%an_lisis%' then 'ana' else '' end where room is null`);
 fs.mkdirSync(path.join(DATA0, 'attachments'), { recursive: true });
 

@@ -20,11 +20,12 @@ const pending = new Map();     // callId → {resolve, reject, timer, mid}
 const runHandlers = new Map(); // runId → {mid, onEvent}
 
 const machine = id => one('select * from machines where id=? and deleted_at is null', id);
-const machines = () => all('select * from machines where deleted_at is null order by id');
+const machines = (kind = 'worker') => all("select * from machines where deleted_at is null and coalesce(kind,'worker')=? order by id", kind);
 function defaultMachine() {
   const d = setting('default_machine', null);
-  if (d && machine(d)) return d;
-  return (LOCAL_EXEC && one('select id from machines where is_local=1 and deleted_at is null')?.id) || machines()[0]?.id || null;
+  const dm = d ? machine(d) : null;
+  if (dm && (dm.kind || 'worker') === 'worker') return d;
+  return (LOCAL_EXEC && one("select id from machines where is_local=1 and deleted_at is null and coalesce(kind,'worker')='worker'")?.id) || machines()[0]?.id || null;
 }
 const online = id => { const m = machine(id); return !!m && (m.is_local ? LOCAL_EXEC : conns.has(id)); };
 const attachmentFile = id => { const a = one('select * from attachments where id=?', id); return path.join(DATA, 'attachments', a.stored); };
@@ -72,10 +73,10 @@ bus.on('toast', ({ title, body, link }) => {
 
 // ---------- agentes de campo ----------
 const sha = s => crypto.createHash('sha256').update(s).digest();
-function createMachine(name, userId) {
+function createMachine(name, userId, kind = 'worker') {
   const secret = crypto.randomBytes(32).toString('base64url');
-  const id = insert('machines', { name, is_local: 0, token_hash: sha(secret).toString('hex'), created_by: userId, created_at: now() });
-  log(userId, 'maquina', id, 'crear', { name });
+  const id = insert('machines', { name, is_local: 0, kind, token_hash: sha(secret).toString('hex'), created_by: userId, created_at: now() });
+  log(userId, 'maquina', id, 'crear', { name, kind });
   return { id, token: `${id}.${secret}` };
 }
 function authWorker(req) {
@@ -131,8 +132,8 @@ function events(m, list = []) {
     r.onEvent(ev);
   }
 }
-function machineList() {
-  return machines().map(m => ({ id: m.id, name: m.name, is_local: !!m.is_local, online: online(m.id), last_seen: m.last_seen, info: m.info ? JSON.parse(m.info) : null,
+function machineList(kind = 'worker') {
+  return machines(kind).map(m => ({ id: m.id, name: m.name, kind: m.kind || 'worker', is_local: !!m.is_local, online: online(m.id), last_seen: m.last_seen, info: m.info ? JSON.parse(m.info) : null,
     is_default: m.id === defaultMachine(), running: [...runHandlers.values()].filter(r => r.mid === m.id).length }));
 }
 
