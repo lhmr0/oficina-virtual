@@ -112,6 +112,15 @@ Contenedor `oficina-ia` en un servidor de la red interna (`deploy/ia/`, sin GPU)
 
 Instalar: copiar `deploy/ia` al servidor como `~/oficina-ia`, crear `secrets/api_key` y ejecutar `docker compose up -d --build`. En la oficina: `OFICINA_IA_URL=http://<servidor>:8010` y `OFICINA_IA_KEY=<clave>`. Las llamadas salen desde el agente de campo (la PC ve la red interna y el VPS no). Sin estas variables, la función queda apagada. Si el servicio cae, todo sigue como antes.
 
+### Control del PC con zer0 (Windows)
+
+Además de los agentes de campo, una PC con **zer0** puede registrarse como máquina de tipo `zer0` (Configuración → Máquinas → Tipo «zer0 (Windows)»). Usa el mismo protocolo saliente (`hello`/`stream`/`reply`) más `POST /api/worker/pc-event`; **no ejecuta tareas ni agentes de la oficina** y su token solo puede usar esas rutas.
+
+- Vista web: `#/pc` (operador/admin). API: `GET /api/pc` (observador), `GET /api/pc/:id/status` y `POST /api/pc/:id/stop` (operador), `POST /api/pc/:id/ask`, `POST /api/pc/:id/session`, `GET /api/pc/:id/session`, `GET /api/pc/:id/frame/:frameId` y `POST /api/pc/:id/approve` (admin).
+- La aprobación de cada acción es siempre local en zer0; la web solo puede aprobar si el interruptor local «Permitir aprobar acciones desde oficina» está activo.
+- Los pantallazos viven **solo en memoria** (máx. 20 por PC, ≤ 400 KB, solo admin, `Cache-Control: no-store`) y se borran `OFICINA_PC_FRAME_TTL_MS` (600000) después de acabar la sesión; una sesión sin respuesta se vence a los `OFICINA_PC_SESSION_MAX_MS` (11 min). El SSE general solo avisa `pc.event` sin datos ni imágenes.
+- Pruebas: `node --no-warnings test-pc.js`.
+
 ## Datos
 
 Todo vive en `data/` (SQLite `oficina.db`, logs de ejecución, sandbox, respaldos diarios). Variables: `OFICINA_PORT` (4242), `OFICINA_DATA`, `OFICINA_BIND`, `OFICINA_LOCAL_EXEC` (0 = no ejecutar agentes en el servidor), `OFICINA_AUTH` (password|google), `OFICINA_PUBLIC_URL`, `OFICINA_ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OFICINA_NO_TOAST`, `OFICINA_CANTINA`.
