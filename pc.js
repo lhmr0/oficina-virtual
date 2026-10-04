@@ -81,6 +81,9 @@ function startSession(mid, userId, sessionId) {
     evictTimer: null
   };
   sessions.set(mid, sess);
+  // zer0 limita la sesión a 10 min; si se cuelga conectado, no dejar la PC "ocupada" para siempre
+  const guard = setTimeout(() => { if (sessions.get(mid) === sess) stopSession(mid, 'Tiempo agotado'); }, Number(process.env.OFICINA_PC_SESSION_MAX_MS || 11 * 60 * 1000));
+  guard.unref?.();
   return sess;
 }
 

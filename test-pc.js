@@ -566,6 +566,19 @@ function fakeZer0(token, handler) {
       assert.equal(evictRes.status, 404);
     });
 
+    await t('sesión colgada: el servidor la vence y libera la PC', async () => {
+      process.env.OFICINA_PC_SESSION_MAX_MS = '200';
+      try {
+        const z = await api('POST', '/api/machines', { name: 'PC-m', kind: 'zer0' });
+        const fz = await fakeZer0(z.token, () => ({ ok: true }));
+        await api('POST', `/api/pc/${z.id}/session`, { instruction: 'x', engine: 'codex' });
+        await rejects(api('POST', `/api/pc/${z.id}/session`, { instruction: 'y', engine: 'codex' }), /ocupado/);
+        await until(async () => (await api('GET', `/api/pc/${z.id}/session`)).state === 'stopped', 3000, 'sesión vencida');
+        assert.equal((await api('POST', `/api/pc/${z.id}/session`, { instruction: 'z', engine: 'codex' })).sessionId.length > 10, true);
+        fz.close();
+      } finally { delete process.env.OFICINA_PC_SESSION_MAX_MS; }
+    });
+
   } catch (e) {
     failed++;
     console.error('✘ error fatal en la suite', e.stack || e);
