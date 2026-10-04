@@ -566,6 +566,25 @@ function fakeZer0(token, handler) {
       assert.equal(evictRes.status, 404);
     });
 
+    await t('aprobación por riesgo: auto/by/askReason/modelRisk llegan intactos a la web', async () => {
+      const z = await api('POST', '/api/machines', { name: 'PC-riesgo', kind: 'zer0' });
+      const fz = await fakeZer0(z.token, () => ({ ok: true }));
+      try {
+        const sid = (await api('POST', `/api/pc/${z.id}/session`, { instruction: 'x', engine: 'agy' })).sessionId;
+        await fz.ev({ sessionId: sid, seq: 1, type: 'step.proposal', data: { stepId: 'a1', tool: 'click', summary: 'clic', auto: true, modelRisk: 'low' } });
+        await new Promise(r => setTimeout(r, 250));
+        await fz.ev({ sessionId: sid, seq: 2, type: 'step.approved', data: { stepId: 'a1', by: 'auto' } });
+        await new Promise(r => setTimeout(r, 250));
+        await fz.ev({ sessionId: sid, seq: 3, type: 'step.proposal', data: { stepId: 'a2', tool: 'type_text', summary: 'escribir', askReason: 'Herramienta type_text requiere aprobación', modelRisk: 'medium' } });
+        const ev = (await api('GET', `/api/pc/${z.id}/session`)).events;
+        const p1 = ev.find(e => e.seq === 1).data, ap = ev.find(e => e.seq === 2).data, p2 = ev.find(e => e.seq === 3).data;
+        assert.equal(p1.auto, true); assert.equal(p1.modelRisk, 'low');
+        assert.equal(ap.by, 'auto');
+        assert.equal(p2.askReason, 'Herramienta type_text requiere aprobación'); assert.equal(p2.modelRisk, 'medium'); assert.ok(!p2.auto);
+        // el estado de la PC expone la auto-aprobacion que informa zer0
+      } finally { fz.close(); }
+    });
+
     await t('sesión colgada: el servidor la vence y libera la PC', async () => {
       process.env.OFICINA_PC_SESSION_MAX_MS = '200';
       try {

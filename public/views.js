@@ -1705,8 +1705,12 @@ function groupPcSteps(events) {
       currentStep.proposal = ev;
       currentStep.tool = ev.data?.tool;
       currentStep.summary = ev.data?.summary;
+      currentStep.auto = ev.data?.auto === true;          // zer0 la ejecuta sola (bajo riesgo)
+      currentStep.askReason = ev.data?.askReason || '';    // por que zer0 pide aprobacion (regla o motivo del motor)
+      currentStep.modelRisk = ev.data?.modelRisk || '';
     } else if (ev.type === 'step.approved') {
       currentStep.decision = 'approved';
+      currentStep.by = ev.data?.by || '';
       currentStep.approved = ev;
     } else if (ev.type === 'step.rejected') {
       currentStep.decision = 'rejected';
@@ -1796,6 +1800,8 @@ const pc = {
       : 'Control desde oficina: apagado';
     const framesText = oc.sendFrames ? 'Capturas: activo' : 'Capturas: apagado';
     const apprText = oc.remoteApproval ? 'Aprobación remota: activo' : 'Aprobación remota: apagado';
+    const ap = oc.autoApproval || {};
+    const autoText = ap.enabled ? `Auto-aprobación de bajo riesgo: activa (${ap.scope === '*' || !ap.scope ? 'todas las apps' : ap.scope})` : 'Auto-aprobación de bajo riesgo: apagada';
 
     const selectorHtml = pcs.length > 1
       ? `<select id="pcSel" aria-label="Elegir PC">${pcs.map(p => `<option value="${p.id}" ${p.id === curPc.id ? 'selected' : ''}>${h(p.name)} (${p.online ? 'en línea' : 'desconectado'})</option>`).join('')}</select>`
@@ -1814,7 +1820,7 @@ const pc = {
         if (s.result) {
           stChip = `<span class="chip ${s.ok ? 'st-completada' : 'st-fallida'}">${s.ok ? 'Resultado: OK' : 'Resultado: Falló'}</span>`;
         } else if (s.decision === 'approved') {
-          stChip = '<span class="chip st-en_curso">Aprobada · ejecutando...</span>';
+          stChip = s.by === 'auto' ? '<span class="chip st-en_curso">Automática · ejecutando...</span>' : '<span class="chip st-en_curso">Aprobada · ejecutando...</span>';
         } else if (s.decision === 'rejected') {
           stChip = '<span class="chip st-bloqueada">Rechazada</span>';
         } else if (s.decision === 'expired') {
@@ -1836,12 +1842,13 @@ const pc = {
         return `<div class="panel" style="margin-bottom:12px;border-left:4px solid ${isPending ? 'var(--yellow)' : s.result ? (s.ok ? 'var(--green)' : 'var(--red)') : 'var(--line)'}">
           <div class="row" style="margin-bottom:6px">
             <b>Paso #${s.num} · <code style="font-size:0.9em">${h(s.stepId)}</code></b>
-            <span class="right">${stChip}</span>
+            <span class="right">${s.by === 'auto' || s.auto ? '<span class="chip st-completada" title="Acción de bajo riesgo: zer0 la ejecutó sin pedir aprobación">⚡ auto</span> ' : ''}${stChip}</span>
           </div>
 
           ${s.proposal ? `<div style="margin:8px 0;padding:8px;background:rgba(255,255,255,0.03);border-radius:4px">
             <div><b>Herramienta:</b> <code>${h(s.tool || 'acción')}</code></div>
             <div style="margin-top:4px"><b>Propuesta:</b> <span>${h(s.summary || '—')}</span></div>
+            ${s.askReason ? `<div style="margin-top:4px"><b>Por qué necesita tu aprobación:</b> <span>${h(s.askReason)}</span>${s.modelRisk ? ` <span class="chip st-pausada_cuota">riesgo según el motor: ${h(s.modelRisk)}</span>` : ''}</div>` : ''}
           </div>` : ''}
 
           ${isPending ? `<div class="panel y" style="margin:10px 0">
@@ -1850,6 +1857,7 @@ const pc = {
               <span class="right" id="pcCountdown" style="font-weight:bold;color:var(--yellow)">60 s restantes</span>
             </div>
             <div style="margin:6px 0"><code>${h(s.tool || '')}: ${h(s.summary || '')}</code></div>
+            ${s.askReason ? `<div style="margin:6px 0"><b>Motivo de la consulta:</b> ${h(s.askReason)}</div>` : ''}
             ${!oc.remoteApproval ? '<p class="muted t-warn" style="margin:6px 0">⚠ La aprobación remota está desactivada en el PC. Debe aprobarse en la ventana de zer0 en Windows.</p>' : ''}
             <div class="row" style="margin-top:10px">
               <button class="btn y" id="pcApprove" data-step="${h(s.stepId)}" ${!admin || !oc.remoteApproval ? 'disabled' : ''}>Aprobar acción</button>
@@ -1918,6 +1926,7 @@ const pc = {
             <span class="chip ${oc.enabled ? 'st-completada' : 'st-bloqueada'}">${h(ctrlText)}</span>
             <span class="chip ${oc.sendFrames ? 'st-completada' : 'st-bloqueada'}">${h(framesText)}</span>
             <span class="chip ${oc.remoteApproval ? 'st-completada' : 'st-bloqueada'}">${h(apprText)}</span>
+            <span class="chip ${ap.enabled ? 'st-completada' : 'st-bloqueada'}" title="Las acciones de bajo riesgo se ejecutan sin pedir aprobación; escribir texto, teclas, abrir apps o URLs y los clics dudosos siempre se consultan">${h(autoText)}</span>
           </div>
           ${avisos.length ? `<div class="panel r" style="margin-top:10px">${avisos.map(a => `<div>⚠ ${h(a)}</div>`).join('')}</div>` : ''}
         ` : `
