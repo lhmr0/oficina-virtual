@@ -1708,6 +1708,7 @@ function groupPcSteps(events) {
       currentStep.auto = ev.data?.auto === true;          // zer0 la ejecuta sola (bajo riesgo)
       currentStep.askReason = ev.data?.askReason || '';    // por que zer0 pide aprobacion (regla o motivo del motor)
       currentStep.modelRisk = ev.data?.modelRisk || '';
+      currentStep.explanation = ev.data?.explanation || '';   // lo que el motor dice que va a hacer y por que
     } else if (ev.type === 'step.approved') {
       currentStep.decision = 'approved';
       currentStep.by = ev.data?.by || '';
@@ -1846,6 +1847,7 @@ const pc = {
           </div>
 
           ${s.proposal ? `<div style="margin:8px 0;padding:8px;background:rgba(255,255,255,0.03);border-radius:4px">
+            ${s.explanation ? `<div style="margin-bottom:6px"><b>Qué va a hacer:</b> ${h(s.explanation)}</div>` : ''}
             <div><b>Herramienta:</b> <code>${h(s.tool || 'acción')}</code></div>
             <div style="margin-top:4px"><b>Propuesta:</b> <span>${h(s.summary || '—')}</span></div>
             ${s.askReason ? `<div style="margin-top:4px"><b>Por qué necesita tu aprobación:</b> <span>${h(s.askReason)}</span>${s.modelRisk ? ` <span class="chip st-pausada_cuota">riesgo según el motor: ${h(s.modelRisk)}</span>` : ''}</div>` : ''}
@@ -1891,7 +1893,9 @@ const pc = {
           <div><b>Sesión:</b> <code style="font-size:0.9em">${h(sess.id)}</code></div>
           <div class="right">${sessionStatusBadge}</div>
         </div>
-        ${lastDone ? `<div class="panel ${lastDone.data?.reason === 'completed' ? 'g' : 'r'}" style="margin-bottom:12px">
+        ${lastDone && lastDone.data?.reason === 'completed' && steps.length === 0 ? `<div class="panel y" style="margin-bottom:12px">
+          <b>zer0 no hizo nada:</b> ${h(lastDone.data?.message || '')}<div class="muted" style="margin-top:6px">Reformula la instrucción (por ejemplo, deja abierta y en primer plano la ventana que quieres usar) e inténtalo de nuevo.</div>
+        </div>` : lastDone ? `<div class="panel ${lastDone.data?.reason === 'completed' ? 'g' : 'r'}" style="margin-bottom:12px">
           <b>Sesión finalizada:</b> razón <code>${h(lastDone.data?.reason || 'terminada')}</code>${lastDone.data?.message ? ` · ${h(lastDone.data.message)}` : ''}
         </div>` : ''}
         ${isDisconnected && isSessionActive ? '<div class="panel r" style="margin-bottom:12px"><b>PC desconectado:</b> la máquina perdió la conexión con la oficina durante la sesión.</div>' : ''}
