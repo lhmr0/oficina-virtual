@@ -948,9 +948,11 @@ async function handleWorker(req, res, url) {
   const m = host.authWorker(req);
   if (!m) { res.writeHead(401); return res.end('token inválido'); }
   const p = url.pathname.slice('/api/worker/'.length);
-  if (m.kind === 'zer0' && !['stream', 'hello', 'reply', 'pc-event'].includes(p)) { res.writeHead(403); return res.end('no permitido'); }
+  if (m.kind === 'zer0' && !['stream', 'hello', 'reply', 'pc-event', 'models'].includes(p)) { res.writeHead(403); return res.end('no permitido'); }
   const json = x => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(x ?? null)); };
   if (req.method === 'GET' && p === 'stream') return host.attachStream(m, req, res);
+  // modelos disponibles por motor (los mantiene actualizar-modelos.js); zer0 los muestra en su selector
+  if (req.method === 'GET' && p === 'models') return json(Object.fromEntries(all('select key, models from agents').map(a => [a.key, J(a.models, [])])));
   if (req.method === 'POST' && p === 'hello') return json(host.hello(m, await readBody(req)));
   if (req.method === 'POST' && p === 'reply') return json(host.reply(m, await readBody(req)));
   if (req.method === 'POST' && p === 'events') return json(host.events(m, (await readBody(req)).events));
