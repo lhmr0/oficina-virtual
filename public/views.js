@@ -1938,49 +1938,39 @@ const pc = {
 
       <!-- Formularios de sesión y pregunta -->
       ${admin ? `
+        <form class="panel" id="pcWinForm" style="margin-bottom:14px">
+          <h3>Control sin supervisión por tiempo limitado</h3>
+          <small class="muted">Habilita en el PC el control remoto, las capturas y la aprobación desde aquí durante el tiempo elegido. Se corta con «Detener» o al vencer (máx. 12 h).</small>
+          <div class="row" style="margin-top:10px;gap:12px;align-items:center;flex-wrap:wrap">
+            <select name="minutes">${opts([['30', '30 min'], ['60', '1 h'], ['240', '4 h'], ['480', '8 h'], ['720', '12 h']], '60')}</select>
+            <label class="row" style="gap:6px"><input type="checkbox" name="autoApproval" checked> Aprobar solas las acciones de bajo riesgo</label>
+            <button class="btn y" id="pcBtnWin" ${!curPc.online ? 'disabled' : ''}>${oc.enabled ? 'Renovar ventana' : 'Habilitar control'}</button>
+          </div>
+          ${curPc.online && st && st.webEnableAllowed === false ? '<small class="muted t-warn">Primero, una sola vez: en zer0 (pestaña Oficina Virtual) marca «Permitir que la oficina habilite el control por tiempo limitado».</small>' : ''}
+        </form>
+
         <form class="panel" id="pcSessionForm" style="margin-bottom:14px">
           <h3>Iniciar sesión de control</h3>
           <div class="field-row">
-            <div>
-              <label class="l">Motor</label>
-              <select name="engine">
-                ${opts([['claude', 'Claude'], ['codex', 'Codex'], ['agy', 'Antigravity (agy)'], ['commandcode', 'CommandCode']], 'claude')}
-              </select>
-            </div>
-            <div>
-              <label class="l">Modelo (opcional)</label>
-              <input name="model" placeholder="claude-3-5-sonnet, etc.">
-            </div>
             <div>
               <label class="l">Máx. pasos (1–10)</label>
               <input type="number" name="maxSteps" min="1" max="10" value="8">
             </div>
           </div>
+          <small class="muted">El motor y el modelo los define la app de Windows.</small>
           <label class="l">Instrucción ${micBtn('#pcInst')}</label>
           <textarea id="pcInst" name="instruction" rows="3" required maxlength="4000" placeholder="Escribe lo que zer0 debe hacer en el PC..."></textarea>
           <div class="row" style="margin-top:10px;align-items:center">
             <button class="btn y" id="pcBtnStart" ${!curPc.online || busy ? 'disabled' : ''}>Iniciar sesión</button>
             ${!curPc.online ? '<small class="muted t-warn">PC desconectado</small>' : ''}
             ${curPc.online && busy ? '<small class="muted t-warn">PC ocupado con otra sesión o consulta</small>' : ''}
-            ${curPc.online && !oc.enabled ? '<small class="muted t-warn">Activa «Permitir control desde oficina» en Windows</small>' : ''}
+            ${curPc.online && !oc.enabled ? '<small class="muted t-warn">Pulsa «Habilitar control» arriba</small>' : ''}
           </div>
         </form>
 
         <details class="panel" style="margin-bottom:14px">
           <summary class="lbl-up" style="cursor:pointer">Pregunta rápida (ask)</summary>
           <form id="pcAskForm" style="margin-top:10px">
-            <div class="field-row">
-              <div>
-                <label class="l">Motor</label>
-                <select name="engine">
-                  ${opts([['claude', 'Claude'], ['codex', 'Codex'], ['agy', 'Antigravity (agy)'], ['commandcode', 'CommandCode']], 'claude')}
-                </select>
-              </div>
-              <div>
-                <label class="l">Modelo (opcional)</label>
-                <input name="model" placeholder="opcional">
-              </div>
-            </div>
             <label class="l">Pregunta ${micBtn('#pcAskText')}</label>
             <textarea id="pcAskText" name="text" rows="2" required maxlength="12000" placeholder="Consulta rápida a zer0..."></textarea>
             <label class="row" style="margin-top:6px"><input type="checkbox" name="includeScreen"> Incluir captura de pantalla</label>
@@ -2043,6 +2033,24 @@ const pc = {
       };
     }
 
+    const winF = $('#pcWinForm', el);
+    if (winF) {
+      winF.onsubmit = async e => {
+        e.preventDefault();
+        const f = formData(winF);
+        const b = $('#pcBtnWin', winF);
+        b.disabled = true;
+        try {
+          await post(`/api/pc/${curPc.id}/window`, { minutes: +f.minutes, autoApproval: !!f.autoApproval });
+          holo('Control habilitado', 'zer0 aceptará sesiones hasta que venza la ventana');
+          refreshSoon(0);
+        } catch (err) {
+          fail(err);
+          b.disabled = false;
+        }
+      };
+    }
+
     const sessF = $('#pcSessionForm', el);
     if (sessF) {
       sessF.onsubmit = async e => {
@@ -2053,10 +2061,8 @@ const pc = {
         try {
           const body = {
             instruction: f.instruction.trim(),
-            engine: f.engine,
             maxSteps: +f.maxSteps || 8
           };
-          if (f.model?.trim()) body.model = f.model.trim();
           await post(`/api/pc/${curPc.id}/session`, body);
           holo('Sesión iniciada', 'zer0 está ejecutando la instrucción');
           refreshSoon(0);
@@ -2077,10 +2083,8 @@ const pc = {
         try {
           const body = {
             text: f.text.trim(),
-            engine: f.engine,
             includeScreen: !!f.includeScreen
           };
-          if (f.model?.trim()) body.model = f.model.trim();
           const rAsk = await post(`/api/pc/${curPc.id}/ask`, body);
           const out = $('#pcAskResult', askF);
           if (out) {

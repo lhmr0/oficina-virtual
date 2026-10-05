@@ -184,7 +184,7 @@ function fakeZer0(token, handler) {
       }
     });
 
-    await t('caso b: ask admin ok y el handler recibe exactamente {text, engine, model, includeScreen}', async () => {
+    await t('caso b: ask admin ok y el handler recibe solo {text, includeScreen} (el motor lo define zer0)', async () => {
       const z = await api('POST', '/api/machines', { name: 'PC-b', kind: 'zer0' });
       let receivedOp = null, receivedArgs = null;
       const fz = await fakeZer0(z.token, (op, args) => {
@@ -200,16 +200,30 @@ function fakeZer0(token, handler) {
           includeScreen: true
         });
         assert.equal(receivedOp, 'zer0.ask');
-        assert.deepEqual(receivedArgs, {
-          text: 'haz una captura',
-          engine: 'claude',
-          model: 'claude-3-5-sonnet',
-          includeScreen: true
-        });
+        assert.deepEqual(receivedArgs, { text: 'haz una captura', includeScreen: true });
         assert.equal(res.ok, true);
       } finally {
         fz.close();
       }
+    });
+
+    await t('ventana: la web abre el control por tiempo limitado y valida minutos', async () => {
+      const z = await api('POST', '/api/machines', { name: 'PC-win', kind: 'zer0' });
+      let got = null;
+      const fz = await fakeZer0(z.token, (op, args) => {
+        if (op === 'zer0.window.open') { got = args; return args.minutes === 99 ? { ok: false, message: 'Esta app no permite que la oficina habilite el control.' } : { ok: true, payload: { enabled: true } }; }
+        return { ok: true };
+      });
+      try {
+        const r1 = await api('POST', `/api/pc/${z.id}/window`, { minutes: 60, autoApproval: true });
+        assert.deepEqual(got, { minutes: 60, autoApproval: true });
+        assert.equal(r1.enabled, true);
+        await api('POST', `/api/pc/${z.id}/window`, { minutes: 30 });
+        assert.deepEqual(got, { minutes: 30, autoApproval: false });
+        for (const bad of [{ minutes: 4 }, { minutes: 721 }, { minutes: 'x' }, { minutes: 60, extra: 1 }, { minutes: 60, autoApproval: 'si' }, {}])
+          assert.equal((await api('POST', `/api/pc/${z.id}/window`, bad, true)).status, 400, JSON.stringify(bad));
+        assert.equal((await api('POST', `/api/pc/${z.id}/window`, { minutes: 99 }, true)).status, 422);
+      } finally { fz.close(); }
     });
 
     await t('caso c: operador/observador permisos exactos', async () => {

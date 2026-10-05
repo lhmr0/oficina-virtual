@@ -321,15 +321,15 @@ r('POST', '/api/pc/:id/ask', 'admin', async ({ params, body, user }) => {
   const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
   for (const k of Object.keys(body)) need(ASK_KEYS.has(k), 'Campo no permitido: ' + k, 400);
   need(typeof body.text === 'string' && body.text.length >= 1 && body.text.length <= 12000, 'Texto requerido (1..12000 caracteres)', 400);
-  need(typeof body.engine === 'string' && ['agy', 'claude', 'codex', 'commandcode'].includes(body.engine), 'Motor inválido', 400);
+  if (body.engine !== undefined) need(typeof body.engine === 'string' && ['agy', 'claude', 'codex', 'commandcode'].includes(body.engine), 'Motor inválido', 400); // el motor lo define la app de Windows; la web ya no lo manda
   if (body.model !== undefined && body.model !== null) need(typeof body.model === 'string' && body.model.length <= 200, 'Modelo inválido', 400);
   if (body.includeScreen !== undefined) need(typeof body.includeScreen === 'boolean', 'includeScreen debe ser booleano', 400);
   need(host.online(mid), 'PC no conectado', 409);
   need(pc.acquire(mid, 'ask'), 'PC ocupado con otra consulta o sesión', 409);
   try {
-    const res = await host.call(mid, 'zer0.ask', { text: body.text, engine: body.engine, model: body.model ?? null, includeScreen: !!body.includeScreen });
+    const res = await host.call(mid, 'zer0.ask', { text: body.text, includeScreen: !!body.includeScreen });
     if (res && res.ok === false) throw new HttpError(422, res.message || 'Error en zer0');
-    log(user.id, 'pc', mid, 'ask', { engine: body.engine, len: body.text.length });
+    log(user.id, 'pc', mid, 'ask', { len: body.text.length });
     return res || { ok: true };
   } finally {
     pc.release(mid, 'ask');
@@ -342,7 +342,7 @@ r('POST', '/api/pc/:id/session', 'admin', async ({ params, body, user }) => {
   const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
   for (const k of Object.keys(body)) need(SESSION_KEYS.has(k), 'Campo no permitido: ' + k, 400);
   need(typeof body.instruction === 'string' && body.instruction.length >= 1 && body.instruction.length <= 4000, 'Instrucción requerida (1..4000 caracteres)', 400);
-  need(typeof body.engine === 'string' && ['agy', 'claude', 'codex', 'commandcode'].includes(body.engine), 'Motor inválido', 400);
+  if (body.engine !== undefined) need(typeof body.engine === 'string' && ['agy', 'claude', 'codex', 'commandcode'].includes(body.engine), 'Motor inválido', 400); // el motor lo define la app de Windows; la web ya no lo manda
   if (body.model !== undefined && body.model !== null) need(typeof body.model === 'string' && body.model.length <= 200, 'Modelo inválido', 400);
   const maxSteps = body.maxSteps !== undefined ? body.maxSteps : 8;
   need(Number.isInteger(maxSteps) && maxSteps >= 1 && maxSteps <= 10, 'maxSteps debe ser un entero entre 1 y 10', 400);
@@ -351,12 +351,12 @@ r('POST', '/api/pc/:id/session', 'admin', async ({ params, body, user }) => {
   const sessionId = crypto.randomUUID();
   pc.startSession(mid, user.id, sessionId);
   try {
-    const res = await host.call(mid, 'zer0.session.start', { sessionId, instruction: body.instruction, engine: body.engine, model: body.model ?? null, maxSteps });
+    const res = await host.call(mid, 'zer0.session.start', { sessionId, instruction: body.instruction, maxSteps });
     if (res && res.ok === false) {
       pc.clearSession(mid);
       throw new HttpError(422, res.message || 'Sesión rechazada por el PC');
     }
-    log(user.id, 'pc', mid, 'session', { sessionId, engine: body.engine, len: body.instruction.length, maxSteps });
+    log(user.id, 'pc', mid, 'session', { sessionId, len: body.instruction.length, maxSteps });
     return { sessionId };
   } catch (e) {
     pc.clearSession(mid);
@@ -395,6 +395,20 @@ r('POST', '/api/pc/:id/approve', 'admin', async ({ params, body, user }) => {
   return res || { ok: true };
 });
 
+const WINDOW_KEYS = new Set(['minutes', 'autoApproval']);
+r('POST', '/api/pc/:id/window', 'admin', async ({ params, body, user }) => {
+  const mid = +params.id;
+  const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
+  for (const k of Object.keys(body)) need(WINDOW_KEYS.has(k), 'Campo no permitido: ' + k, 400);
+  need(Number.isInteger(body.minutes) && body.minutes >= 5 && body.minutes <= 720, 'minutes debe ser un entero entre 5 y 720', 400);
+  if (body.autoApproval !== undefined) need(typeof body.autoApproval === 'boolean', 'autoApproval debe ser booleano', 400);
+  need(host.online(mid), 'PC no conectado', 409);
+  // zer0 solo obedece si el usuario lo permitio en la propia app (permiso local); si no, responde ok:false con el motivo
+  const res = await host.call(mid, 'zer0.window.open', { minutes: body.minutes, autoApproval: !!body.autoApproval });
+  if (res && res.ok === false) throw new HttpError(422, res.message || 'zer0 no habilitó el control');
+  log(user.id, 'pc', mid, 'ventana', { minutes: body.minutes, autoApproval: !!body.autoApproval });
+  return res.payload || res;
+});
 r('POST', '/api/pc/:id/stop', 'operador', async ({ params, user }) => {
   const mid = +params.id;
   const m = host.machine(mid); need(m && m.kind === 'zer0', 'PC no encontrado', 404);
