@@ -286,6 +286,186 @@ r('DELETE', '/api/folders/:id', 'operador', ({ params, user }) => {
   log(user.id, 'proyecto', f.project_id, 'quitar_carpeta', { path: f.path }); emit('project.updated', { id: f.project_id });
   return { ok: true };
 });
+// ---------- mando directo (centralizador movil de proyectos, 4 agentes y control tactil PC) ----------
+const SKIP_DIRS = new Set(['AppData', 'Application Data', 'Contacts', 'Cookies', 'Desktop', 'Downloads', 'Favorites', 'IntelGraphicsProfiles', 'Links', 'Local Settings', 'Music', 'My Documents', 'NetHood', 'OneDrive', 'Pictures', 'PrintHood', 'Recent', 'Saved Games', 'Searches', 'SendTo', 'Start Menu', 'Templates', 'Videos', 'node_modules', '.git', '.ijfw', '.serena']);
+r('GET', '/api/mando/discover', 'operador', async ({ query }) => {
+  const mid = +query.machine_id || host.defaultMachine();
+  need(mid && host.online(mid), 'La maquina PC no esta conectada', 409);
+  let basePath = query.path || null;
+  if (!basePath) {
+    const rootLs = await host.call(mid, 'listDir', { path: null });
+    basePath = rootLs.dirs?.[0]?.path || null;
+  }
+  const ls = await host.call(mid, 'listDir', { path: basePath });
+  const existingPaths = new Set(all('select path from project_folders').map(f => String(f.path).toLowerCase()));
+  const candidates = [];
+  for (const d of (ls.dirs || [])) {
+    if (SKIP_DIRS.has(d.name) || d.name.startsWith('.')) continue;
+    const already = existingPaths.has(String(d.path).toLowerCase());
+    let is_git = false;
+    try { const info = await host.call(mid, 'folderInfo', { path: d.path }); is_git = !!info.is_git; } catch {}
+    candidates.push({ name: d.name, path: d.path, is_git, already });
+  }
+  candidates.sort((a, b) => (b.is_git - a.is_git) || a.name.localeCompare(b.name));
+  return { machine_id: mid, base_path: ls.path, parent: ls.parent, candidates };
+});
+
+r('POST', '/api/mando/import', 'operador', async ({ body, user }) => {
+  const mid = +body.machine_id || host.defaultMachine();
+  const list = Array.isArray(body.folders) ? body.folders : [];
+  need(list.length, 'Selecciona al menos una carpeta');
+  const imported = [];
+  const COLORS = ['#ffe81f', '#4fc3f7', '#3ddc84', '#ff8c42', '#b98cff', '#ff5a5a'];
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i];
+    if (!item || !item.path) continue;
+    const exists = one('select project_id from project_folders where lower(path)=lower(?)', String(item.path));
+    if (exists) { imported.push(exists.project_id); continue; }
+    const chk = await checkFolder({ path: item.path, machine_id: mid });
+    const name = String(item.name || path.basename(chk.path)).trim();
+    const pid = insert('projects', {
+      name,
+      code: name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toUpperCase() || 'PRJ',
+      kind: 'con_carpetas',
+      status: 'activo',
+      description: 'Proyecto local en ' + chk.path,
+      briefing: '',
+      color: COLORS[i % COLORS.length],
+      created_by: user.id,
+      created_at: now(),
+      updated_at: now()
+    });
+    await addFolder(pid, { label: 'principal', path: chk.path, machine_id: mid, use_worktrees: 1, is_default: 1 }, user.id, chk);
+    imported.push(pid);
+  }
+  emit('project.updated', { id: imported[0] || null });
+  return { ok: true, imported };
+});
+
+r('GET', '/api/mando/screen', 'operador', async ({ query }) => {
+  const mid = +query.machine_id || host.defaultMachine();
+  need(mid && host.online(mid), 'La maquina PC no esta conectada', 409);
+  return host.call(mid, 'pcScreen', {});
+});
+
+r('POST', '/api/mando/pc-click', 'operador', async ({ body }) => {
+  const mid = +body.machine_id || host.defaultMachine();
+  need(mid && host.online(mid), 'La maquina PC no esta conectada', 409);
+  return host.call(mid, 'pcClick', { rx: body.rx, ry: body.ry, button: body.button, double: !!body.double });
+});
+
+r('POST', '/api/mando/pc-key', 'operador', async ({ body }) => {
+  const mid = +body.machine_id || host.defaultMachine();
+  need(mid && host.online(mid), 'La maquina PC no esta conectada', 409);
+  return host.call(mid, 'pcKey', { text: body.text || '', key: body.key || '' });
+});
+
+r('POST', '/api/mando/pc-quick', 'operador', async ({ body }) => {
+  const pid = +body.project_id || null;
+  const folder = pid ? one('select * from project_folders where project_id=? order by is_default desc, id limit 1', pid) : null;
+  const mid = folder?.machine_id || +body.machine_id || host.defaultMachine();
+  need(mid && host.online(mid), 'La maquina PC no esta conectada', 409);
+  return host.call(mid, 'pcQuick', { action: body.action, cwd: folder?.path || null, value: body.value || '' });
+});
+
+r('GET', '/api/mando/state', 'observador', ({ query }) => {
+  const pid = +query.project_id || null;
+  const p = pid ? one('select * from projects where id=? and deleted_at is null', pid) : null;
+  const folders = pid ? all('select * from project_folders where project_id=? order by is_default desc, id', pid) : [];
+  const convs = all(
+    "select * from conversations where deleted_at is null and kind in ('consulta_rapida','mando') " + (pid ? 'and project_id=?' : '') + ' order by updated_at desc limit 30',
+    ...(pid ? [pid] : [])
+  );
+  const convIds = convs.map(c => c.id);
+  const messages = convIds.length
+    ? all('select * from messages where conversation_id in (' + convIds.join(',') + ') order by id desc limit 80').reverse()
+    : [];
+  const tasks = pid
+    ? all('select * from tasks where project_id=? and deleted_at is null order by updated_at desc limit 20', pid).map(taskRow)
+    : [];
+  const runningConvs = [...R.active.values()].map(a => a.convId);
+  return { project: p, folders, conversations: convs, messages, tasks, runningConvs };
+});
+
+r('POST', '/api/mando/send', 'operador', async ({ body, user }) => {
+  const text = String(body.text || '').trim();
+  need(text, 'Escribe o dicta una orden');
+  const pid = +body.project_id || null;
+  const folder = pid ? one('select * from project_folders where project_id=? order by is_default desc, id limit 1', pid) : null;
+  const mid = folder?.machine_id || host.defaultMachine();
+  const mode = body.mode === 'plan' ? 'plan' : 'editar';
+
+  if (body.shell) {
+    need(mid && host.online(mid), 'La maquina PC no esta conectada', 409);
+    const shRes = await host.call(mid, 'pcShell', { cwd: folder?.path || null, command: text });
+    let c = pid ? one("select * from conversations where deleted_at is null and kind='consulta_rapida' and project_id=? order by updated_at desc limit 1", pid) : null;
+    if (!c) {
+      const defAg = one('select id from agents where enabled=1 order by id limit 1')?.id || 1;
+      const cid = insert('conversations', { kind: 'consulta_rapida', project_id: pid, title: '[PowerShell] ' + text.slice(0, 40), agent_id: defAg, mode: 'editar', folder_path: folder?.path || null, machine_id: mid, created_by: user.id, created_at: now(), updated_at: now() });
+      c = one('select * from conversations where id=?', cid);
+    }
+    insert('messages', { conversation_id: c.id, role: 'usuario', user_id: user.id, text: '💻 PS> ' + text, kind: 'mensaje', at: now() });
+    insert('messages', { conversation_id: c.id, role: 'sistema', user_id: user.id, text: '```\n' + shRes.output.slice(-12000) + '\n```', kind: 'mensaje', at: now() });
+    update('conversations', c.id, { updated_at: now() });
+    emit('conv.updated', { id: c.id });
+    return { ok: shRes.ok, kind: 'shell', output: shRes.output };
+  }
+
+  if (body.mode === 'tarea') {
+    need(pid, 'Selecciona un proyecto para crear una tarea');
+    const areaRow = one('select id from areas where deleted_at is null order by id limit 1');
+    const agId = +body.agent_id || one('select id from agents where enabled=1 order by id limit 1')?.id;
+    const promptTxt = body.voz ? (text + '\n\n' + R.VOZ) : text;
+    const tid = R.createTask({
+      project_id: pid,
+      area_id: areaRow?.id || null,
+      folder_id: folder?.id || null,
+      agent_id: agId,
+      mode: 'editar',
+      priority: 'alta',
+      title: text.slice(0, 85),
+      prompt: promptTxt
+    }, user.id);
+    bg(R.runTask(tid, user.id), tid);
+    return { ok: true, kind: 'tarea', task_id: tid };
+  }
+
+  const targetAgents = body.broadcast
+    ? all('select * from agents where enabled=1 order by id')
+    : [one('select * from agents where id=?', +body.agent_id || 1)].filter(Boolean);
+  need(targetAgents.length, 'No hay agentes habilitados');
+
+  const launched = [];
+  for (const ag of targetAgents) {
+    const runMode = body.broadcast ? 'plan' : mode;
+    let c = !body.fresh && pid
+      ? one("select * from conversations where deleted_at is null and kind='consulta_rapida' and project_id=? and agent_id=? and mode=? order by updated_at desc limit 1", pid, ag.id, runMode)
+      : null;
+    const isBusy = c && ([...R.active.values()].some(a => a.convId === c.id) || R.queue.some(q => q.convId === c.id));
+    if (!c || isBusy) {
+      const cid = insert('conversations', {
+        kind: 'consulta_rapida',
+        project_id: pid,
+        title: (pid ? '[' + (one('select name from projects where id=?', pid)?.name || 'Proyecto') + '] ' : '') + text.slice(0, 48),
+        agent_id: ag.id,
+        model: body.model || ag.default_model,
+        effort: body.effort || ag.default_effort,
+        mode: runMode,
+        folder_path: folder?.path || null,
+        machine_id: mid,
+        created_by: user.id,
+        created_at: now(),
+        updated_at: now()
+      });
+      c = one('select * from conversations where id=?', cid);
+    }
+    const fullPrompt = chatPrompt(c, dictated({ text, voz: !!body.voz }));
+    R.runTurn(c.id, text, { userId: user.id, prompt: fullPrompt }).catch(() => {});
+    launched.push({ conv_id: c.id, agent_id: ag.id, agent_name: ag.name });
+  }
+  return { ok: true, kind: body.broadcast ? 'broadcast' : 'chat', launched };
+});
+
 // ---------- máquinas (agentes de campo) ----------
 r('GET', '/api/machines', 'observador', () => host.machineList());
 r('POST', '/api/machines', 'admin', ({ body, user }) => {

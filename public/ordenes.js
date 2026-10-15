@@ -35,6 +35,8 @@ const SECCIONES = [
   ['estacion', 'Estación', '#/estacion'],
   ['mapa', 'Estación', '#/estacion'],
   ['oficina', 'Estación', '#/estacion'],
+  ['mando directo', 'Mando Directo', '#/mando'],
+  ['centro de mando', 'Mando Directo', '#/mando'],
   ['control del pc', 'Control del PC', '#/pc'],
   ['control de pc', 'Control del PC', '#/pc'],
   ['pc', 'Control del PC', '#/pc'],

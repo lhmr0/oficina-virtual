@@ -246,7 +246,28 @@ export const formData = el => Object.fromEntries([...el.querySelectorAll('[name]
 
 // ---------- voz: 🎤 dicta (Whisper en el servidor interno) y 🔊 lee en voz alta (voz del servidor o del navegador) ----------
 // micBtn('#id') junto al textarea; al enviar, voz: isDictated(ta) avisa al agente que el texto viene de un dictado
-export const canListen = () => !!(S.boot?.ia && navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+export const hasWebSpeech = () => !!(globalThis.window && (window.SpeechRecognition || window.webkitSpeechRecognition));
+export const canListen = () => !!((S.boot?.ia && globalThis.navigator?.mediaDevices?.getUserMedia && globalThis.window?.MediaRecorder) || hasWebSpeech());
+let webSpeechRec = null;
+export function listenWebSpeech(onState = () => {}) {
+  if (webSpeechRec) { try { webSpeechRec.stop(); } catch {} webSpeechRec = null; return Promise.resolve(null); }
+  const SR = globalThis.window && (window.SpeechRecognition || window.webkitSpeechRecognition);
+  if (!SR) { fail('Este navegador no soporta reconocimiento de voz'); return Promise.resolve(null); }
+  stopSpeaking();
+  return new Promise(resolve => {
+    const rec = new SR();
+    webSpeechRec = rec;
+    rec.lang = 'es-PE';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    let resultText = '';
+    rec.onstart = () => onState('rec');
+    rec.onresult = ev => { resultText = ev.results?.[0]?.[0]?.transcript || ''; };
+    rec.onerror = err => { webSpeechRec = null; onState('idle'); if (err.error !== 'aborted' && err.error !== 'no-speech') fail('Microfono: ' + err.error); resolve(null); };
+    rec.onend = () => { webSpeechRec = null; onState('idle'); resolve(resultText.trim()); };
+    try { rec.start(); } catch (e) { webSpeechRec = null; onState('idle'); resolve(null); }
+  });
+}
 export const micBtn = sel => canListen() ? `<button type="button" class="btn ghost" data-mic="${sel}" title="Dictar por voz (pulsa otra vez para terminar)">🎤</button>` : '';
 export const isDictated = ta => { const v = ta?.dataset.voz === '1'; if (ta) delete ta.dataset.voz; return v; };
 export function paintMic(b, st) { // st: rec | busy | idle
@@ -275,6 +296,8 @@ export async function transcribir(blob) {
 }
 // Graba hasta el siguiente clic en cualquier 🎤 y devuelve lo transcrito ('' si no se entendió; null si falló o si este clic solo detuvo la grabación)
 export async function listen(onState = () => {}) {
+  if (webSpeechRec) { try { webSpeechRec.stop(); } catch {} return null; }
+  if (!S.boot?.ia && hasWebSpeech()) return listenWebSpeech(onState);
   if (recording) { recording.stop(); return null; }
   stopSpeaking();
   try {

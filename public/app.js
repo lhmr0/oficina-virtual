@@ -52,8 +52,8 @@ export function setProject(id) {
   localStorage.setItem('ov_project', S.project || '');
   const s = $('#projSel'); if (s) s.value = S.project || '';
 }
-const MENU = [['proyectos', 'Proyectos', 'folder'], ['kanban', 'Kanban', 'board'], ['repos', 'Repositorios', 'branch'],['cantina', 'Cantina', 'chat'], ['consejo', 'Consejo Jedi', 'council'], ['archivos', 'Archivos Jedi', 'archive'], ['puente', 'Puente de Mando', 'gauge'], ['pc', 'Control del PC', 'monitor'], ['config', 'Configuración', 'gear']];
-const WIDE = ['proyectos', 'kanban', 'consejo', 'archivos', 'puente', 'pc', 'config'];
+const MENU = [['mando', 'Mando Directo', 'rocket'], ['proyectos', 'Proyectos', 'folder'], ['kanban', 'Kanban', 'board'], ['repos', 'Repositorios', 'branch'],['cantina', 'Cantina', 'chat'], ['consejo', 'Consejo Jedi', 'council'], ['archivos', 'Archivos Jedi', 'archive'], ['puente', 'Puente de Mando', 'gauge'], ['pc', 'Control del PC', 'monitor'], ['config', 'Configuración', 'gear']];
+const WIDE = ['mando', 'proyectos', 'kanban', 'consejo', 'archivos', 'puente', 'pc', 'config'];
 function shell() {
   const me = S.boot.me;
   app.innerHTML = `
@@ -73,6 +73,7 @@ function shell() {
   </aside>
   <nav class="dock" aria-label="Acciones">
     <button class="dock-me" id="meBtn" aria-haspopup="menu" aria-expanded="false" aria-label="Menú de ${h(me.name)}">${userSprite(me, 2.4)}<span>${h(me.name.split(' ')[0])}</span></button>
+    <a href="#/mando" data-nav="mando">${ic('rocket')}<span>Mando</span></a>
     <a href="#/kanban" data-nav="kanban">${ic('board')}<span>Kanban</span></a>
     <a href="#/cantina" data-nav="cantina">${ic('chat')}<span>Cantina</span></a>
     ${canEdit() ? `<button id="dNew" class="dock-y">${ic('plus')}<span>Tarea</span></button>` : ''}

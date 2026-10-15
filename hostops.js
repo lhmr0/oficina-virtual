@@ -24,6 +24,17 @@ function create(cfg) {
   // ---------- rutas ----------
   function canon(p) { try { return fs.realpathSync.native(path.resolve(p)); } catch { return path.resolve(p); } }
   const expand = s => String(s).replace(/%([^%]+)%/g, (m, v) => process.env[v] ?? m);
+  // CommandCode: cada llamada al CLI dispara su chequeo de versión (npm view). Se guarda el resultado 1 día; solo se cachea si es válido.
+  const ccFile = path.join(dataDir, 'cc-cache.json');
+  const isCC = a => (a || []).some(x => /command-code[\\/]dist[\\/]index\.mjs$/i.test(expand(x)));
+  async function yearly(key, fn, valid) {
+    let c = {};
+    try { c = JSON.parse(fs.readFileSync(ccFile, 'utf8')); } catch {}
+    if (c[key] && Date.now() - c[key].at < 86400e3) return c[key].v;
+    const v = await fn();
+    if (valid(v)) { c[key] = { at: Date.now(), v }; try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(ccFile, JSON.stringify(c)); } catch {} }
+    return v;
+  }
   const under = (p, r) => p.toLowerCase() === r.toLowerCase() || p.toLowerCase().startsWith(r.toLowerCase().replace(/[\\/]$/, '') + path.sep);
   const sandboxRoot = path.join(canon(dataDir), 'sandbox');
   const sameSandboxPath = (a, b) => {
@@ -146,6 +157,120 @@ function create(cfg) {
 
   // ---------- operaciones (todas serializables: entran y salen JSON) ----------
   const ops = {
+    // Captura de pantalla nativa de Windows en JPEG Base64
+    pcScreen: async () => {
+      if (process.platform !== 'win32') throw new Error('Control de pantalla solo disponible en Windows');
+      const ps = [
+        'Add-Type -AssemblyName System.Windows.Forms,System.Drawing;',
+        '\x24b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;',
+        '\x24bmp = New-Object System.Drawing.Bitmap(\x24b.Width, \x24b.Height);',
+        '\x24g = [System.Drawing.Graphics]::FromImage(\x24bmp);',
+        '\x24g.CopyFromScreen(\x24b.Location, [System.Drawing.Point]::Empty, \x24b.Size);',
+        '\x24ms = New-Object System.IO.MemoryStream;',
+        '\x24bmp.Save(\x24ms, [System.Drawing.Imaging.ImageFormat]::Jpeg);',
+        'Write-Output (\x24b.Width.ToString() + "x" + \x24b.Height.ToString() + "|" + [Convert]::ToBase64String(\x24ms.ToArray()))'
+      ].join(' ');
+      const r = await sh('powershell', ['-NoProfile', '-Command', ps], 25000);
+      if (r.err || !r.out) throw new Error(r.errOut || r.err?.message || 'No se pudo capturar la pantalla');
+      const sep = r.out.indexOf('|');
+      const dims = sep > 0 ? r.out.slice(0, sep).split('x') : ['1920', '1080'];
+      const b64 = sep > 0 ? r.out.slice(sep + 1).trim() : r.out.trim();
+      return { width: +dims[0] || 1920, height: +dims[1] || 1080, jpegB64: b64, at: new Date().toISOString() };
+    },
+    // Clic remoto en coordenadas relativas (rx, ry de 0.0 a 1.0) + devuelve nueva captura
+    pcClick: async ({ rx, ry, button = 'left', double = false }) => {
+      if (process.platform !== 'win32') throw new Error('Solo disponible en Windows');
+      const nx = Math.max(0, Math.min(1, Number(rx) || 0));
+      const ny = Math.max(0, Math.min(1, Number(ry) || 0));
+      const flags = button === 'right' ? '0x0008, 0x0010' : '0x0002, 0x0004';
+      const clicks = double ? 2 : 1;
+      const ps = [
+        'Add-Type -AssemblyName System.Windows.Forms;',
+        '\x24sig = "[DllImport(`"user32.dll`")] public static extern bool SetCursorPos(int X, int Y); [DllImport(`"user32.dll`")] public static extern void mouse_event(int dwFlags, int dx, int dy, int cButtons, int dwExtraInfo);";',
+        '\x24u = Add-Type -MemberDefinition \x24sig -Name "WinMouse" -Namespace "Oficina" -PassThru;',
+        '\x24b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;',
+        '\x24x = [int](\x24b.Width * ' + nx.toFixed(4) + ');',
+        '\x24y = [int](\x24b.Height * ' + ny.toFixed(4) + ');',
+        '\x24u::SetCursorPos(\x24x, \x24y) | Out-Null;',
+        'Start-Sleep -Milliseconds 60;',
+        'for (\x24i=0; \x24i -lt ' + clicks + '; \x24i++) { \x24f = @(' + flags + '); \x24u::mouse_event(\x24f[0], 0, 0, 0, 0); Start-Sleep -Milliseconds 40; \x24u::mouse_event(\x24f[1], 0, 0, 0, 0); Start-Sleep -Milliseconds 70; }'
+      ].join(' ');
+      await sh('powershell', ['-NoProfile', '-Command', ps], 15000);
+      await new Promise(r => setTimeout(r, 350));
+      return ops.pcScreen();
+    },
+    // Enviar texto o teclas especiales a la ventana activa de Windows + devuelve nueva captura
+    pcKey: async ({ text = '', key = '' }) => {
+      if (process.platform !== 'win32') throw new Error('Solo disponible en Windows');
+      const KEY_MAP = { enter: '{ENTER}', esc: '{ESC}', tab: '{TAB}', backspace: '{BS}', space: ' ', up: '{UP}', down: '{DOWN}', left: '{LEFT}', right: '{RIGHT}', altf4: '%{F4}', win: '^{ESC}' };
+      const seq = key && KEY_MAP[key] ? KEY_MAP[key] : String(text).replace(/[+^%~(){}[\]]/g, '{\x24&}');
+      const b64Seq = Buffer.from(seq, 'utf8').toString('base64');
+      const ps = [
+        'Add-Type -AssemblyName System.Windows.Forms;',
+        '\x24str = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("' + b64Seq + '"));',
+        '[System.Windows.Forms.SendKeys]::SendWait(\x24str);'
+      ].join(' ');
+      await sh('powershell', ['-NoProfile', '-Command', ps], 15000);
+      await new Promise(r => setTimeout(r, 350));
+      return ops.pcScreen();
+    },
+    // Acciones rapidas de 1 toque sobre la PC Windows
+    pcQuick: async ({ action, cwd, value = '' }) => {
+      const targetDir = cwd ? checkPath(cwd) : (roots[0] || os.homedir());
+      if (action === 'vscode') {
+        spawn('cmd.exe', ['/c', 'code', targetDir], { cwd: targetDir, windowsHide: true, detached: true, stdio: 'ignore' }).unref();
+        return { ok: true, msg: 'VS Code abierto en ' + targetDir };
+      }
+      if (action === 'explorer') {
+        spawn('explorer.exe', [targetDir], { cwd: targetDir, windowsHide: true, detached: true, stdio: 'ignore' }).unref();
+        return { ok: true, msg: 'Explorador abierto en ' + targetDir };
+      }
+      if (action === 'lock') {
+        await sh('rundll32.exe', ['user32.dll,LockWorkStation'], 5000);
+        return { ok: true, msg: 'Sesion de Windows bloqueada' };
+      }
+      if (action === 'vol_up' || action === 'vol_down' || action === 'vol_mute') {
+        const charCode = action === 'vol_up' ? 175 : action === 'vol_down' ? 174 : 173;
+        const ps = '\x24w = New-Object -ComObject WScript.Shell; \x24w.SendKeys([char]' + charCode + ')';
+        await sh('powershell', ['-NoProfile', '-Command', ps], 5000);
+        return { ok: true, msg: 'Volumen ajustado (' + action + ')' };
+      }
+      if (action === 'clip_get') {
+        const r = await sh('powershell', ['-NoProfile', '-Command', 'Get-Clipboard'], 8000);
+        return { ok: true, clipboard: r.out || '(Portapapeles vacio)' };
+      }
+      if (action === 'clip_set') {
+        const b64 = Buffer.from(String(value), 'utf8').toString('base64');
+        const ps = 'Set-Clipboard -Value ([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("' + b64 + '")))';
+        await sh('powershell', ['-NoProfile', '-Command', ps], 8000);
+        return { ok: true, msg: 'Texto copiado al portapapeles de tu PC' };
+      }
+      if (action === 'open_url') {
+        const u = String(value || '').trim();
+        if (!/^https?:\/\//i.test(u)) throw new Error('URL invalida');
+        spawn('cmd.exe', ['/c', 'start', '', u], { windowsHide: true, detached: true, stdio: 'ignore' }).unref();
+        return { ok: true, msg: 'URL abierta en el navegador de la PC' };
+      }
+      throw new Error('Accion rapida desconocida: ' + action);
+    },
+    // Ejecucion directa de comandos en PowerShell
+    pcShell: async ({ cwd, command }) => {
+      const targetDir = cwd ? checkPath(cwd) : (roots[0] || os.homedir());
+      const cmd = String(command || '').trim();
+      if (!cmd) throw new Error('Comando vacio');
+      return new Promise(res => {
+        const shellExe = process.platform === 'win32' ? 'powershell.exe' : 'sh';
+        const shellArgs = process.platform === 'win32' ? ['-NoProfile', '-Command', cmd] : ['-c', cmd];
+        execFile(shellExe, shellArgs, { cwd: targetDir, timeout: 120000, windowsHide: true, encoding: 'utf8', maxBuffer: 10e6 }, (err, out, errOut) => {
+          res({
+            ok: !err,
+            code: err?.code ?? 0,
+            cwd: targetDir,
+            output: ((out || '') + (errOut ? '\n[STDERR]\n' + errOut : '')).trim() || '(Comando ejecutado sin salida en consola)'
+          });
+        });
+      });
+    },
     info: () => ({ hostname: os.hostname(), platform: process.platform, node: process.version, user: os.userInfo().username, roots, strict, runs: [...runs.keys()] }),
     checkFolder: ({ path: p }) => { const r = checkPath(p); return { path: r, is_git: isGit(r) }; },
     listDir: ({ path: p }) => {
@@ -323,9 +448,12 @@ function create(cfg) {
     },
     // adjuntos: files = [{id, name, size, url?|src?}] → .oficina/adjuntos/<name>; fetcher lo aporta quien llama
     probe: async ({ exe, pre_args = [] }) => {
-      const r = await sh(resolveExe(exe), [...pre_args.map(expand), '--version']);
-      const found = !(r.err && (r.err.code === 'ENOENT' || /not found|no se encuentra|Cannot find module/i.test(r.errOut)));
-      return { found, version: found ? (r.out || r.errOut).split(/\r?\n/)[0].slice(0, 80) : null };
+      const go = async () => {
+        const r = await sh(resolveExe(exe), [...pre_args.map(expand), '--version']);
+        const found = !(r.err && (r.err.code === 'ENOENT' || /not found|no se encuentra|Cannot find module/i.test(r.errOut)));
+        return { found, version: found ? (r.out || r.errOut).split(/\r?\n/)[0].slice(0, 80) : null };
+      };
+      return isCC(pre_args) ? yearly('probe', go, v => v.found && v.version) : go();
     },
     processes: async ({ pids }) => {
       if (!pids?.length || process.platform !== 'win32') return {};
@@ -350,7 +478,7 @@ function create(cfg) {
         } catch { return []; }
       }
       if (adapter === 'agy') return (await run(['models'])).split(/\r?\n/).map(l => l.split('\t')[0].trim()).filter(l => /^[\w.-]+$/.test(l));
-      if (adapter === 'commandcode') {
+      if (adapter === 'commandcode') return yearly('models', async () => {
         try {
           const out = await run(['--list-models']);
           const ignore = new Set(['Available', 'Open', 'Stealth', 'Anthropic', 'OpenAI', 'Google', 'Sakana', 'Meta', 'xAI', 'Pass', 'Docs:', 'Decision']);
@@ -365,7 +493,7 @@ function create(cfg) {
           if (list.length) return list;
         } catch {}
         return (await run(['--list-models'])).split(/\r?\n/).map(l => l.trim().split(/\s+/)[0]).filter(x => /^[\w.-]+\/[\w.-]+$/.test(x));
-      }
+      }, l => Array.isArray(l) && l.length);
       if (adapter === 'claude') return CLAUDE_MODELS;
       return [];
     },

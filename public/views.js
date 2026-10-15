@@ -1,7 +1,7 @@
 // Vistas de la oficina
 import { S, get, post, put, del, h, $, $$, ago, dur, fmtDate, bytes, num, STATUS, PSTATUS, chip, agent, area, user, project, isAdmin, canEdit,
   agentChip, userChip, saber, opts, md, modal, closeModal, confirmBox, promptBox, formData, holo, fail, act, beep,
-  machines, machineName, defaultMachine, folderPicker, ic, upload, attachmentsHTML, micBtn, isDictated, voicePrefs, speak, stopSpeaking, WIN_LABELS, agentLimits, agentLimitsBadge, startRecording, stopRecording, isRecording, transcribir } from './core.js';
+  machines, machineName, defaultMachine, folderPicker, ic, upload, attachmentsHTML, micBtn, isDictated, listen, voicePrefs, speak, stopSpeaking, WIN_LABELS, agentLimits, agentLimitsBadge, startRecording, stopRecording, isRecording, transcribir } from './core.js';
 import { sprite, agentSprite, userSprite, icon, ICON_NAMES } from './sprites.js';
 import { route, refreshSoon, loadBoot, setProject, applyTheme } from './app.js';
 import { parseVoz } from './ordenes.js';
@@ -2138,13 +2138,436 @@ const pc = {
   }
 };
 
-export const VIEWS = { estacion, proyectos, kanban, repos, tarea, cantina, consejo, archivos, puente, config, pc };
+// ===================== MANDO DIRECTO (MOVIL, VOZ, PROYECTOS Y CONTROL TACTIL PC) =====================
+function detectVoiceAgent(rawText, agentsList, projectsList) {
+  let text = String(rawText || '').trim();
+  let agentId = null;
+  let broadcast = false;
+  let shell = false;
+  let projectId = null;
+  for (const p of (projectsList || [])) {
+    const escaped = p.name.replace(/[.*+?^()[\]{}|\\]/g, '\\export const VIEWS = { estacion, proyectos, kanban, repos, tarea, cantina, consejo, archivos, puente, config, pc };');
+    const rxP = new RegExp('^proyecto\\s+' + escaped + '[,:\\s]+', 'i');
+    if (rxP.test(text)) { projectId = p.id; text = text.replace(rxP, '').trim(); break; }
+  }
+  if (/^(powershell|terminal|consola|cmd)[,:\s]+/i.test(text)) {
+    shell = true;
+    text = text.replace(/^(powershell|terminal|consola|cmd)[,:\s]+/i, '').trim();
+  } else if (/^(todos|consejo|rafaga|ráfaga|broadcast)[,:\s]+/i.test(text)) {
+    broadcast = true;
+    text = text.replace(/^(todos|consejo|rafaga|ráfaga|broadcast)[,:\s]+/i, '').trim();
+  } else {
+    const mapRx = [
+      ['claude', /^claude[,:\s]+/i],
+      ['codex', /^c[oó]dex[,:\s]+/i],
+      ['antigravity', /^(antigravity|agy|gemini)[,:\s]+/i],
+      ['commandcode', /^(command\s*code|comando)[,:\s]+/i]
+    ];
+    for (const [key, rx] of mapRx) {
+      if (rx.test(text)) {
+        const found = (agentsList || []).find(a => a.key === key);
+        if (found) { agentId = found.id; text = text.replace(rx, '').trim(); break; }
+      }
+    }
+  }
+  return { text: text || rawText, agentId, broadcast, shell, projectId };
+}
+
+async function showPcScreenModal() {
+  const d = modal('<h2>📸 Control Táctil de tu PC Windows</h2><div class="empty">Capturando pantalla en vivo...</div>');
+  let clickMode = 'left';
+  let autoTimer = null;
+  d.addEventListener('close', () => { if (autoTimer) clearInterval(autoTimer); }, { once: true });
+
+  const paintFrame = (res) => {
+    const img = d.querySelector('#pcLiveImg');
+    const meta = d.querySelector('#pcLiveMeta');
+    if (img && res?.jpegB64) {
+      img.src = 'data:image/jpeg;base64,' + res.jpegB64;
+      if (meta) meta.textContent = 'Resolución: ' + (res.width || 1920) + '×' + (res.height || 1080) + ' · Toca cualquier punto de la imagen para hacer clic en tu PC';
+      return;
+    }
+    d.querySelector('form').innerHTML = '<div class="row" style="justify-content:space-between">' +
+      '<h2 style="margin:0">📸 Pantalla Interactiva de tu PC</h2>' +
+      '<button type="button" class="btn sm ghost" data-close>✕ Cerrar</button></div>' +
+      '<small class="muted" id="pcLiveMeta">Resolución: ' + (res.width || 1920) + '×' + (res.height || 1080) + ' · Toca la imagen para hacer clic en tu PC</small>' +
+      '<div class="row" style="margin:8px 0;gap:6px">' +
+        '<button type="button" class="btn sm y" data-cmode="left">👆 Clic Izq</button>' +
+        '<button type="button" class="btn sm ghost" data-cmode="double">⚡ Doble Clic</button>' +
+        '<button type="button" class="btn sm ghost" data-cmode="right">🖱️ Clic Der</button>' +
+        '<button type="button" class="btn sm" id="btnRefScreen">🔄 Refrescar</button>' +
+        '<label class="row" style="font-size:var(--fs-xs);margin-left:auto"><input type="checkbox" id="chkAutoScreen"> En vivo (3s)</label>' +
+      '</div>' +
+      '<div style="position:relative;background:#000;border:2px solid var(--holo);border-radius:8px;overflow:hidden;cursor:crosshair">' +
+        '<img id="pcLiveImg" src="data:image/jpeg;base64,' + res.jpegB64 + '" alt="Pantalla PC" style="width:100%;max-height:58vh;object-fit:contain;display:block;user-select:none">' +
+      '</div>' +
+      '<div class="row" style="margin-top:8px;gap:6px">' +
+        '<input id="pcTypeInput" placeholder="Escribir texto en la ventana activa de la PC..." style="flex:1">' +
+        '<button type="button" class="btn sm y" id="btnSendType">⌨️ Escribir</button>' +
+      '</div>' +
+      '<div class="row" style="margin-top:6px;gap:4px">' +
+        [['enter','↵ Enter'],['esc','Esc'],['tab','⇥ Tab'],['space','Espacio'],['backspace','⌫ Borrar'],['win','⊞ Win'],['altf4','✕ Alt+F4']].map(([k,l]) => '<button type="button" class="btn sm ghost" data-pckey="' + k + '">' + l + '</button>').join('') +
+      '</div>';
+
+    d.querySelectorAll('[data-cmode]').forEach(b => {
+      b.onclick = () => {
+        clickMode = b.dataset.cmode;
+        d.querySelectorAll('[data-cmode]').forEach(x => { x.classList.toggle('y', x === b); x.classList.toggle('ghost', x !== b); });
+      };
+    });
+
+    const imgEl = d.querySelector('#pcLiveImg');
+    if (imgEl) {
+      imgEl.onclick = async ev => {
+        const rect = imgEl.getBoundingClientRect();
+        const rx = (ev.clientX - rect.left) / rect.width;
+        const ry = (ev.clientY - rect.top) / rect.height;
+        const metaEl = d.querySelector('#pcLiveMeta');
+        if (metaEl) metaEl.textContent = '⏳ Enviando clic a tu PC...';
+        try {
+          const next = await post('/api/mando/pc-click', {
+            rx,
+            ry,
+            button: clickMode === 'right' ? 'right' : 'left',
+            double: clickMode === 'double'
+          });
+          paintFrame(next);
+        } catch (err) { fail(err); }
+      };
+    }
+
+    const rb = d.querySelector('#btnRefScreen');
+    if (rb) rb.onclick = async () => { rb.disabled = true; try { paintFrame(await get('/api/mando/screen')); } catch (e) { fail(e); } rb.disabled = false; };
+
+    const autoChk = d.querySelector('#chkAutoScreen');
+    if (autoChk) autoChk.onchange = () => {
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      if (autoChk.checked) {
+        autoTimer = setInterval(async () => {
+          if (!d.open) return clearInterval(autoTimer);
+          try { paintFrame(await get('/api/mando/screen')); } catch {}
+        }, 3000);
+      }
+    };
+
+    const sendType = async () => {
+      const inp = d.querySelector('#pcTypeInput');
+      if (!inp || !inp.value) return;
+      const val = inp.value;
+      inp.value = '';
+      try { paintFrame(await post('/api/mando/pc-key', { text: val })); } catch (e) { fail(e); }
+    };
+    const btnType = d.querySelector('#btnSendType');
+    if (btnType) btnType.onclick = sendType;
+    const inpType = d.querySelector('#pcTypeInput');
+    if (inpType) inpType.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); sendType(); } };
+
+    d.querySelectorAll('[data-pckey]').forEach(b => {
+      b.onclick = async () => {
+        try { paintFrame(await post('/api/mando/pc-key', { key: b.dataset.pckey })); } catch (e) { fail(e); }
+      };
+    });
+  };
+
+  try { paintFrame(await get('/api/mando/screen')); } catch (err) {
+    d.querySelector('form').innerHTML = '<div class="panel r">' + h(err.message) + '</div><button class="btn ghost" data-close>Cerrar</button>';
+  }
+}
+
+async function importProjectsModal() {
+  const d = modal('<h2>📥 Importar proyectos desde tu PC</h2><div class="empty">Escaneando carpetas en tu PC...</div>');
+  const loadDir = async (dirPath) => {
+    try {
+      const q = dirPath ? ('?path=' + encodeURIComponent(dirPath)) : '';
+      const res = await get('/api/mando/discover' + q);
+      const listHtml = res.candidates.map((c, idx) => {
+        return '<label class="row" style="padding:6px 4px;border-bottom:1px solid var(--line)">' +
+          '<input type="checkbox" name="imp" data-idx="' + idx + '" ' + (c.is_git && !c.already ? 'checked' : '') + ' ' + (c.already ? 'disabled' : '') + '>' +
+          '<b>' + h(c.name) + '</b> ' +
+          (c.is_git ? '<span class="chip st-completada">git</span>' : '<span class="chip">carpeta</span>') +
+          (c.already ? '<small class="muted right">ya importado</small>' : '<small class="muted right">' + h(c.path) + '</small>') +
+        '</label>';
+      }).join('') || '<div class="empty">No se encontraron subcarpetas</div>';
+      d.querySelector('form').innerHTML = '<h2>📥 Importar proyectos de tu PC</h2>' +
+        '<p class="muted">Selecciona las carpetas de tu PC Windows para centralizarlas como proyectos en la Oficina Virtual.</p>' +
+        '<div class="row" style="margin:8px 0"><code class="grow ellipsis">' + h(res.base_path || '') + '</code>' +
+        (res.parent ? '<button type="button" class="btn sm" id="impUp">⬆ Subir carpeta</button>' : '') +
+        '<button type="button" class="btn sm" id="impBrowse">📁 Otra ruta...</button></div>' +
+        '<div class="check-list" style="max-height:48vh">' + listHtml + '</div>' +
+        '<div class="row" style="margin-top:12px"><button type="button" class="btn y" id="impOk">Importar seleccionados</button>' +
+        '<button type="button" class="btn ghost" data-close>Cancelar</button></div>';
+      const upBtn = d.querySelector('#impUp');
+      if (upBtn) upBtn.onclick = () => loadDir(res.parent);
+      const brBtn = d.querySelector('#impBrowse');
+      if (brBtn) brBtn.onclick = async () => { const picked = await folderPicker(res.machine_id, res.base_path); if (picked) loadDir(picked); };
+      const okBtn = d.querySelector('#impOk');
+      if (okBtn) okBtn.onclick = async () => {
+        const checked = [...d.querySelectorAll('input[name=imp]:checked')].map(ch => res.candidates[+ch.dataset.idx]).filter(Boolean);
+        if (!checked.length) return fail('Marca al menos una carpeta');
+        okBtn.disabled = true; okBtn.textContent = 'Importando...';
+        try {
+          const out = await post('/api/mando/import', { machine_id: res.machine_id, folders: checked });
+          await loadBoot();
+          if (out.imported?.length) setProject(out.imported[0]);
+          closeModal();
+          holo('Proyectos importados', checked.length + ' carpetas vinculadas');
+          refreshSoon(0);
+        } catch (err) { fail(err); okBtn.disabled = false; }
+      };
+    } catch (err) { d.querySelector('form').innerHTML = '<div class="panel r">' + h(err.message) + '</div><button class="btn ghost" data-close>Cerrar</button>'; }
+  };
+  loadDir(null);
+}
+
+const mando = {
+  refreshOn: ['conv.updated', 'task.updated', 'run.started', 'project.updated', 'agent.status'],
+  event(type, d) {
+    if (type === 'run.log') {
+      const c = document.getElementById('mandoLiveConsole');
+      if (c) { c.hidden = false; c.dataset.run = d.run_id; appendLog(c, d.line); }
+      return 'handled';
+    }
+    if (['conv.updated', 'task.updated', 'run.started'].includes(type)) return 'refresh';
+  },
+  async render(el) {
+    const pid = S.project || S.boot.projects[0]?.id || null;
+    if (pid && pid !== S.project) setProject(pid);
+    const st = await get('/api/mando/state' + (pid ? '?project_id=' + pid : ''));
+    const curProj = project(pid);
+    const defFolder = st.folders?.[0] || null;
+    const ags = agentsOn();
+    S.mandoAgent = S.mandoAgent || ags[0]?.id || 'all';
+    S.mandoMode = S.mandoMode || 'editar';
+
+    const agentButtons = ags.map(a => {
+      const isSel = String(S.mandoAgent) === String(a.id);
+      return '<button type="button" class="btn ' + (isSel ? 'y' : 'ghost') + '" data-magent="' + a.id + '" style="border-left:3px solid ' + h(a.color) + '">' +
+        agentSprite(a, 1.8) + ' <span>' + h(a.name) + '</span> ' + agentLimitsBadge(a, true) + '</button>';
+    }).join('') +
+    '<button type="button" class="btn ' + (S.mandoAgent === 'all' ? 'y' : 'ghost') + '" data-magent="all" title="Lanza los 4 agentes en paralelo sobre el proyecto">⚡ Todos (4 IA)</button>' +
+    '<button type="button" class="btn ' + (S.mandoAgent === 'shell' ? 'y' : 'ghost') + '" data-magent="shell" title="Ejecutar comando directo en PowerShell sin pasar por IA">💻 PowerShell</button>';
+
+    const promptsRapidos = [
+      ['📊 Estado del Proyecto', 'Analiza el estado actual de este repositorio, los últimos commits y archivos modificados, y dame un resumen ejecutivo en español.'],
+      ['🐛 Buscar bugs', 'Revisa los archivos recientes de este proyecto en busca de posibles errores o casos borde y dime cómo solucionarlos.'],
+      ['🧪 Correr pruebas', 'Ejecuta la suite de pruebas de este proyecto y dime si todo pasa o qué falló.'],
+      ['🖥️ Top CPU/RAM en PC', '__ps__:Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Name,Id,CPU,WorkingSet | Format-Table -AutoSize']
+    ];
+
+    const msgsHtml = (st.messages || []).slice(-30).map(m => {
+      const convObj = st.conversations.find(c => c.id === m.conversation_id);
+      const agObj = agent(m.agent_id || convObj?.agent_id);
+      return '<div class="msg ' + h(m.role) + '">' +
+        '<div class="who">' + (m.role === 'agente' ? agentChip(agObj?.id, 1.5) : m.role === 'usuario' ? userChip(m.user_id) : 'SISTEMA / PC') +
+        ' · ' + fmtDate(m.at) + (convObj ? ' · <a href="#/cantina/' + convObj.id + '">' + h(convObj.title.slice(0, 30)) + '</a>' : '') +
+        (m.role === 'agente' ? ' <button type="button" class="btn sm ghost" data-say title="Leer en voz alta">' + ic('sound', 'sm') + '</button>' : '') +
+        '</div><div class="body">' + md(m.text) + '</div></div>';
+    }).join('') || '<div class="empty">Habla con 🎤 o escribe abajo para controlar tus proyectos o tu PC con Claude, Codex, Antigravity, CommandCode o PowerShell.</div>';
+
+    const activeTasksHtml = (st.tasks || []).slice(0, 5).map(t => {
+      return '<a class="room-link" href="#/tarea/' + t.id + '">' + chip(t.status) + ' <b class="ellipsis">#' + t.id + ' ' + h(t.title) + '</b> <small>' + (agent(t.agent_id)?.name || 'humano') + '</small></a>';
+    }).join('') || '<small class="muted">Sin tareas recientes en este proyecto</small>';
+
+    el.innerHTML = '<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px">' +
+      '<div class="row"><h1 style="margin:0">🚀 Mando Directo</h1><span class="chip st-en_curso">Voz + 4 IA + Control PC</span></div>' +
+      '<div class="row">' +
+        (canEdit() ? '<button type="button" class="btn sm y" id="btnScreenPC">📸 Controlar Pantalla PC</button>' : '') +
+        (canEdit() ? '<button type="button" class="btn sm" id="btnImpPC">📥 Importar Carpetas PC</button>' : '') +
+        (canEdit() ? '<button type="button" class="btn sm ghost" id="btnNewProj">+ Proyecto</button>' : '') +
+      '</div></div>' +
+      (canEdit() ? '<div class="panel" style="margin-bottom:12px;padding:10px 12px">' +
+        '<div class="row" style="justify-content:space-between;gap:6px">' +
+          '<small class="lbl-up" style="color:var(--holo)">⚡ Acciones Rápidas en tu PC Windows (1 toque)</small>' +
+          '<div class="row" style="gap:4px">' +
+            '<button type="button" class="btn sm ghost" data-pcq="vscode">💻 Abrir en VS Code</button>' +
+            '<button type="button" class="btn sm ghost" data-pcq="explorer">📂 Abrir Carpeta en PC</button>' +
+            '<button type="button" class="btn sm ghost" id="btnClipGet">📋 Ver Portapapeles PC</button>' +
+            '<button type="button" class="btn sm ghost" id="btnClipSet">📲 Enviar a Portapapeles</button>' +
+            '<button type="button" class="btn sm ghost" id="btnOpenUrl">🌐 Abrir Web en PC</button>' +
+            '<button type="button" class="btn sm ghost" data-pcq="vol_down">🔉</button>' +
+            '<button type="button" class="btn sm ghost" data-pcq="vol_mute">🔇</button>' +
+            '<button type="button" class="btn sm ghost" data-pcq="vol_up">🔊</button>' +
+            '<button type="button" class="btn sm warn" data-pcq="lock">🔒 Bloquear PC</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' : '') +
+      '<div class="panel y" style="margin-bottom:12px">' +
+        '<div class="field-row" style="align-items:end">' +
+          '<div><label class="l" for="mandoProjSel">1. Proyecto / Carpeta Activa en PC</label>' +
+          '<select id="mandoProjSel">' + opts(S.boot.projects.map(p => [p.id, p.name + (p.folders?.length ? ' (' + p.folders[0].label + ')' : '')]), pid || '', '— Raíz General PC / Cantina —') + '</select></div>' +
+          '<div><label class="l" for="mandoModeSel">2. Modo de Acción</label>' +
+          '<select id="mandoModeSel">' + opts([
+            ['editar', '⚡ Directo · Editar archivos y ejecutar comandos en PC'],
+            ['plan', '🔍 Directo · Solo lectura / Análisis'],
+            ['tarea', '🌿 Crear Tarea Kanban (Worktree Git aislado)']
+          ], S.mandoMode) + '</select></div>' +
+        '</div>' +
+        '<div class="row" style="margin-top:8px;justify-content:space-between">' +
+          '<small class="muted">📁 Ruta en Windows: <code>' + h(defFolder ? defFolder.path : 'C:\\Users\\LOCALADMINPJ / D:\\cantina') + '</code></small>' +
+          '<div class="row" style="gap:4px">' +
+            (curProj ? '<a class="btn sm ghost" href="#/kanban/' + curProj.id + '">📋 Kanban (' + (curProj.total || 0) + ')</a>' : '') +
+            '<a class="btn sm ghost" href="#/repos">🌿 Git / Deploy</a>' +
+          '</div>' +
+        '</div>' +
+        '<div class="l" style="margin-top:10px">3. Ejecutor (puedes tocar uno o nombrarlo al hablar: "Claude...", "Codex...", "Antigravity...", "CommandCode...", "PowerShell...")</div>' +
+        '<div class="row" id="mandoAgentsBar" style="gap:6px;margin-top:4px">' + agentButtons + '</div>' +
+        '<div class="row" style="gap:6px;margin-top:10px">' +
+          promptsRapidos.map(([lbl, pr]) => '<button type="button" class="btn sm ghost" data-qprompt="' + h(pr) + '">' + h(lbl) + '</button>').join('') +
+        '</div>' +
+      '</div>' +
+      '<div class="console" id="mandoLiveConsole" style="height:170px;margin-bottom:12px" ' + (st.runningConvs?.length ? '' : 'hidden') + '>⚡ Ejecutando en tu PC Windows...</div>' +
+      '<div class="panel">' +
+        '<div class="row" style="justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">Conversación y Consola de Resultados</h3>' +
+        '<label class="row" style="font-size:var(--fs-sm)"><input type="checkbox" id="mandoFresh"> Sesión nueva</label></div>' +
+        '<div class="chat" id="mandoChatBox" data-scroll="mchat" style="max-height:46vh">' + msgsHtml + '</div>' +
+        (canEdit() ? '<form id="mandoForm" class="col-flex" style="margin-top:10px">' +
+          '<textarea id="mandoInput" rows="3" placeholder="Escribe o pulsa 🎤 para hablar (ej: Claude revisa este proyecto, o PowerShell git status)..." required></textarea>' +
+          '<div class="row">' +
+            '<button type="submit" class="btn y" id="mandoSendBtn">▶ Ejecutar ahora</button>' +
+            '<button type="button" class="btn" id="mandoVoiceDirect" title="Dictar por voz y ejecutar al instante">🎤 Hablar y Ejecutar</button>' +
+            micBtn('#mandoInput') +
+          '</div></form>' : '') +
+      '</div>' +
+      '<div class="panel" style="margin-top:12px"><h3 style="margin-top:0">Tareas del proyecto</h3>' + activeTasksHtml + '</div>';
+
+    const chatBox = el.querySelector('#mandoChatBox');
+    if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+
+    const projSel = el.querySelector('#mandoProjSel');
+    if (projSel) projSel.onchange = e => { setProject(+e.target.value || null); route(true); };
+
+    const modeSel = el.querySelector('#mandoModeSel');
+    if (modeSel) modeSel.onchange = e => { S.mandoMode = e.target.value; };
+
+    const scrBtn = el.querySelector('#btnScreenPC');
+    if (scrBtn) scrBtn.onclick = () => showPcScreenModal();
+
+    const impBtn = el.querySelector('#btnImpPC');
+    if (impBtn) impBtn.onclick = () => importProjectsModal();
+
+    const newProjBtn = el.querySelector('#btnNewProj');
+    if (newProjBtn) newProjBtn.onclick = () => projectForm();
+
+    el.querySelectorAll('[data-pcq]').forEach(b => {
+      b.onclick = async () => {
+        const actName = b.dataset.pcq;
+        if (actName === 'lock' && !await confirmBox('¿Bloquear la sesión de tu PC Windows ahora?', 'Bloquear PC', true)) return;
+        try {
+          const r = await post('/api/mando/pc-quick', { project_id: pid, action: actName });
+          holo('PC Windows', r.msg || 'Listo');
+        } catch (e) { fail(e); }
+      };
+    });
+
+    const clipGetBtn = el.querySelector('#btnClipGet');
+    if (clipGetBtn) clipGetBtn.onclick = async () => {
+      try {
+        const r = await post('/api/mando/pc-quick', { project_id: pid, action: 'clip_get' });
+        modal('<h2>📋 Portapapeles actual de tu PC</h2><textarea rows="6" readonly>' + h(r.clipboard || '') + '</textarea><div class="row" style="margin-top:10px"><button type="button" class="btn ghost" data-close>Cerrar</button></div>');
+      } catch (e) { fail(e); }
+    };
+
+    const clipSetBtn = el.querySelector('#btnClipSet');
+    if (clipSetBtn) clipSetBtn.onclick = async () => {
+      const txt = await promptBox('Enviar al portapapeles de tu PC', 'Texto a copiar en Windows:', '', true);
+      if (txt != null) {
+        try { const r = await post('/api/mando/pc-quick', { project_id: pid, action: 'clip_set', value: txt }); holo('Portapapeles PC', r.msg); } catch (e) { fail(e); }
+      }
+    };
+
+    const openUrlBtn = el.querySelector('#btnOpenUrl');
+    if (openUrlBtn) openUrlBtn.onclick = async () => {
+      const u = await promptBox('Abrir página en el navegador de tu PC', 'URL (https://...):', 'https://');
+      if (u && u !== 'https://') {
+        try { const r = await post('/api/mando/pc-quick', { project_id: pid, action: 'open_url', value: u }); holo('Navegador PC', r.msg); } catch (e) { fail(e); }
+      }
+    };
+
+    el.querySelectorAll('[data-magent]').forEach(b => {
+      b.onclick = () => {
+        const v = b.dataset.magent;
+        S.mandoAgent = (v === 'all' || v === 'shell') ? v : +v;
+        route(true);
+      };
+    });
+
+    const sendOrder = async (rawText, isVoice) => {
+      let forceShell = false;
+      let cleanText = rawText;
+      if (rawText.startsWith('__ps__:')) {
+        forceShell = true;
+        cleanText = rawText.slice(7);
+      }
+      const parsed = isVoice ? detectVoiceAgent(cleanText, ags, S.boot.projects) : { text: cleanText, agentId: null, broadcast: false, shell: forceShell, projectId: null };
+      if (parsed.projectId && parsed.projectId !== pid) setProject(parsed.projectId);
+      const targetProj = parsed.projectId || pid;
+      const isShell = parsed.shell || forceShell || S.mandoAgent === 'shell';
+      const isBroadcast = !isShell && (parsed.broadcast || S.mandoAgent === 'all');
+      const targetAgent = parsed.agentId || ((S.mandoAgent === 'all' || S.mandoAgent === 'shell') ? ags[0]?.id : +S.mandoAgent);
+      const fresh = !!el.querySelector('#mandoFresh')?.checked;
+      const sendBtn = el.querySelector('#mandoSendBtn');
+      if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Ejecutando...'; }
+      try {
+        const r = await post('/api/mando/send', {
+          project_id: targetProj,
+          agent_id: targetAgent,
+          broadcast: isBroadcast,
+          shell: isShell,
+          mode: S.mandoMode,
+          text: parsed.text,
+          voz: !!isVoice,
+          fresh
+        });
+        beep('ok');
+        if (r.kind === 'tarea') {
+          holo('Tarea creada y en ejecución', '#' + r.task_id, { link: '#/tarea/' + r.task_id });
+        } else if (r.kind === 'shell') {
+          holo('PowerShell ejecutado', parsed.text.slice(0, 60));
+        } else {
+          holo(isBroadcast ? 'Ráfaga enviada a los 4 agentes' : 'Orden en ejecución', parsed.text.slice(0, 80));
+        }
+        refreshSoon(100);
+      } catch (err) { fail(err); } finally {
+        if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '▶ Ejecutar ahora'; }
+      }
+    };
+
+    el.querySelectorAll('[data-qprompt]').forEach(b => {
+      b.onclick = () => sendOrder(b.dataset.qprompt, false);
+    });
+
+    const form = el.querySelector('#mandoForm');
+    if (form) {
+      form.onsubmit = async e => {
+        e.preventDefault();
+        const inp = el.querySelector('#mandoInput');
+        const val = inp.value.trim();
+        if (!val) return;
+        const wasVoz = isDictated(inp);
+        inp.value = '';
+        await sendOrder(val, wasVoz);
+      };
+    }
+
+    const vBtn = el.querySelector('#mandoVoiceDirect');
+    if (vBtn) {
+      vBtn.onclick = async () => {
+        const heard = await listen(stState => {
+          vBtn.textContent = stState === 'rec' ? '⏹ Escuchando (toca para enviar)...' : stState === 'busy' ? '⏳ Transcribiendo...' : '🎤 Hablar y Ejecutar';
+          vBtn.classList.toggle('r', stState === 'rec');
+        });
+        if (heard) await sendOrder(heard, true);
+      };
+    }
+  }
+};
+
+export const VIEWS = { estacion, mando, proyectos, kanban, repos, tarea, cantina, consejo, archivos, puente, config, pc };
 
 
 // ---------- órdenes por voz desde el dock: dictar → interpretar → confirmar → ejecutar ----------
 export function vozForm() {
-  if (!S.boot?.ia) return holo('Dictado no configurado', 'Falta OFICINA_IA_URL en el servidor (ver README §6).', { err: true });
-  if (!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder)) return holo('Voz no disponible', 'Este navegador no permite grabar audio.', { err: true });
+  if (!S.boot?.ia && !(window.SpeechRecognition || window.webkitSpeechRecognition)) return holo('Voz no disponible', 'Activa OFICINA_IA_URL o usa Chrome/Edge con soporte de voz.', { err: true });
   const d = modal(`<h2>🎤 Orden por voz</h2>
     <p class="muted">Pulsa el micro y habla. Ejemplos: «crea una tarea en el proyecto Oficina Virtual titulada arreglar el login para el agente Codex», «abre la cantina», «pregúntale a Claude si el servidor está en línea», «busca dictado por voz».</p>
     <div class="row" style="margin:6px 0"><button type="button" class="btn y" id="vzMic">🎤 Hablar</button><small id="vzState" class="muted"></small></div>
