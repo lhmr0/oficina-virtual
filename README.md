@@ -1,133 +1,271 @@
 # ★ Oficina Virtual
 
-Oficina 8-bit (estilo galáctico) para asignar tareas a agentes de IA — **Claude, Codex, Antigravity y CommandCode** — por proyecto y área, verlas trabajar en tiempo real y no perder nada si un agente se queda sin cuota.
+**Una oficina 8-bit para dirigir un equipo de agentes de IA de código — Claude Code, Codex, Antigravity y CommandCode — desde el navegador.**
 
-## Arrancar
+Le asignas tareas a cada agente por proyecto y área, los ves trabajar en tiempo real en un mapa estilo *Gather*, respondes sus preguntas, revisas el diff y fusionas su rama. Si un agente se queda sin cuota, otro toma el relevo con todo el contexto y no se pierde nada.
+
+![Estación: mapa de la oficina con salas por área, sala de agentes y tablero](docs/img/estacion.png)
+
+- **Sin dependencias npm.** Node 22+ (`node:sqlite`), HTML/CSS/JS sin build.
+- **Usa los CLIs que ya tienes** (`claude`, `codex`, `agy`, `commandcode`) con tu propia sesión y suscripción: no hay API keys de por medio.
+- **Agentes en paralelo sin pisarse:** cada tarea corre en su propio `git worktree`.
+- **Accesible desde cualquier lado:** servidor en un VPS y tu PC como ejecutora, conectada por una conexión saliente (sin abrir puertos).
+
+---
+
+## Índice
+
+- [Capturas](#capturas)
+- [Inicio rápido](#inicio-rápido)
+- [Cómo funciona](#cómo-funciona)
+- [Secciones](#secciones)
+- [Despliegue en un VPS con la PC como ejecutora](#despliegue-en-un-vps-con-la-pc-como-ejecutora)
+- [Extras opcionales](#extras-opcionales)
+- [Datos y variables de entorno](#datos-y-variables-de-entorno)
+- [Seguridad](#seguridad)
+- [Pruebas](#pruebas)
+- [Estructura del código](#estructura-del-código)
+
+---
+
+## Capturas
+
+| | |
+|---|---|
+| **Kanban** — arrastra a *En curso* para ejecutar con el agente asignado ![Kanban](docs/img/kanban.png) | **Tarea** — consola en vivo, chat, diff, ejecuciones, relevos e historial ![Tarea](docs/img/tarea.png) |
+| **Cantina** — consultas rápidas sin crear tarea ![Cantina](docs/img/cantina.png) | **Mando Directo** — los 4 agentes + PowerShell, por texto o voz ![Mando Directo](docs/img/mando.png) |
+| **Puente de Mando** — salud, versión, cuota y consumo de cada agente ![Puente de Mando](docs/img/puente.png) | **Configuración** — máquinas, agentes, áreas, usuarios, límites ![Configuración](docs/img/config.png) |
+| **Consejo Jedi** — los agentes proponen mejoras sobre lo hecho ![Consejo](docs/img/consejo.png) | **Archivos Jedi** — historial completo con búsqueda y CSV ![Archivos](docs/img/archivos.png) |
+
+<sub>Capturas tomadas con datos de demostración.</sub>
+
+---
+
+## Inicio rápido
+
+Requisitos: **Node 22+**, **git** y al menos uno de los CLIs instalado y con sesión iniciada: `claude`, `codex`, `agy` o `commandcode`.
+
+```bash
+git clone https://github.com/lhmr0/oficina-virtual.git
+cd oficina-virtual
+node --no-warnings server.js
+```
+
+En Windows también sirve doble clic en `iniciar.bat`.
+
+Abre <http://127.0.0.1:4242>. El primer ingreso crea al **Comandante** (administrador). Luego:
+
+1. **Proyectos → Nuevo**: dale un nombre y una o varias carpetas locales (git opcional).
+2. **+ Tarea**: título, instrucciones, agente, modelo, esfuerzo y modo (*Plan*, *Editar* o *Supervisado*).
+3. Pulsa **Ejecutar** (o arrastra la tarjeta a *En curso* en el Kanban) y mira la consola en vivo.
+4. Cuando el agente termina, la tarea pasa a **Revisión**: revisa el diff y **Aprueba** (puedes fusionar la rama) o **Devuelve** con un comentario.
+
+---
+
+## Cómo funciona
 
 ```
-iniciar.bat
+ Navegador ──► server.js (HTTP + SSE, SQLite)
+                   │
+                   ├─ runner.js ──► lanza el CLI del agente en la carpeta de la tarea
+                   │                 (claude / codex / agy / commandcode)
+                   │                 y transmite su salida en vivo
+                   │
+                   └─ worker.js (opcional, en otra PC) ──► igual, pero remoto,
+                                     por conexión saliente HTTPS
 ```
-o `node --no-warnings server.js` y abre http://127.0.0.1:4242. El primer ingreso crea al **Comandante** (admin).
 
-Requisitos: Node 22+, git, y los CLIs de los agentes instalados y con sesión iniciada (`claude`, `codex`, `agy`, `commandcode`). Sin dependencias npm.
+**Ciclo de una tarea**
 
-## Qué hay
+1. **Aislamiento.** Si la carpeta es un repo git, la tarea corre en su propio **worktree** (`<repo>/.oficina-worktrees/task-N`, rama `oficina/task-N-…`), así varios agentes trabajan en paralelo en el mismo repo. Sin git, corre en la carpeta (una tarea a la vez). Sin carpeta, en `data/sandbox/task-N`.
+2. **Protocolo.** El agente mantiene `.oficina/progreso.md` y termina cada turno con `[[CONSULTA]]` (te pregunta algo → notificación) o `[[LISTO]]` (pasa a *Revisión*).
+3. **Conversación.** Al responder se **reanuda la misma sesión** del CLI, con todo su contexto.
+4. **Integración.** El agente **no** hace push ni despliega desde su rama. Eso se hace en el panel **Repositorios**: ves cada repo con su rama base (↑/↓ respecto al remoto, cambios sin commit), las ramas de tareas pendientes (commits, archivos, si chocan con la base o con otra tarea), y botones de **Aprobar y fusionar**, **Push** (`pull --no-rebase` + push: nunca pisa lo remoto; si hay conflicto crea una tarea para resolverlo) y **Desplegar**. El comando de despliegue se define por repo en `worker.json`: `"deploy": { "C:\\ruta\\repo": "bash C:/ruta/deploy.sh" }`.
+5. **Relevo.** Si se agota la cuota del agente: checkpoint git + *snapshot* de relevo, y eliges quién continúa (o se hace solo, según la cadena de relevo del área).
+6. **Supervisión.** En modo *Supervisado* (Claude), cada permiso que pide el agente aparece en vivo para aprobarlo o denegarlo.
+
+**Modos de ejecución**
+
+| Modo | Qué puede hacer el agente |
+|---|---|
+| **Plan** | Solo lectura. |
+| **Supervisado** (Claude) | Te pide cada permiso en la web. |
+| **Editar** | Trabaja sin pedir permiso y sin sandbox (ver [Seguridad](#seguridad)). |
+
+---
+
+## Secciones
 
 | Sección | Para qué |
 |---|---|
-| **Estación** | Mapa de la oficina (estilo Gather): cada área es una sala con escritorios donde se trabajan sus tareas; en la **Sala de agentes** cada agente tiene su puesto con lo que hace, en qué tarea y su cuota ("?" espera tu respuesta, "!" lista para revisión, Zz sin cuota). Cantina, Consejo, Puente y Archivos están en «Más salas». Todo lo demás se abre en un panel lateral sobre el mapa; dock inferior y buscador **Ctrl+K**. |
+| **Estación** | Mapa de la oficina: cada área (Documentación, Desarrollo, Análisis…) es una sala con escritorios donde se trabajan sus tareas. En la **Sala de agentes** cada agente tiene su puesto con lo que hace, en qué tarea y su cuota (`?` espera tu respuesta, `!` lista para revisión, `Zz` sin cuota). Todo lo demás se abre en un panel lateral sobre el mapa; dock inferior y buscador **Ctrl+K**. |
 | **Proyectos** | Con carpetas locales (una o varias, git opcional) o solo de registro. Estado, avance, métricas. |
-| **Kanban** | Por proyecto o de todos los proyectos. Arrastra a "En curso" para ejecutar. |
-| **Tarea** | Agente + modelo + esfuerzo + modo, consola en vivo, chat con el agente, diff, ejecuciones, relevos, historial de cambios. |
-| **Cantina** | Consultas rápidas sin proyecto; multi-turno, cambio de agente a mitad, convertir en tarea/proyecto. Sin carpeta elegida trabajan en la carpeta fija `D:\cantina` de la máquina (`OFICINA_CANTINA` o `"cantina"` en `worker.json`; vacío = sandbox por chat); los chats en modo *Editar* sobre la misma carpeta van de a uno. |
-| **Consejo Jedi** | Informe de lo hecho → uno o varios agentes proponen mejoras por "lentes" → tablero de propuestas → tareas. |
-| **Archivos Jedi** | Historial de chats, tareas, ejecuciones, relevos, notificaciones, bitácora, consejos, papelera. Búsqueda global y CSV. |
-| **Puente de Mando** | Estado de todo: versión y salud de cada agente, límites (los que informa el CLI + medidos + manuales), procesos, carpetas git, sistema. Orden 66. |
-| **Configuración** | Máquinas (agentes de campo), agentes (comando, modelos, **precios por modelo** en USD/1M tokens tomados de las páginas oficiales, esfuerzos, concurrencia, patrones de cuota), áreas y cadena de relevo, usuarios/roles, límites, automatización, plantillas, perfil. |
+| **Kanban** | Por proyecto o global. Filtros por área, agente, prioridad y responsable. Arrastra a *En curso* para ejecutar. |
+| **Tarea** | Agente + modelo + esfuerzo + modo, consola en vivo, chat con el agente, adjuntos, diff, ejecuciones, relevos e historial de cambios. |
+| **Cantina** | Consultas rápidas sin proyecto; multi-turno, cambio de agente a mitad de la conversación, y convertir el chat en tarea o proyecto. |
+| **Mando Directo** | Una caja de órdenes para hablarle (o escribirle) a cualquiera de los 4 agentes o a PowerShell sobre un proyecto, con acciones rápidas sobre la PC. |
+| **Consejo Jedi** | Informe de lo hecho → uno o varios agentes proponen mejoras desde distintas "lentes" → tablero de propuestas → tareas. |
+| **Archivos Jedi** | Historial de chats, tareas, ejecuciones, relevos, notificaciones, bitácora, consejos y papelera. Búsqueda global y exportación CSV. |
+| **Puente de Mando** | Estado de todo: versión y salud de cada agente, límites (los que informa el CLI + medidos + manuales), consumo en tokens y USD, procesos, carpetas git, sistema. |
+| **Configuración** | Máquinas, agentes (comando, modelos, **precios por modelo** en USD/1M tokens, esfuerzos, concurrencia, patrones de cuota), áreas y cadena de relevo, usuarios y roles (`admin`, `operador`, `observador`), límites, automatización, plantillas, apariencia y perfil. |
 
-## Cómo trabaja un agente
+---
 
-1. Cada tarea con carpeta git corre en su propio **worktree** (`<repo>/.oficina-worktrees/task-N`, rama `oficina/task-N-…`), así varios agentes trabajan en paralelo sin pisarse. Sin git: corre en la carpeta (una tarea a la vez). Sin carpeta: en `data/sandbox/task-N`.
-2. El agente mantiene `.oficina/progreso.md` y termina cada turno con `[[CONSULTA]]` (te pregunta → notificación) o `[[LISTO]]` (pasa a Revisión).
-3. Al responder se **reanuda la misma sesión** del CLI. Al aprobar puedes fusionar la rama.
-   El agente **no** hace push ni despliega desde su rama (desplegar una rama pisaría lo que otras tareas ya integraron). Eso se hace en el panel **Repositorios** (encima de Ejecuciones en la Estación): cada repo git de cada proyecto con su rama base (↑/↓ respecto al remoto, cambios sin commit), las ramas de tareas pendientes (commits, archivos, si chocan con la base o tocan los mismos archivos que otra tarea), **Aprobar y fusionar**, **Push** (`pull --no-rebase` + push: nunca pisa lo remoto; si choca crea una tarea para resolverlo) y **Desplegar** desde la carpeta base. El comando de despliegue se define en la máquina, en `worker.json`: `"deploy": { "C:\\ruta\\repo": "bash C:/ruta/deploy.sh" }`.
-4. Si se agota la cuota: checkpoint git + snapshot de relevo; eliges quién continúa (o relevo automático por la cadena del área).
-5. Modo **supervisado** (Claude): cada permiso que pide aparece en vivo para aprobar/denegar.
-
-⚠ En modo *Editar* los agentes trabajan sin pedir permiso y sin sandbox (Claude `bypassPermissions`, Codex `--dangerously-bypass-approvals-and-sandbox`, agy `--dangerously-skip-permissions`, CommandCode `auto-accept`): pueden ejecutar comandos, hacer push y desplegar con tus credenciales, igual que tu CLI. *Plan* es solo lectura; *Supervisado* (Claude) te pide cada permiso.
-
-## En el VPS con la PC como ejecutora (acceso desde cualquier lado)
+## Despliegue en un VPS con la PC como ejecutora
 
 ```
-Celular / laptop ──HTTPS──► VPS ua.csjla.pe (web, BD, login Google, cola)
+Celular / laptop ──HTTPS──► VPS (web, BD, login Google, cola)
                                   ▲
                     conexión SALIENTE HTTPS (sin abrir puertos)
                                   │
-                     PC ── worker.js (agente de campo): Claude/Codex/agy/CommandCode, git, archivos
+                     PC ── worker.js (agente de campo): CLIs de los agentes, git, archivos
 ```
-- Si la PC está apagada, las tareas quedan **en cola** y arrancan solas cuando el agente se reconecta.
-- El agente de campo solo lanza `claude`, `codex`, `agy` y CommandCode, y solo trabaja en carpetas dentro de `roots` (worker.json).
-- Adjuntos: se suben al VPS y el agente los baja a `.oficina/adjuntos/` de la carpeta de trabajo antes del turno.
 
-### 1. Google SSO (una vez)
-1. https://console.cloud.google.com → crea un proyecto (ej. "Oficina Virtual").
+- Si la PC está apagada, las tareas quedan **en cola** y arrancan solas cuando el agente de campo se reconecta.
+- El agente de campo solo lanza `claude`, `codex`, `agy` y CommandCode, y solo trabaja en carpetas dentro de `roots` (`worker.json`).
+- Los adjuntos se suben al VPS y el agente de campo los baja a `.oficina/adjuntos/` antes del turno.
+
+En los pasos siguientes, reemplaza `tu-dominio.com` por tu dominio.
+
+### 1. Login con Google (una vez)
+
+1. En <https://console.cloud.google.com> crea un proyecto.
 2. **Google Auth Platform → Branding / Audiencia**: tipo **Externo**, estado **Prueba**; en *Usuarios de prueba* agrega los correos permitidos.
 3. **Clientes → Crear cliente → Aplicación web**
-   - Orígenes autorizados: `https://ua.csjla.pe`
-   - URI de redirección: `https://ua.csjla.pe/api/auth/google/callback`
-4. Copia el ID y el secreto **directamente** en el VPS: `ssh vps` → `nano ~/oficina/.env` → `GOOGLE_CLIENT_ID=…` y `GOOGLE_CLIENT_SECRET=…`.
+   - Orígenes autorizados: `https://tu-dominio.com`
+   - URI de redirección: `https://tu-dominio.com/api/auth/google/callback`
+4. Guarda el ID y el secreto **directamente** en el VPS, en `~/oficina/.env` (permisos `600`):
 
-`~/oficina/.env` (permisos 600):
-```
+```ini
 OFICINA_AUTH=google
-OFICINA_PUBLIC_URL=https://ua.csjla.pe
-OFICINA_ALLOWED_EMAILS=correo1@…,correo2@…
+OFICINA_PUBLIC_URL=https://tu-dominio.com
+OFICINA_ALLOWED_EMAILS=correo1@ejemplo.com,correo2@ejemplo.com
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 ```
-Solo los correos de `OFICINA_ALLOWED_EMAILS` entran (verificados por Google); no existe login por contraseña en este modo.
 
-### 2. Apache (requiere sudo, una vez)
-```
-sudo cp /etc/apache2/sites-available/ua.csjla.pe-le-ssl.conf /etc/apache2/sites-available/ua.csjla.pe-le-ssl.conf.bak-proyecto_sea
-sudo cp ~/oficina/app/deploy/ua.csjla.pe-le-ssl.conf /etc/apache2/sites-available/ua.csjla.pe-le-ssl.conf
-sudo apache2ctl configtest && sudo systemctl reload apache2
-```
+Solo entran los correos de `OFICINA_ALLOWED_EMAILS` (verificados por Google); en este modo no existe login por contraseña.
+
+### 2. Proxy inverso
+
+El contenedor escucha en `127.0.0.1:4242`. Pon delante Apache o Nginx con HTTPS. Hay un ejemplo de Apache en [`deploy/ua.csjla.pe-le-ssl.conf`](deploy/ua.csjla.pe-le-ssl.conf) (incluye la configuración para SSE).
 
 ### 3. Desplegar / actualizar
-Desde la PC (sube el último commit, reconstruye y reinicia el contenedor `oficina-virtual` en 127.0.0.1:4242):
-```
+
+Con Docker ([`Dockerfile`](Dockerfile)). Desde la PC, el script sube el último commit, reconstruye y reinicia el contenedor `oficina-virtual`:
+
+```bash
 bash deploy/deploy-vps.sh
 ```
 
 ### 4. Agente de campo en la PC
-- Token: Configuración → Máquinas → *Generar token*, o en el VPS `docker run --rm -v ~/oficina/data:/data oficina-virtual node server.js crear-maquina "PC"`.
-- `worker.json` junto a `worker.js`: `{"url": "https://ua.csjla.pe", "token": "…", "roots": ["C:\\Users\\TU_USUARIO"]}` (no se sube a git).
-- Probar: `node worker.js` · Dejarlo siempre activo: `powershell -ExecutionPolicy Bypass -File instalar-agente.ps1` (tarea al iniciar sesión, log en `worker.log`).
+
+- Token: **Configuración → Máquinas → Generar token**, o en el VPS:
+  `docker run --rm -v ~/oficina/data:/data oficina-virtual node server.js crear-maquina "PC"`
+- Crea `worker.json` junto a `worker.js` (está en `.gitignore`):
+  ```json
+  { "url": "https://tu-dominio.com", "token": "…", "roots": ["C:\\Users\\TU_USUARIO"] }
+  ```
+- Probar: `node worker.js`
+- Dejarlo siempre activo (Windows, tarea al iniciar sesión, log en `worker.log`):
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File instalar-agente.ps1
+  ```
 - La PC no debe suspenderse si quieres trabajar desde fuera.
 
-### 5. Actualización diaria de CLIs y modelos en la PC
-Para mantener actualizados automáticamente los 4 CLIs (`claude`, `codex`, `agy`, `commandcode`) y sincronizar todos los modelos y esfuerzos de razonamiento en la base de datos de la Oficina Virtual:
+### 5. Actualización diaria de CLIs y modelos
 
-- **Ejecutar manualmente ahora**:
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\actualizar-diario.ps1
-  ```
-  o doble clic en `actualizar-diario.bat`.
-- **Programar ejecución diaria automática** (tarea programada de Windows a las 03:00 AM):
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\actualizar-diario.ps1 -InstalarTarea -Hora "03:00"
-  ```
-- **Desinstalar la tarea programada**:
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\actualizar-diario.ps1 -DesinstalarTarea
-  ```
-- El registro de cada ejecución queda guardado en `actualizar.log`.
+[`actualizar-diario.ps1`](actualizar-diario.ps1) actualiza los 4 CLIs y sincroniza sus modelos y esfuerzos de razonamiento en la base de datos (log en `actualizar.log`).
 
-### 6. Servicio de IA local (opcional): dictado por voz y adjuntos → texto
-Contenedor `oficina-ia` en un servidor de la red interna (`deploy/ia/`, sin GPU):
-- **🎤 Dictado** en la Cantina, las respuestas y la tarea nueva (Whisper `large-v3-turbo`, español, ~0,4 s por segundo de audio). Al agente se le avisa que el texto viene de un dictado. **🔊** lee en voz alta las respuestas de los agentes (voz del navegador).
-- **🎤 Órdenes por voz** desde el dock inferior: crea tareas (proyecto, título, agente y área), lanza consultas a la Cantina, navega a una sección y busca en el historial. La orden se interpreta con reglas (`public/ordenes.js`) y se confirma en pantalla antes de ejecutar. Detalle en `ANALISIS-TAREA-32.md`.
-- **Adjuntos PDF/Office → `<adjunto>.md`** (tablas incluidas; OCR en español para los escaneados), que el agente lee en vez del original.
+```powershell
+# Ejecutar ahora (o doble clic en actualizar-diario.bat)
+powershell -ExecutionPolicy Bypass -File .\actualizar-diario.ps1
+# Programar todos los días a las 03:00
+powershell -ExecutionPolicy Bypass -File .\actualizar-diario.ps1 -InstalarTarea -Hora "03:00"
+# Quitar la tarea programada
+powershell -ExecutionPolicy Bypass -File .\actualizar-diario.ps1 -DesinstalarTarea
+```
 
-Instalar: copiar `deploy/ia` al servidor como `~/oficina-ia`, crear `secrets/api_key` y ejecutar `docker compose up -d --build`. En la oficina: `OFICINA_IA_URL=http://<servidor>:8010` y `OFICINA_IA_KEY=<clave>`. Las llamadas salen desde el agente de campo (la PC ve la red interna y el VPS no). Sin estas variables, la función queda apagada. Si el servicio cae, todo sigue como antes.
+---
+
+## Extras opcionales
+
+### Servicio de IA local: voz y adjuntos → texto
+
+Contenedor `oficina-ia` ([`deploy/ia/`](deploy/ia/)) para un servidor de la red interna, sin GPU:
+
+- **🎤 Dictado** en la Cantina, las respuestas y la tarea nueva (Whisper `large-v3-turbo`, español). Al agente se le avisa que el texto viene de un dictado. **🔊** lee en voz alta las respuestas.
+- **🎤 Órdenes por voz** desde el dock: crea tareas (proyecto, título, agente y área), lanza consultas a la Cantina, navega y busca en el historial. La orden se interpreta con reglas ([`public/ordenes.js`](public/ordenes.js)) y se confirma en pantalla antes de ejecutarse.
+- **Adjuntos PDF/Office → `<adjunto>.md`** (tablas incluidas; OCR en español para escaneados), que el agente lee en vez del original.
+
+Instalar: copia `deploy/ia` al servidor, crea `secrets/api_key` y ejecuta `docker compose up -d --build`. En la oficina define `OFICINA_IA_URL=http://<servidor>:8010` y `OFICINA_IA_KEY=<clave>`. Sin estas variables la función queda apagada; si el servicio cae, todo lo demás sigue funcionando.
 
 ### Control del PC con zer0 (Windows)
 
-Además de los agentes de campo, una PC con **zer0** puede registrarse como máquina de tipo `zer0` (Configuración → Máquinas → Tipo «zer0 (Windows)»). Usa el mismo protocolo saliente (`hello`/`stream`/`reply`) más `POST /api/worker/pc-event`; **no ejecuta tareas ni agentes de la oficina** y su token solo puede usar esas rutas.
+Una PC con **zer0** puede registrarse como máquina de tipo `zer0` (**Configuración → Máquinas → Tipo «zer0 (Windows)»**) para control visual paso a paso desde la vista `#/pc`. Usa el mismo protocolo saliente que el agente de campo, pero **no ejecuta tareas ni agentes** y su token solo puede usar sus propias rutas.
 
-- Vista web: `#/pc` (operador/admin). API: `GET /api/pc` (observador), `GET /api/pc/:id/status` y `POST /api/pc/:id/stop` (operador), `POST /api/pc/:id/ask`, `POST /api/pc/:id/session`, `GET /api/pc/:id/session`, `GET /api/pc/:id/frame/:frameId` y `POST /api/pc/:id/approve` (admin).
-- La aprobación de cada acción es siempre local en zer0; la web solo puede aprobar si el interruptor local «Permitir aprobar acciones desde oficina» está activo.
-- Los pantallazos viven **solo en memoria** (máx. 20 por PC, ≤ 400 KB, solo admin, `Cache-Control: no-store`) y se borran `OFICINA_PC_FRAME_TTL_MS` (600000) después de acabar la sesión; una sesión sin respuesta se vence a los `OFICINA_PC_SESSION_MAX_MS` (11 min). El SSE general solo avisa `pc.event` sin datos ni imágenes.
-- Pruebas: `node --no-warnings test-pc.js`.
+- La aprobación de cada acción es local en zer0; la web solo puede aprobar si el interruptor local «Permitir aprobar acciones desde oficina» está activo.
+- Los pantallazos viven **solo en memoria** (máx. 20 por PC, ≤ 400 KB, solo admin, `Cache-Control: no-store`) y se borran a los `OFICINA_PC_FRAME_TTL_MS` (10 min) de terminar la sesión; una sesión sin respuesta vence a los `OFICINA_PC_SESSION_MAX_MS` (11 min).
+- API: `GET /api/pc` (observador), `GET /api/pc/:id/status` y `POST /api/pc/:id/stop` (operador), `POST /api/pc/:id/ask`, `POST|GET /api/pc/:id/session`, `GET /api/pc/:id/frame/:frameId` y `POST /api/pc/:id/approve` (admin).
 
-## Datos
+---
 
-Todo vive en `data/` (SQLite `oficina.db`, logs de ejecución, sandbox, respaldos diarios). Variables: `OFICINA_PORT` (4242), `OFICINA_DATA`, `OFICINA_BIND`, `OFICINA_LOCAL_EXEC` (0 = no ejecutar agentes en el servidor), `OFICINA_AUTH` (password|google), `OFICINA_PUBLIC_URL`, `OFICINA_ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OFICINA_NO_TOAST`, `OFICINA_CANTINA`.
+## Datos y variables de entorno
+
+Todo vive en `data/`: SQLite `oficina.db`, logs de ejecución, sandbox y respaldos diarios.
+
+| Variable | Por defecto | Para qué |
+|---|---|---|
+| `OFICINA_PORT` | `4242` | Puerto HTTP. |
+| `OFICINA_BIND` | `127.0.0.1` | Interfaz de escucha. |
+| `OFICINA_DATA` | `./data` | Carpeta de datos. |
+| `OFICINA_LOCAL_EXEC` | `1` | `0` = no ejecutar agentes en el servidor (solo vía agente de campo). |
+| `OFICINA_AUTH` | `password` | `password` o `google`. |
+| `OFICINA_PUBLIC_URL` | | URL pública (necesaria para Google). |
+| `OFICINA_ALLOWED_EMAILS` | | Correos permitidos con Google, separados por coma. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | | Credenciales OAuth de Google. |
+| `OFICINA_CANTINA` | | Carpeta fija de trabajo de la Cantina (vacío = sandbox por chat). |
+| `OFICINA_IA_URL` / `OFICINA_IA_KEY` | | Servicio de IA local (voz y adjuntos). |
+| `OFICINA_NO_TOAST` | | Desactiva las notificaciones nativas de Windows. |
+
+---
+
+## Seguridad
+
+> [!WARNING]
+> En modo **Editar** los agentes trabajan **sin pedir permiso y sin sandbox** (Claude `bypassPermissions`, Codex `--dangerously-bypass-approvals-and-sandbox`, agy `--dangerously-skip-permissions`, CommandCode `auto-accept`): pueden ejecutar comandos, hacer push y desplegar con tus credenciales, igual que tu CLI. Usa *Plan* o *Supervisado* si no confías en la tarea.
+
+- Por defecto escucha solo en `127.0.0.1`. Para exponerlo, ponlo detrás de HTTPS y usa `OFICINA_AUTH=google`.
+- Roles: `observador` (solo ve), `operador` (crea y ejecuta tareas), `admin` (configuración, usuarios, máquinas).
+- El agente de campo solo trabaja dentro de las carpetas declaradas en `roots`.
+- Nunca subas `worker.json`, `.env` ni `data/` (ya están en `.gitignore`).
+
+---
 
 ## Pruebas
 
+```bash
+node --no-warnings test.js           # flujo completo con agentes falsos
+node --no-warnings test-pc.js        # control del PC con zer0
+node --no-warnings test-hostops.js   # operaciones sobre el host
+node --no-warnings test-frontend.js  # lógica del frontend
 ```
-node --no-warnings test.js
-```
-Recorre el flujo completo con agentes falsos (auth, roles, proyectos, cola, consultas, cuota y relevo, git, cantina, consejo, puente, recuperación).
+
+`test.js` recorre el flujo completo con agentes falsos: auth, roles, proyectos, cola, consultas, cuota y relevo, git, cantina, consejo, puente y recuperación.
+
+---
+
+## Estructura del código
+
+| Archivo | Rol |
+|---|---|
+| [`server.js`](server.js) | Servidor HTTP, API REST, SSE, auth y roles. |
+| [`db.js`](db.js) | Esquema y acceso a SQLite (`node:sqlite`). |
+| [`runner.js`](runner.js) | Ciclo de vida de las tareas: cola, ejecución de los CLIs, worktrees, relevos. |
+| [`worker.js`](worker.js) | Agente de campo: ejecuta en la PC lo que pide el VPS. |
+| [`host.js`](host.js) / [`hostops.js`](hostops.js) | Máquinas conectadas y operaciones sobre ellas (git, archivos, despliegue). |
+| [`council.js`](council.js) | Consejo Jedi: informes y propuestas de mejora. |
+| [`status.js`](status.js) | Puente de Mando: salud, versiones, cuotas y consumo. |
+| [`pc.js`](pc.js) | Integración con zer0. |
+| [`public/`](public/) | Frontend sin build: vistas, mapa, sprites, voz y órdenes. |
+| [`deploy/`](deploy/) | Despliegue en VPS y servicio de IA local. |
