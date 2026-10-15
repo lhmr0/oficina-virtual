@@ -10,11 +10,46 @@ Le asignas tareas a cada agente por proyecto y área, los ves trabajar en tiempo
 - **Usa los CLIs que ya tienes** (`claude`, `codex`, `agy`, `commandcode`) con tu propia sesión y suscripción: no hay API keys de por medio.
 - **Agentes en paralelo sin pisarse:** cada tarea corre en su propio `git worktree`.
 - **Accesible desde cualquier lado:** servidor en un VPS y tu PC como ejecutora, conectada por una conexión saliente (sin abrir puertos).
+- **Control remoto de tu PC desde el celular:** con **Mando Directo** ves la pantalla de tu PC, haces clic, escribes, ejecutas PowerShell y le hablas a los agentes por voz, todo desde el navegador.
+
+---
+
+## 🚀 Mando Directo: tu PC en el bolsillo
+
+**Mando Directo** es el centro de control de la oficina. Desde el celular o cualquier navegador manejas tus proyectos, tus 4 agentes y **tu PC Windows completa**, aunque estés lejos de ella.
+
+<p align="center">
+  <img src="docs/img/mando-movil.png" alt="Control remoto de la pantalla de la PC desde el celular" width="260">
+  &nbsp;&nbsp;
+  <img src="docs/img/mando.png" alt="Mando Directo" width="560">
+</p>
+
+| Qué puedes hacer | Cómo |
+|---|---|
+| 🖥️ **Ver y manejar la pantalla de tu PC** | **Controlar Pantalla PC** abre una captura en vivo de tu escritorio. Tocas cualquier punto y la PC hace **clic izquierdo, doble clic o clic derecho** ahí. Puedes refrescar a mano o activar **En vivo** (cada 3 s). |
+| ⌨️ **Escribir en la PC** | Envía texto a la ventana activa y teclas especiales: Enter, Esc, Tab, Espacio, Borrar, Win y Alt+F4. Cada acción te devuelve la pantalla actualizada. |
+| 🤖 **Darle órdenes a los agentes** | Elige Claude, Codex, Antigravity o CommandCode, o **⚡ Todos (4 IA)** para lanzar los cuatro en paralelo sobre el proyecto y comparar respuestas. La conversación sigue el hilo de la anterior; marca *Sesión nueva* para empezar de cero. |
+| 💻 **Ejecutar PowerShell** | Corre comandos en la carpeta del proyecto (`git status`, `npm test`, …) y ve la salida en la misma consola. |
+| 🎤 **Mandar por voz** | Pulsa el micrófono y di, por ejemplo, *"Claude, revisa este proyecto"*, *"todos, propongan mejoras"*, *"PowerShell git status"* o *"proyecto Portal, Codex, corre las pruebas"*. Reconoce el agente, el proyecto y si es un comando de consola. |
+| ⚙️ **Elegir el modo** | *Directo · Editar* (edita archivos y ejecuta comandos), *Directo · Solo lectura* (análisis) o *Crear tarea* (tarea de prioridad alta en su propio worktree git, que arranca al instante). |
+| ⚡ **Acciones rápidas de un toque** | Abrir el proyecto en **VS Code** o en el **Explorador**, **ver o enviar el portapapeles** de la PC, **abrir una web** en la PC, **subir, bajar o silenciar el volumen** y **bloquear la sesión de Windows**. |
+| 🧭 **Atajos del proyecto** | Estado del proyecto, buscar bugs, correr pruebas, ver qué consume CPU/RAM; saltar al Kanban o a Git/Deploy; ver las tareas del proyecto. |
+| 📥 **Importar carpetas de la PC** | Recorre las carpetas de tu PC, marca las que quieras (las que son repos git aparecen primero) y se crean como proyectos listos para usar. |
+
+![Control táctil de la pantalla de la PC](docs/img/mando-pantalla.png)
+
+<sub>La pantalla que aparece dentro del control es una imagen de demostración.</sub>
+
+**Cómo funciona por dentro:** la web llama a la API `/api/mando/*` del servidor, que reenvía la orden a la PC por la misma conexión saliente del [agente de campo](#4-agente-de-campo-en-la-pc). En la PC, [`hostops.js`](hostops.js) toma la captura con .NET (`System.Drawing`), mueve el mouse y hace clic con `user32.dll`, escribe con `SendKeys` y ejecuta PowerShell solo dentro de las carpetas permitidas en `roots`. No hace falta abrir puertos ni instalar nada extra: si el agente de campo está conectado, el Mando funciona.
+
+> [!CAUTION]
+> El Mando da control total de la PC (pantalla, teclado, PowerShell). Solo los roles `operador` y `admin` pueden usarlo. Si la oficina está expuesta a internet, protégela con HTTPS y `OFICINA_AUTH=google`.
 
 ---
 
 ## Índice
 
+- [Mando Directo: tu PC en el bolsillo](#-mando-directo-tu-pc-en-el-bolsillo)
 - [Capturas](#capturas)
 - [Inicio rápido](#inicio-rápido)
 - [Cómo funciona](#cómo-funciona)
@@ -103,7 +138,7 @@ Abre <http://127.0.0.1:4242>. El primer ingreso crea al **Comandante** (administ
 | **Kanban** | Por proyecto o global. Filtros por área, agente, prioridad y responsable. Arrastra a *En curso* para ejecutar. |
 | **Tarea** | Agente + modelo + esfuerzo + modo, consola en vivo, chat con el agente, adjuntos, diff, ejecuciones, relevos e historial de cambios. |
 | **Cantina** | Consultas rápidas sin proyecto; multi-turno, cambio de agente a mitad de la conversación, y convertir el chat en tarea o proyecto. |
-| **Mando Directo** | Una caja de órdenes para hablarle (o escribirle) a cualquiera de los 4 agentes o a PowerShell sobre un proyecto, con acciones rápidas sobre la PC. |
+| **Mando Directo** | Control remoto de la PC y de los agentes desde el celular: pantalla en vivo con clic y teclado, los 4 agentes (o todos a la vez), PowerShell, voz, acciones rápidas e importar carpetas. Ver [Mando Directo](#-mando-directo-tu-pc-en-el-bolsillo). |
 | **Consejo Jedi** | Informe de lo hecho → uno o varios agentes proponen mejoras desde distintas "lentes" → tablero de propuestas → tareas. |
 | **Archivos Jedi** | Historial de chats, tareas, ejecuciones, relevos, notificaciones, bitácora, consejos y papelera. Búsqueda global y exportación CSV. |
 | **Puente de Mando** | Estado de todo: versión y salud de cada agente, límites (los que informa el CLI + medidos + manuales), consumo en tokens y USD, procesos, carpetas git, sistema. |
