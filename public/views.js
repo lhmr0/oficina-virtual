@@ -2146,7 +2146,7 @@ function detectVoiceAgent(rawText, agentsList, projectsList) {
   let shell = false;
   let projectId = null;
   for (const p of (projectsList || [])) {
-    const escaped = p.name.replace(/[.*+?^()[\]{}|\\]/g, '\\export const VIEWS = { estacion, proyectos, kanban, repos, tarea, cantina, consejo, archivos, puente, config, pc };');
+    const escaped = p.name.replace(/[.*+?^()[\]{}|\\]/g, '\\$&');
     const rxP = new RegExp('^proyecto\\s+' + escaped + '[,:\\s]+', 'i');
     if (rxP.test(text)) { projectId = p.id; text = text.replace(rxP, '').trim(); break; }
   }
