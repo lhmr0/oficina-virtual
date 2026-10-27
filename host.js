@@ -10,7 +10,7 @@ const pc = require('./pc');
 
 const LOCAL_EXEC = process.env.OFICINA_LOCAL_EXEC !== '0';
 const deployCfg = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'worker.json'), 'utf8')).deploy; } catch { return null; } })(); // mismo "deploy" que el agente de campo
-const local = H.create({ dataDir: DATA, strict: false, cantina: process.env.OFICINA_CANTINA ?? (process.platform === 'win32' ? 'D:/cantina' : ''), deploy: deployCfg });
+const local = H.create({ dataDir: DATA, strict: false, cantina: process.env.OFICINA_CANTINA ?? (process.platform === 'win32' ? 'D:/cantina' : ''), reportes: process.env.OFICINA_REPORTES, deploy: deployCfg });
 const PUBLIC_URL = (process.env.OFICINA_PUBLIC_URL || `http://127.0.0.1:${process.env.OFICINA_PORT || 4242}`).replace(/\/$/, '');
 
 if (LOCAL_EXEC && !one('select 1 from machines where is_local=1'))

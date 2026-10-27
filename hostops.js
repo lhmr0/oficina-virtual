@@ -11,7 +11,7 @@ const https = require('node:https');
 // Claude CLI no tiene comando para listar modelos: IDs completos (sin alias sonnet/opus…, que duplicaban la lista). Actualizar al salir uno nuevo.
 const CLAUDE_MODELS = ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5'];
 
-// cfg: { dataDir, strict, roots[], cantina } — strict = agente de campo: solo CLIs conocidos y rutas bajo roots (más la carpeta de la Cantina)
+// cfg: { dataDir, strict, roots[], cantina, reportes } — strict = agente de campo: solo CLIs conocidos y rutas bajo roots (más la carpeta de la Cantina)
 function create(cfg) {
   const dataDir = cfg.dataDir;
   const strict = !!cfg.strict;
@@ -282,7 +282,8 @@ function create(cfg) {
       return { path: r, is_git: isGit(r), parent: parent !== r && (!strict || roots.some(x => under(parent, x))) ? parent : null, dirs: dirs.slice(0, 500) };
     },
     // prepara la carpeta de trabajo: sandbox, carpeta directa o worktree git por tarea
-    workdir: ({ sandbox, cantina, folder, task, exclude: ex = [] }) => {
+    workdir: ({ sandbox, cantina, reportes, folder, task, exclude: ex = [] }) => {
+      if (reportes) { if (!cfg.reportes) throw new Error('Esta máquina no tiene carpeta de reportes: agrega "reportes" en worker.json'); return { cwd: checkPath(cfg.reportes), git: false }; }
       if (cantina && cantinaDir) try { fs.mkdirSync(cantinaDir, { recursive: true }); return { cwd: canon(cantinaDir), git: false }; } catch {} // sin ese disco: sandbox del chat
       if (sandbox != null) { const d = sandboxBase(sandbox, true); return { cwd: d, git: false }; }
       const base = checkPath(folder.path);

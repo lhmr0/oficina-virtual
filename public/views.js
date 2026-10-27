@@ -1034,7 +1034,7 @@ const cantina = {
         <form id="ncF"><label class="l">Mensaje ${micBtn('#ncText')}</label><textarea name="text" id="ncText" rows="5" required></textarea>
         ${agentPicker('nc', {}, { modes: false })}
         <details class="opts"><summary>Opciones: solo lectura · carpeta de la Cantina · sin adjuntos</summary>
-        <div class="field-row"><div><label class="l">Modo</label><select name="mode">${opts([['plan', 'Solo lectura'], ['editar', 'Puede editar archivos']], 'plan')}</select></div>
+        <div class="field-row"><div><label class="l">Modo</label><select name="mode">${opts([['plan', 'Solo lectura'], ['editar', 'Puede editar archivos'], ['reporte', 'Reporte (SIJ → Excel/Word, Claude, sin tocar repos)']], 'plan')}</select></div>
         <div><label class="l">Proyecto (contexto, opcional)</label><select name="project_id" id="ncProj">${opts(S.boot.projects.map(p => [p.id, p.name]), '', '—')}</select></div></div>
         <div class="field-row">${machineSel('name="machine_id" id="ncMachine"')}</div>
         <label class="l">Carpeta (vacío = carpeta de la Cantina)</label><div class="row" style="flex-wrap:nowrap"><input name="folder_path" id="ncFolder" placeholder="D:\\cantina"><button class="btn sm" type="button" id="ncBrowse">Examinar</button></div>
@@ -1045,7 +1045,7 @@ const cantina = {
       const c = x.conversation;
       right = `<div class="panel"><div class="row"><h2 style="margin:0" class="grow ellipsis">${c.pinned ? ic('pin', 'sm') + ' ' : ''}${h(c.title)}</h2>${chip(c.status === 'inactiva' ? 'completada' : c.status === 'error' ? 'fallida' : c.status === 'sin_cuota' ? 'pausada_cuota' : c.status, c.status)}</div>
         ${offlineWarn(x.machine, x.machine_online)}
-        <div class="row" style="margin:8px 0">${agentChip(c.agent_id)}${machines().length > 1 ? `<span class="chip">${ic('monitor', 'sm')} ${h(x.machine || '')}</span>` : ''}<span class="chip">${h(c.model || '-')} · ${h(c.effort || '-')} · ${c.mode === 'plan' ? 'lectura' : 'edición'}</span>${c.folder_path ? `<span class="chip" title="${h(c.folder_path)}">${ic('folder', 'sm')} ${h(c.folder_path.split(/[\\/]/).pop())}</span>` : ''}${c.project_id ? `<span class="chip">${h(project(c.project_id)?.name || '')}</span>` : ''}${c.task_id ? `<a class="chip" href="#/tarea/${c.task_id}">→ tarea #${c.task_id}</a>` : ''}</div>
+        <div class="row" style="margin:8px 0">${agentChip(c.agent_id)}${machines().length > 1 ? `<span class="chip">${ic('monitor', 'sm')} ${h(x.machine || '')}</span>` : ''}<span class="chip">${h(c.model || '-')} · ${h(c.effort || '-')} · ${c.mode === 'plan' ? 'lectura' : c.mode === 'reporte' ? 'reporte' : 'edición'}</span>${c.folder_path ? `<span class="chip" title="${h(c.folder_path)}">${ic('folder', 'sm')} ${h(c.folder_path.split(/[\\/]/).pop())}</span>` : ''}${c.project_id ? `<span class="chip">${h(project(c.project_id)?.name || '')}</span>` : ''}${c.task_id ? `<a class="chip" href="#/tarea/${c.task_id}">→ tarea #${c.task_id}</a>` : ''}</div>
         ${canEdit() ? `<div class="row">${x.running ? '<button class="btn sm r" id="cAbort">■ Abortar</button>' : ''}<button class="btn sm" id="cSwitch">⇄ Cambiar agente</button><button class="btn sm g" id="cTask">→ Tarea</button><button class="btn sm" id="cProj">→ Proyecto</button>
           <button class="btn sm ghost" id="cRename">Renombrar</button><button class="btn sm ghost" id="cPin">${c.pinned ? 'Desfijar' : 'Fijar'}</button><button class="btn sm ghost" id="cArch">${c.archived ? 'Desarchivar' : 'Archivar'}</button>
           <a class="btn sm ghost" href="/api/conversations/${cid}/md">Exportar .md</a><button class="btn sm r" id="cDel">Eliminar</button></div>` : ''}
@@ -2399,6 +2399,7 @@ const mando = {
           '<select id="mandoModeSel">' + opts([
             ['editar', '⚡ Directo · Editar archivos y ejecutar comandos en PC'],
             ['plan', '🔍 Directo · Solo lectura / Análisis'],
+            ['reporte', '📊 Reporte · SIJ → Excel/Word (Claude, carpeta de reportes)'],
             ['tarea', '🌿 Crear Tarea Kanban (Worktree Git aislado)']
           ], S.mandoMode) + '</select></div>' +
         '</div>' +

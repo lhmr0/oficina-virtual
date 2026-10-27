@@ -16,7 +16,7 @@ const CANTINA = process.env.OFICINA_CANTINA ?? file.cantina ?? 'D:/cantina'; // 
 if (!URL_ || !TOKEN) { console.error('Falta url/token: crea worker.json con {"url": "https://…", "token": "…"} (el token se genera en Configuración → Máquinas)'); process.exit(1); }
 fs.mkdirSync(path.join(DATA, 'sandbox'), { recursive: true });
 
-const H = create({ dataDir: DATA, strict: true, roots: ROOTS, cantina: CANTINA, deploy: file.deploy });
+const H = create({ dataDir: DATA, strict: true, roots: ROOTS, cantina: CANTINA, reportes: process.env.OFICINA_REPORTES ?? file.reportes, deploy: file.deploy });
 const auth = { Authorization: 'Bearer ' + TOKEN };
 const say = (...a) => console.log(new Date().toLocaleTimeString(), ...a);
 const sleep = ms => new Promise(r => setTimeout(r, ms));

@@ -477,6 +477,16 @@ function gitRepo(name) {
     assert.equal(one('select deleted_at from conversations where id=?', cid).deleted_at, null);
   });
 
+  await t('modo reporte: Claude con dontAsk + allowlist; sin bypass', async () => {
+    const { args } = R.ADAPTERS.claude.args({ session_id: 's', mode: 'reporte' }, { first: true, prompt: 'x' });
+    assert.equal(args[args.indexOf('--permission-mode') + 1], 'dontAsk');
+    assert.ok(args.includes('mcp__sij') && args.includes('Bash(python .oficina/*)') && args.includes('--disallowedTools'));
+    assert.ok(!args.includes('bypassPermissions'));
+    const { ops } = require('./hostops').create({ dataDir: TMP, roots: [TMP], reportes: TMP });
+    assert.equal(ops.workdir({ reportes: true }).cwd.toLowerCase(), fs.realpathSync.native(TMP).toLowerCase());
+    assert.throws(() => require('./hostops').create({ dataDir: TMP }).ops.workdir({ reportes: true }), /carpeta de reportes/);
+  });
+
   await t('parser de límites Claude/Codex → agent_limits y bootstrap', async () => {
     const st = { limits: [] };
     R.ADAPTERS.claude.parse({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', unifiedWindows: { five_hour: { utilization: 0.31, resetsAt: 1790281800 }, seven_day: { utilization: 0.85, resetsAt: 1790460000 } } } }, st, () => {});

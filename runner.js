@@ -17,6 +17,16 @@ const RULES = `## Reglas de la oficina (obligatorias)
 4. ${DELIVER}`;
 const RULES_CHAT = 'Esta oficina es un centro de comandos de proyectos y también se usa desde el celular: empieza por la respuesta o el estado en 1–3 líneas y después, solo si hace falta, el detalle. ' +
   'Si necesitas que el usuario decida algo antes de seguir, termina con la línea [[CONSULTA]] y la pregunta. ' + DELIVER;
+// modo Reporte (solo Claude): corre en la carpeta de reportes de la máquina (worker.json "reportes": así carga su memoria y CLAUDE.md)
+// con dontAsk: todo lo que no esté en esta lista se rechaza solo. El hook rtk de la PC reescribe "python …" a "rtk python …".
+// ponytail: python .oficina/* corre código arbitrario (lo escribe el propio agente); el aislamiento real sería otro usuario de Windows
+const REPORT_TOOLS = ['Read', 'Glob', 'Grep', 'TodoWrite', 'mcp__sij', 'Edit(./.oficina/**)', 'Edit(~/.claude/projects/**/memory/**)',
+  'Bash(python .oficina/*)', 'Bash(rtk python .oficina/*)'];
+// la configuración de usuario se carga (trae el MCP del SIJ), y con ella sus "allow": se niegan los que no son de lectura
+const REPORT_DENY = ['Bash(agy *)', 'Bash(rtk agy *)', 'Bash(npm *)', 'Bash(rtk npm *)', 'Bash(npx *)', 'Bash(rtk npx *)'];
+const RULES_REPORTE = 'Modo Reporte: consultas y reportes sobre los datos, sin tocar código, repositorios ni servidores (solo git status/diff/log; commits, push, ssh, npm y deploy están bloqueados).' +
+  'Consulta el SIJ con las herramientas mcp__sij__*. Para armar Excel/Word escribe el script en .oficina/tmp/ y ejecútalo exactamente como "python .oficina/tmp/<script>.py" ' +
+  '(openpyxl y python-docx están instalados); cualquier otro comando será rechazado. Escribe archivos solo dentro de .oficina/.';
 const VOZ = '(Este mensaje se dictó por voz y se transcribió automáticamente: puede tener errores de transcripción. Interpreta la intención; si algo clave es ambiguo, pregunta antes de actuar. Responde breve y claro.)';
 // servicio de IA del servidor interno (deploy/ia): voz → texto y adjuntos → texto. Sin OFICINA_IA_URL queda apagado
 const iaCfg = () => process.env.OFICINA_IA_URL ? { url: process.env.OFICINA_IA_URL, key: process.env.OFICINA_IA_KEY || '' } : null;
@@ -47,6 +57,7 @@ function staticLock(t) {
 // chats en modo edición: su carpeta o la carpeta fija de la Cantina (compartida por todas las consultas rápidas de la máquina)
 function convLock(c) {
   if (c.task_id && c.kind === 'tarea') { const t = one('select * from tasks where id=?', c.task_id); return t ? staticLock(t) : null; }
+  if (c.mode === 'reporte') return `reportes-${machineOfConv(c)}`; // comparten .oficina/entregables: uno a la vez
   if (c.mode !== 'editar') return null;
   const mid = machineOfConv(c);
   return c.folder_path ? dirLock(mid, c.folder_path) : c.kind === 'consulta_rapida' ? `cantina-${mid}` : null;
@@ -82,7 +93,9 @@ const ADAPTERS = {
         a.push('--input-format', 'stream-json', '--permission-mode', 'default', '--permission-prompt-tool', 'stdio');
         return { args: a, stdin: JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } }) + '\n', keepOpen: true };
       }
-      a.push('--permission-mode', c.mode === 'plan' ? 'plan' : 'bypassPermissions'); // editar: sin terminal no hay a quién pedir permiso
+      if (c.mode === 'reporte') a.push('--permission-mode', 'dontAsk', '--setting-sources', 'user',
+        '--allowedTools', ...setting('reporte_tools', REPORT_TOOLS), '--disallowedTools', ...REPORT_DENY);
+      else a.push('--permission-mode', c.mode === 'plan' ? 'plan' : 'bypassPermissions'); // editar: sin terminal no hay a quién pedir permiso
       return { args: a, stdin: prompt };
     },
     newSession: () => crypto.randomUUID(),
@@ -290,8 +303,10 @@ async function start(item, mid) {
   let cwd;
   try {
     cwd = task ? (await workdir(one('select * from tasks where id=?', task.id))).cwd
+      : cc.mode === 'reporte' ? (await host.call(mid, 'workdir', { reportes: true })).cwd
       : cc.folder_path || (await host.call(mid, 'workdir', { cantina: cc.kind === 'consulta_rapida', sandbox: 'conv-' + c.id })).cwd;
   } catch (e) { active.delete(key); throw e; }
+  if (cc.mode === 'reporte' && ag.adapter !== 'claude') cc.mode = 'plan'; // la allowlist es de Claude; los demás CLIs, solo lectura
   // El catálogo del agente puede quedar desactualizado; consulta la máquina que ejecutará Codex.
   if (ag.adapter === 'codex' && cc.model) {
     try {
@@ -862,6 +877,6 @@ function order66(userId) {
 }
 function resumeQueue(userId) { setSetting('queue_paused', false); log(userId, 'sistema', null, 'reanudar_cola'); emit('queue', { paused: false }); pump(); }
 
-module.exports = { DEFAULT_EXCLUDE, ADAPTERS, STATUS, RULES, RULES_CHAT, VOZ, iaCfg, codexFallback, queue, active, orphans, pendingPerms, runTurn, runTask, runTaskBg, abortConv, answerPermission, setStatus, changeTask,
+module.exports = { DEFAULT_EXCLUDE, ADAPTERS, STATUS, RULES, RULES_CHAT, RULES_REPORTE, VOZ, iaCfg, codexFallback, queue, active, orphans, pendingPerms, runTurn, runTask, runTaskBg, abortConv, answerPermission, setStatus, changeTask,
   createTask, approveTask, returnTask, handoffTask, createHandoff, snapshot, taskPrompt, workdir, folderOf, machineOfTask, machineOfConv, recover, order66,
   resumeQueue, quotaTick, parseReset, saveLimits, agyLimits, markQuota, pump, question, isPaused, depsPending };

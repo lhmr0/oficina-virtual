@@ -393,7 +393,7 @@ r('POST', '/api/mando/send', 'operador', async ({ body, user }) => {
   const pid = +body.project_id || null;
   const folder = pid ? one('select * from project_folders where project_id=? order by is_default desc, id limit 1', pid) : null;
   const mid = folder?.machine_id || host.defaultMachine();
-  const mode = body.mode === 'plan' ? 'plan' : 'editar';
+  const mode = ['plan', 'reporte'].includes(body.mode) ? body.mode : 'editar';
 
   if (body.shell) {
     need(mid && host.online(mid), 'La maquina PC no esta conectada', 409);
@@ -753,7 +753,7 @@ const dictated = b => b.voz ? `${b.text}\n\n${R.VOZ}` : b.text; // al agente le 
 function chatPrompt(c, text) {
   if (c.session_id) return text;
   const p = c.project_id ? one('select * from projects where id=?', c.project_id) : null;
-  return [R.RULES_CHAT, p ? `Contexto: proyecto "${p.name}". ${p.briefing || p.description || ''}` : '', c.context || '', text].filter(Boolean).join('\n\n');
+  return [R.RULES_CHAT, c.mode === 'reporte' ? R.RULES_REPORTE : '', p ? `Contexto: proyecto "${p.name}". ${p.briefing || p.description || ''}` : '', c.context || '', text].filter(Boolean).join('\n\n');
 }
 r('GET', '/api/conversations', 'observador', ({ query }) => {
   const w = ['c.deleted_at is null', `c.kind in (${query.kind ? "'" + String(query.kind).replace(/[^a-z_]/g, '') + "'" : "'consulta_rapida'"})`], p = [];
@@ -768,7 +768,7 @@ r('POST', '/api/conversations', 'operador', async ({ body, user }) => {
   const chk = body.folder_path ? await checkFolder({ path: body.folder_path, machine_id: body.machine_id }) : null;
   const ag = one('select * from agents where id=?', +body.agent_id);
   const id = insert('conversations', { kind: 'consulta_rapida', project_id: body.project_id || null, title: body.title || body.text.trim().slice(0, 60), agent_id: ag.id,
-    model: body.model || ag.default_model, effort: body.effort || ag.default_effort, mode: body.mode === 'editar' ? 'editar' : 'plan',
+    model: body.model || ag.default_model, effort: body.effort || ag.default_effort, mode: ['editar', 'reporte'].includes(body.mode) ? body.mode : 'plan',
     folder_path: chk?.path || null, machine_id: chk?.mid || (+body.machine_id || null), created_by: user.id, created_at: now(), updated_at: now() });
   for (const aid of body.attachment_ids || []) run('update attachments set conversation_id=? where id=? and conversation_id is null and task_id is null', id, +aid);
   log(user.id, 'chat', id, 'crear', { agente: ag.key });
