@@ -466,6 +466,137 @@ r('POST', '/api/mando/send', 'operador', async ({ body, user }) => {
   return { ok: true, kind: body.broadcast ? 'broadcast' : 'chat', launched };
 });
 
+// ---------- harness: chats de los 4 CLIs por proyecto (también los de Claude Desktop / Codex app), y seguirlos desde aquí ----------
+const agentOfAdapter = k => one('select * from agents where adapter=? and enabled=1 order by id limit 1', k);
+async function harnessSessions(pid, limit) {
+  const folders = all(`select f.* from project_folders f join projects p on p.id=f.project_id where p.deleted_at is null ${pid ? 'and p.id=?' : ''}`, ...(pid ? [pid] : []));
+  const byM = {};
+  for (const f of folders) (byM[f.machine_id || host.defaultMachine()] ||= []).push(f);
+  const sessions = [], errors = [];
+  await Promise.all(Object.entries(byM).map(async ([mid, fl]) => {
+    mid = +mid;
+    if (!host.online(mid)) return errors.push(`La máquina "${host.machine(mid)?.name || mid}" no está conectada`);
+    try {
+      const r = await host.call(mid, 'agentSessions', { paths: [...new Set(fl.map(f => f.path))], limit });
+      for (const s of r.sessions) for (const f of fl.filter(x => x.path === s.path)) sessions.push({ ...s, machine_id: mid, project_id: f.project_id });
+      for (const [k, v] of Object.entries(r.errors || {})) errors.push(`${k}: ${v}`);
+    } catch (e) { errors.push(/desconocida/.test(e.message) ? 'El agente de campo de la PC está desactualizado: reinícialo para ver los chats de los CLIs' : e.message); }
+  }));
+  // sesiones que ya se siguen desde la oficina (misma sesión del CLI)
+  const linked = new Map(all("select id, session_id, status from conversations where deleted_at is null and session_id is not null").map(c => [c.session_id, c]));
+  const running = new Set([...R.active.values()].map(a => a.convId));
+  for (const s of sessions) { const c = linked.get(s.id); if (c) { s.conv_id = c.id; s.running = running.has(c.id) || R.queue.some(q => q.convId === c.id); } }
+  sessions.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+  return { sessions, errors };
+}
+// contexto VIVO de un proyecto (se arma al momento de cada turno): git real de sus carpetas, lo último de cada agente y las tareas abiertas;
+// es lo que comparten todos los agentes para no trabajar a ciegas sobre lo que hizo otro
+const AG_NAME = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity', commandcode: 'CommandCode' };
+const agoTxt = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? `hace ${m} min` : m < 2880 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} d`; };
+async function projectContext(pid, { skip = null, short = false } = {}) {
+  const p = one('select * from projects where id=? and deleted_at is null', pid);
+  if (!p) return '';
+  const out = [`# Contexto actual del proyecto "${p.name}" (${new Date().toLocaleString('es-PE')})`];
+  if (p.briefing || p.description) out.push((p.briefing || p.description).slice(0, 1500));
+  for (const f of all('select * from project_folders where project_id=? order by is_default desc, id', pid)) {
+    const mid = f.machine_id || host.defaultMachine();
+    let g = null;
+    if (host.online(mid)) try { g = await host.call(mid, 'repoStatus', { repo: f.path }); } catch {}
+    out.push(g ? `## ${f.path}\nRama ${g.head}${g.upstream ? ` (↑${g.ahead} ↓${g.behind} vs ${g.upstream})` : ''} · ${g.changes.length ? `${g.changes.length} cambios sin commit: ${g.changes.slice(0, 12).map(c => c.file).join(', ')}` : 'sin cambios sin commit'}` +
+      (short ? '' : `\nÚltimos commits:\n${g.log.map(l => '- ' + l).join('\n')}`) : `## ${f.path}${host.online(mid) ? ' (sin git)' : ' (PC desconectada: estado no disponible)'}`);
+  }
+  const ss = (await harnessSessions(pid, short ? 2 : 3)).sessions.filter(s => s.id !== skip).slice(0, short ? 4 : 8);
+  if (ss.length) out.push('## Lo último de cada agente en este proyecto\n' + ss.map(s => `- [${AG_NAME[s.agent]}${s.source ? ' · ' + s.source : ''} · ${agoTxt(s.updated_at)}] ${s.title}${s.last_user && !short ? `\n  Pidió: ${s.last_user}` : ''}\n  Último: ${s.preview || '—'}`).join('\n'));
+  const ts = all("select t.id, t.title, t.status, a.name ag from tasks t left join agents a on a.id=t.agent_id where t.project_id=? and t.deleted_at is null and t.status not in ('completada','fallida') order by t.updated_at desc limit 8", pid);
+  if (ts.length) out.push('## Tareas abiertas en la oficina\n' + ts.map(t => `- #${t.id} [${t.status}] ${t.title} (${t.ag || '—'})`).join('\n'));
+  return out.join('\n\n');
+}
+// prompt con el contexto vivo delante: proyecto propio + los que el usuario quiera "conectar"
+async function liveContext(pid, extra = [], skip = null) {
+  const parts = [];
+  if (pid) parts.push(await projectContext(pid, { skip }));
+  for (const x of [...new Set(extra.map(Number))].filter(x => x && x !== pid)) parts.push(await projectContext(x, { short: true }));
+  return parts.filter(Boolean).join('\n\n---\n\n');
+}
+const withCtx = (ctx, text) => ctx ? `${ctx}\n\n(Arriba: el estado real del proyecto en este momento, por si cambió algo desde tu último turno; otros agentes pueden haber trabajado aquí. Revisa los archivos si dudas.)\n\n---\n\n${text}` : text;
+r('GET', '/api/harness/context', 'observador', async ({ query }) => ({ text: await liveContext(+query.project_id || null, String(query.extra || '').split(',').filter(Boolean)) }));
+// chat nuevo en la carpeta del proyecto, con el contexto vivo y los permisos elegidos (editar = bypass)
+r('POST', '/api/harness/new', 'operador', async ({ body, user }) => {
+  const text = String(body.text || '').trim();
+  need(text, 'Escribe el mensaje');
+  const pid = +body.project_id;
+  const folder = one('select * from project_folders where project_id=? order by is_default desc, id limit 1', pid);
+  need(folder, 'Ese proyecto no tiene carpeta en la PC');
+  const ag = one('select * from agents where id=? and enabled=1', +body.agent_id);
+  need(ag, 'Agente no disponible');
+  const mode = ['plan', 'reporte'].includes(body.mode) ? body.mode : 'editar';
+  const id = insert('conversations', { kind: 'consulta_rapida', project_id: pid, title: '[Harness] ' + text.replace(/\s+/g, ' ').slice(0, 60), agent_id: ag.id,
+    model: body.model || ag.default_model, effort: body.effort || ag.default_effort, mode, folder_path: folder.path, machine_id: folder.machine_id || host.defaultMachine(),
+    context: JSON.stringify({ harness: true, extra: (body.extra_projects || []).map(Number) }), created_by: user.id, created_at: now(), updated_at: now() });
+  log(user.id, 'chat', id, 'harness_nuevo', { agente: ag.key, proyecto: pid });
+  const c = one('select * from conversations where id=?', id);
+  R.runTurn(id, text, { userId: user.id, prompt: await harnessPrompt(c, dictated({ text, voz: !!body.voz })) }).catch(() => {});
+  return { conv_id: id };
+});
+// conversaciones del harness: guardan {harness, extra} en context (las que vienen de otro agente, el texto de traspaso en handoff)
+const harnessMeta = c => { try { const j = JSON.parse(c.context || ''); return j?.harness ? j : null; } catch { return null; } };
+// sesión que sigue (mismo agente): solo el mensaje, como seguir el chat en el CLI; el estado del proyecto solo si se pide (ctx).
+// sesión nueva (chat nuevo, otro agente o compactada): reglas + traspaso + estado del proyecto, una sola vez
+async function harnessPrompt(c, text, ctx = false) {
+  const m = harnessMeta(c);
+  if (c.session_id) return ctx && !/^\/[a-z]/i.test(text) ? withCtx(await liveContext(c.project_id, m?.extra || [], c.session_id), text) : text;
+  return [R.RULES_CHAT, c.mode === 'reporte' ? R.RULES_REPORTE : '', m?.handoff || '', withCtx(await liveContext(c.project_id, m?.extra || []), text)].filter(Boolean).join('\n\n');
+}
+r('GET', '/api/harness', 'observador', async ({ query }) => {
+  const pid = +query.project_id || null;
+  const { sessions, errors } = await harnessSessions(pid, pid ? 8 : 3);
+  return { sessions, errors, agents: all('select id, name, adapter, default_model, default_effort from agents where enabled=1 order by id') };
+});
+r('GET', '/api/harness/transcript', 'observador', async ({ query }) => {
+  const mid = +query.machine_id || host.defaultMachine();
+  need(host.online(mid), 'La máquina PC no está conectada', 409);
+  return host.call(mid, 'agentTranscript', { agent: query.agent, id: query.id, max: +query.max || 80 });
+});
+// sigue un chat de un CLI: con el mismo agente reanuda su sesión nativa (lo que se haga aquí aparece luego en Claude Code/Desktop o Codex);
+// con otro agente, arranca con la conversación previa y las demás sesiones del proyecto como contexto
+r('POST', '/api/harness/continue', 'operador', async ({ body, user }) => {
+  const text = String(body.text || '').trim();
+  need(text, 'Escribe el mensaje para seguir');
+  const mid = +body.machine_id || host.defaultMachine();
+  need(host.online(mid), 'La máquina PC no está conectada', 409);
+  const tgt = one('select * from agents where id=? and enabled=1', +body.target_agent_id) || agentOfAdapter(body.agent);
+  need(tgt, 'Agente no disponible');
+  const mode = ['plan', 'reporte'].includes(body.mode) ? body.mode : 'editar';
+  const src = await host.call(mid, 'agentTranscript', { agent: body.agent, id: body.id, max: 400 });
+  need(src.cwd, 'La sesión no tiene carpeta de trabajo');
+  const same = tgt.adapter === body.agent && !body.fresh; // fresh = compactar: mismo agente, sesión nueva con los últimos mensajes
+  const pid = +body.project_id || one('select project_id from project_folders where lower(?) like lower(path) || \'%\' order by length(path) desc limit 1', src.cwd)?.project_id || null;
+  let c = same ? one('select * from conversations where deleted_at is null and session_id=? and agent_id=? order by id desc limit 1', String(body.id), tgt.id) : null;
+  need(!c || !([...R.active.values()].some(a => a.convId === c.id) || R.queue.some(q => q.convId === c.id)), 'Esa conversación ya está en ejecución', 409);
+  const extra = (body.extra_projects || []).map(Number);
+  if (c) update('conversations', c.id, { mode, context: JSON.stringify({ ...(harnessMeta(c) || {}), harness: true, extra }) });
+  else {
+    const srcName = agentOfAdapter(body.agent)?.name || body.agent;
+    let handoff = null;
+    if (!same) {
+      const conv = src.messages.map(m => `**${m.role === 'usuario' ? 'Usuario' : srcName}:** ${m.text}`).join('\n\n');
+      handoff = [body.fresh ? `# Sesión compactada: continúas tu conversación anterior en ${src.cwd} (abajo sus últimos mensajes)` : `# Continúas una conversación que el usuario tuvo con ${srcName} en ${src.cwd}`,
+        'Abajo están sus últimos mensajes; el estado real del proyecto va después.', conv.slice(-24000)].join('\n\n');
+    }
+    const context = JSON.stringify({ harness: true, extra, handoff });
+    const title = String(body.title || src.messages.find(m => m.role === 'usuario')?.text || text).replace(/\s+/g, ' ').slice(0, 60);
+    const id = insert('conversations', { kind: 'consulta_rapida', project_id: pid, title: '[Harness] ' + title, agent_id: tgt.id,
+      model: (same && src.model) || tgt.default_model, effort: tgt.default_effort, mode, folder_path: src.cwd, machine_id: mid,
+      session_id: same ? String(body.id) : null, context, created_by: user.id, created_at: now(), updated_at: now() });
+    insert('messages', { conversation_id: id, role: 'sistema', user_id: user.id, kind: 'handoff', at: now(),
+      text: same ? `Sigue la sesión ${body.id} de ${srcName} (${src.source || 'CLI'}) en ${src.cwd}` : `${body.fresh ? 'Compactada: sesión nueva' : 'Viene'} de ${srcName} (sesión ${body.id}, ${src.total} mensajes) → ${tgt.name}` });
+    log(user.id, 'chat', id, 'harness_seguir', { de: body.agent, sesion: body.id, a: tgt.key });
+    c = one('select * from conversations where id=?', id);
+  }
+  R.runTurn(c.id, text, { userId: user.id, prompt: await harnessPrompt(c, dictated({ text, voz: !!body.voz }), !!body.with_ctx) }).catch(() => {});
+  return { conv_id: c.id };
+});
+
 // ---------- máquinas (agentes de campo) ----------
 r('GET', '/api/machines', 'observador', () => host.machineList());
 r('POST', '/api/machines', 'admin', ({ body, user }) => {
@@ -782,11 +913,12 @@ r('GET', '/api/conversations/:id', 'observador', ({ params }) => {
     running: [...R.active.values()].some(a => a.convId === c.id) || R.queue.some(q => q.convId === c.id),
     attachments: attachmentsOf(null, [c.id]), machine: host.machine(R.machineOfConv(c))?.name || null, machine_online: host.online(R.machineOfConv(c)) };
 });
-r('POST', '/api/conversations/:id/reply', 'operador', ({ params, body, user }) => {
+r('POST', '/api/conversations/:id/reply', 'operador', async ({ params, body, user }) => {
   need(body.text?.trim(), 'Escribe un mensaje');
   const c = one('select * from conversations where id=?', +params.id);
   if (c.task_id && c.kind === 'tarea') { bg(R.runTask(c.task_id, user.id, { text: body.text, voz: !!body.voz }), c.task_id); return { ok: true }; }
-  R.runTurn(c.id, body.text, { userId: user.id, prompt: chatPrompt(c, dictated(body)) }).catch(() => {});
+  // chats del harness: cada turno lleva el estado real del proyecto (git + lo que hicieron los otros agentes)
+  R.runTurn(c.id, body.text, { userId: user.id, prompt: harnessMeta(c) ? await harnessPrompt(c, dictated(body)) : chatPrompt(c, dictated(body)) }).catch(() => {});
   return { ok: true };
 });
 const transcript = cid => all('select role, text from messages where conversation_id=? order by id', cid).map(m => `**${m.role}:** ${m.text}`).join('\n\n');

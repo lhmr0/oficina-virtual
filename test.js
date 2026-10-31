@@ -150,7 +150,8 @@ function gitRepo(name) {
     const SP = await import(pathToFileURL(path.join(__dirname, 'public', 'sprites.js')).href);
     assert.match(SP.userSprite({ avatar: 'vader' }, 2), /^<svg/);
     assert.notEqual(SP.userSprite({ avatar: 'vader' }), SP.userSprite({ avatar: 'rebel' }));
-    assert.equal(SP.userSprite({ role: 'admin' }), SP.sprite('imperial', '#ff8c42', 2, ''), 'sin avatar cae al rol');
+    assert.equal(SP.userSprite({ role: 'admin' }), SP.userSprite({ avatar: 'imperial' }), 'sin avatar cae al rol');
+    assert.doesNotMatch(SP.agentSprite({ key: 'claude' }, 2), /undefined/, 'avatar ilustrado de agente completo');
     for (const k of ['vader', 'mono', 'cr7', 'bebe']) {
       const svg = SP.sprite(k, '#fff', 2);
       assert.doesNotMatch(svg, /fill="undefined"/, `${k}: todos los colores están en la paleta`);

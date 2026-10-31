@@ -4,6 +4,9 @@ import { agentSprite, userSprite } from './sprites.js';
 // iconos de línea (24×24, trazo): controles y etiquetas de la interfaz. Los sprites pixel son del mapa; los emoji, del contenido
 const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
+  agents: '<path d="M12 3l2.2 5.3L19.5 10.5l-5.3 2.2L12 18l-2.2-5.3L4.5 10.5l5.3-2.2z"/><path d="M19 17l.8 1.9 1.9.8-1.9.8L19 22.4l-.8-1.9-1.9-.8 1.9-.8z"/>',
+  map: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
@@ -39,7 +42,7 @@ export function applyTheme(theme) {
   try { localStorage.setItem('ov_theme', val); } catch {}
   document.documentElement.setAttribute('data-theme', val);
   const meta = document.getElementById('metaTheme');
-  if (meta) meta.content = isLight ? '#f4ede2' : '#070913';
+  if (meta) meta.content = isLight ? '#f2f0ea' : '#0f0f0d';
 }
 applyTheme(S.theme);
 

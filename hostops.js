@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const https = require('node:https');
+const SES = require('./sesiones');
 
 // Claude CLI no tiene comando para listar modelos: IDs completos (sin alias sonnet/opus…, que duplicaban la lista). Actualizar al salir uno nuevo.
 const CLAUDE_MODELS = ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5'];
@@ -157,6 +158,9 @@ function create(cfg) {
 
   // ---------- operaciones (todas serializables: entran y salen JSON) ----------
   const ops = {
+    // Harness: chats que los CLIs guardan en esta PC (solo rutas permitidas)
+    agentSessions: ({ paths, limit }) => SES.list((paths || []).filter(p => { try { checkPath(p); return true; } catch { return false; } }), Math.min(+limit || 5, 30)),
+    agentTranscript: ({ agent, id, max }) => { const t = SES.transcript(agent, String(id), Math.min(+max || 80, 400)); if (t.cwd) checkPath(t.cwd); return t; },
     // Captura de pantalla nativa de Windows en JPEG Base64
     pcScreen: async () => {
       if (process.platform !== 'win32') throw new Error('Control de pantalla solo disponible en Windows');

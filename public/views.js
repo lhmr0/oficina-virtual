@@ -359,7 +359,7 @@ const estacion = {
     const zone = `<section class="agents-zone" aria-label="Sala de agentes">
       <div class="plaque">${icon('radar', 2.5)}<b>Sala de agentes</b><small>${S.boot.agents.filter(a => busy.has(a.id)).length} de ${S.boot.agents.filter(a => a.enabled).length} trabajando</small>
         <span class="zone-legend" aria-hidden="true">? espera tu respuesta · ! lista para revisión · … en cola · Zz sin cuota</span>
-        <button type="button" class="btn sm right" id="btnMoreRooms" title="${h([...otherAreas.map(a => a.alias), 'Cantina', 'Consejo Jedi', 'Puente de Mando', ...(canEdit() ? ['Control del PC'] : []), 'Archivos Jedi'].join(', '))}">Más salas <span class="n">${otherAreas.length + (canEdit() ? 5 : 4)}</span>${otherActive + live.length ? ` · ${otherActive + live.length} activas` : ''}</button></div>
+        <button type="button" class="btn sm right" id="btnMoreRooms" title="${h([...otherAreas.map(a => a.alias), 'Chats', 'Mejoras', 'Estado', ...(canEdit() ? ['Control del PC'] : []), 'Archivos Jedi'].join(', '))}">Más salas <span class="n">${otherAreas.length + (canEdit() ? 5 : 4)}</span>${otherActive + live.length ? ` · ${otherActive + live.length} activas` : ''}</button></div>
       <div class="ws-row">
         ${deco(ZONE_DECO[0])}
         <button type="button" class="ws ws-me" id="wsMe" title="Tu puesto: abre la Bandeja">
@@ -639,10 +639,10 @@ function otherRoomsModal(vis, busy, otherAreas, live, lastCouncil) {
         return card(`data-area-modal="${a.id}"`, a.color, a.icon, a.alias, a.name, `<div class="card-meta"><b>${at}</b> en actividad · <b>${pend}</b> pendientes</div>`);
       }).join('')}
       ${card('data-go-modal="#/cantina"', '#ffe81f', 'cantina', 'Cantina', 'Consultas rápidas', `<div class="card-meta">${live.length ? `<b>${live.length}</b> consultas activas: ${live.map(c => h(c.title)).slice(0, 2).join(', ')}` : 'Nadie en la barra'}</div>`)}
-      ${card('data-go-modal="#/consejo"', '#b98cff', 'holocron', 'Consejo Jedi', 'Propuestas de mejora', `<div class="card-meta">${lastCouncil ? `Última sesión ${ago(lastCouncil.at)} · ${lastCouncil.aceptadas}/${lastCouncil.propuestas} aceptadas` : 'Aún no se ha reunido'}</div>`)}
-      ${card('data-go-modal="#/puente"', '#4fc3f7', 'radar', 'Puente de Mando', 'Estado y límites de agentes', `<div class="consoles">${S.boot.agents.map(a => `<span title="${h(a.name)}">${sprite('console', lamp(a), 2.5)}</span>`).join('')}</div>`)}
+      ${card('data-go-modal="#/consejo"', '#b98cff', 'holocron', 'Mejoras', 'Propuestas de mejora', `<div class="card-meta">${lastCouncil ? `Última sesión ${ago(lastCouncil.at)} · ${lastCouncil.aceptadas}/${lastCouncil.propuestas} aceptadas` : 'Aún no se ha reunido'}</div>`)}
+      ${card('data-go-modal="#/puente"', '#4fc3f7', 'radar', 'Estado', 'Estado y límites de agentes', `<div class="consoles">${S.boot.agents.map(a => `<span title="${h(a.name)}">${sprite('console', lamp(a), 2.5)}</span>`).join('')}</div>`)}
       ${canEdit() ? card('data-go-modal="#/pc"', '#00e5ff', 'radar', 'Control del PC', 'zer0 en tiempo real', '<div class="card-meta">Sesión paso a paso, capturas y aprobación remota.</div>') : ''}
-      ${card('data-go-modal="#/archivos"', '#8c97c9', 'holocron', 'Archivos Jedi', 'Historial y ejecuciones', '<div class="card-meta">Chats, tareas, ejecuciones, relevos y bitácora.</div>')}
+      ${card('data-go-modal="#/archivos"', '#8c97c9', 'holocron', 'Historial', 'Historial y ejecuciones', '<div class="card-meta">Chats, tareas, ejecuciones, relevos y bitácora.</div>')}
     </div>
     <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn ghost" value="c">Cerrar</button></div>`);
   $$('[data-area-modal]', d).forEach(b => b.onclick = e => { e.preventDefault(); closeModal(); roomModal(+b.dataset.areaModal, vis); });
@@ -1057,7 +1057,7 @@ const cantina = {
       setTimeout(() => { const ch = $('.chat', el); if (ch) ch.scrollTop = ch.scrollHeight; });
       if (x.running && x.runs[0]) get(`/api/runs/${x.runs[0].id}/log`).then(lg => { const lv = $('#chatLive', el); if (lv) { lv.dataset.run = x.runs[0].id; showLog(lv, lg.log); lv.scrollTop = lv.scrollHeight; } });
     }
-    el.innerHTML = `<h1>Cantina de Mos Eisley</h1><div class="cantina">${left}<div>${right}</div></div>`;
+    el.innerHTML = `<h1>${ic('chat')} Chats</h1><div class="cantina">${left}<div>${right}</div></div>`;
     $('#newChat', el).onclick = () => go('#/cantina');
     $('#chatQ', el).oninput = e => { q.q = e.target.value; clearTimeout(S.cq); S.cq = setTimeout(() => route(true), 300); };
     $('#chatArch', el).onchange = e => { q.archived = e.target.checked; route(true); };
@@ -1118,7 +1118,7 @@ const consejo = {
     const rid = +r.args[0];
     if (!rid) {
       const list = await get('/api/council');
-      el.innerHTML = `<div class="row"><h1 style="margin:0">Consejo Jedi</h1><span class="right">${canEdit() ? '<button class="btn y" id="conv">Convocar consejo</button>' : ''}</span></div>
+      el.innerHTML = `<div class="row"><h1 style="margin:0">${ic('council')} Mejoras</h1><span class="right">${canEdit() ? '<button class="btn y" id="conv">Convocar consejo</button>' : ''}</span></div>
         <p class="muted">Envía un informe de lo último que se hizo a uno o varios agentes y recibe propuestas de mejora priorizadas que puedes convertir en tareas.</p>
         <div class="panel table-wrap"><table class="grid"><tr><th>#</th><th>Fecha</th><th>Proyectos</th><th>Lentes</th><th>Agentes</th><th>Estado</th><th>Propuestas</th></tr>
         ${list.map(v => `<tr class="click" data-r="${v.id}"><td>${v.id}</td><td>${fmtDate(v.at)}<br><small>${userChip(v.created_by)}</small></td><td>${JSON.parse(v.project_ids || '[]').map(p => h(project(p)?.name || '#' + p)).join(', ')}</td>
@@ -1165,7 +1165,7 @@ const consejo = {
 };
 async function conveneDialog(pid) {
   const L = S.boot.lenses;
-  const d = modal(`<h2>Convocar al Consejo Jedi</h2>
+  const d = modal(`<h2>Pedir propuestas de mejora</h2>
     <h3>1 · Alcance: ¿qué trabajo revisar?</h3>
     <div class="field-row">${[['project_ids', 'Proyectos', S.boot.projects, pid], ['area_ids', 'Áreas', S.boot.areas], ['agent_ids', 'Hecho por', S.boot.agents]].map(([n, l, list, sel]) =>
       `<div><div class="l">${l} <small>(ninguno = todos)</small></div><div class="check-list">${list.map(x => `<label class="row"><input type="checkbox" name="${n}" value="${x.id}" ${x.id === sel ? 'checked' : ''}> ${h(x.name)}</label>`).join('')}</div></div>`).join('')}</div>
@@ -1249,7 +1249,7 @@ const archivos = {
         <div class="row" style="margin-top:10px"><button class="btn sm ghost" id="pgP" ${data.page <= 1 ? 'disabled' : ''}>◀</button><span>Página ${data.page} de ${Math.max(1, Math.ceil(data.total / data.size))} · ${data.total} registros</span><button class="btn sm ghost" id="pgN" ${data.page * data.size >= data.total ? 'disabled' : ''}>▶</button></div>`;
       S.arows = data.rows;
     }
-    el.innerHTML = `<h1>Archivos Jedi</h1><div class="tabs">${TABS.map(([k, l]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>${bodyHTML}`;
+    el.innerHTML = `<h1>${ic('archive')} Historial</h1><div class="tabs">${TABS.map(([k, l]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>${bodyHTML}`;
     $$('[data-t]', el).forEach(b => b.onclick = () => { f.page = 1; delete f.status; go('#/archivos/' + b.dataset.t); }); // el estado significa otra cosa en cada pestaña
     $('#sF', el)?.addEventListener('submit', e => { e.preventDefault(); go('#/archivos/buscar?q=' + encodeURIComponent($('#sQ').value)); });
     const apply = () => { Object.assign(f, { user_id: $('#afU').value, agent_id: $('#afG').value, project_id: $('#afP').value, area_id: $('#afA').value, status: $('#afS')?.value || '', from: $('#afF').value, to: $('#afT').value, q: $('#afQ').value, page: 1 }); route(true); };
@@ -1298,9 +1298,9 @@ const puente = {
         <h3>Consumo medido</h3><table class="grid"><tr><th></th><th>Tokens</th><th>Costo</th><th>Runs</th></tr>${Object.entries(a.usage).map(([w, u]) => `<tr><td>${w}</td><td>${num(u.tokens)}</td><td>$${u.usd.toFixed(2)}</td><td>${u.runs}</td></tr>`).join('')}</table>
         <h3>Tokens (ventana 5h) · últimas 24h</h3><div class="spark" style="--c:${a.color}">${snaps.map(x => `<i style="height:${Math.max(2, (x.detail.usage5h?.tokens || 0) / max * 100)}%" title="${fmtDate(x.at)} · ${x.state}"></i>`).join('') || '<small class="muted">sin datos</small>'}</div></div>`;
     };
-    el.innerHTML = `<div class="row"><h1 style="margin:0">Puente de Mando</h1><small class="muted">último escaneo ${ago(s.last_scan)}</small>
+    el.innerHTML = `<div class="row"><h1 style="margin:0">${ic('gauge')} Estado</h1><small class="muted">último escaneo ${ago(s.last_scan)}</small>
       <span class="right">${canEdit() ? '<button class="btn y" id="scan">Escanear ahora</button><button class="btn" id="ntest">Notificación de prueba</button><button class="btn ghost" id="ttest">Toast Windows</button>' : ''}
-      ${isAdmin() ? (s.queue_paused ? '<button class="btn g" id="resume">Reanudar cola</button>' : '<button class="btn r" id="o66">ORDEN 66</button>') : ''}</span></div>
+      ${isAdmin() ? (s.queue_paused ? '<button class="btn g" id="resume">Reanudar cola</button>' : '<button class="btn r" id="o66">Detener todo</button>') : ''}</span></div>
       ${s.queue_paused ? '<div class="panel r" style="margin:10px 0">La cola está en pausa: nada nuevo se ejecuta.</div>' : ''}
       <h2>Máquinas</h2><div class="grid3">${s.machines.map(m => `<div class="panel ${m.online ? 'h' : 'r'}"><div class="row">${sprite('desk', cssVar(m.online ? '--green' : '--red'), 3)}<div class="grow"><b class="lbl-up">${h(m.name)}</b>${m.is_default ? ' ★' : ''}<br>
         <span class="dot ${m.online ? 'ok' : 'bad'}"></span> ${m.online ? 'conectada' : 'desconectada'} · ${m.is_local ? 'este servidor' : 'agente de campo'}</div></div>
@@ -1321,7 +1321,7 @@ const puente = {
     on('#scan', async () => { holo('Escaneando…'); await act(() => post('/api/status/scan')); refreshSoon(0); });
     on('#ntest', () => act(() => post('/api/notify/test')));
     on('#ttest', () => act(() => post('/api/notify/test?toast=1'), 'Toast enviado a Windows'));
-    on('#o66', async () => { if (await confirmBox('ORDEN 66: abortar TODAS las ejecuciones y pausar la cola?', 'Ejecutar la orden', true)) { const r = await act(() => post('/api/order66')); holo('Orden 66 ejecutada', `${r.stopped} ejecuciones detenidas`, { err: true }); } });
+    on('#o66', async () => { if (await confirmBox('Detener todo: aborta TODAS las ejecuciones y pausa la cola. ¿Seguir?', 'Ejecutar la orden', true)) { const r = await act(() => post('/api/order66')); holo('Orden 66 ejecutada', `${r.stopped} ejecuciones detenidas`, { err: true }); } });
     on('#resume', () => act(() => post('/api/queue/resume'), 'Cola reanudada'));
     el.onclick = async e => {
       const t = e.target.closest('[data-test]'); if (t) { t.disabled = true; t.textContent = 'Probando…'; try { const r = await post(`/api/agents/${t.dataset.test}/test`); holo(r.ok ? 'Prueba OK' : 'Prueba falló', r.ok ? `Respondió "${r.reply}" en ${dur(r.latency_ms / 1000)}` : (r.error || r.end_reason), { err: !r.ok }); } catch (err) { fail(err); } refreshSoon(0); }
@@ -1426,7 +1426,7 @@ const config = {
         <div><label class="l">Métrica</label><select name="metric">${opts([['tokens', 'Tokens'], ['usd', 'USD'], ['runs', 'Ejecuciones']])}</select></div><div><label class="l">Límite</label><input type="number" name="limit_value" min="1" required></div></div><button class="btn y" style="margin-top:10px">Agregar límite</button></form>`;
     } else if (tab === 'auto') {
       const st = S.boot.settings;
-      body = `<form class="panel" id="autoF"><h3>Consejo Jedi automático</h3>
+      body = `<form class="panel" id="autoF"><h3>Propuestas de mejora automáticas</h3>
         <label class="l">Convocar retrospectiva cada N tareas completadas por proyecto (0 = apagado)</label><input type="number" name="council_auto_n" min="0" value="${st.council_auto_n}" style="max-width:160px">
         <label class="l">Agentes del consejo automático</label>${agentsOn().map(a => `<label class="row"><input type="checkbox" name="caa" value="${a.id}" ${st.council_auto_agents.some(x => x.agent_id === a.id) ? 'checked' : ''}>${h(a.name)}</label>`).join('')}
         <h3>Límites y estado</h3><label class="row"><input type="checkbox" name="divert_at_80" ${st.divert_at_80 ? 'checked' : ''}> Deshabilitar un agente al llegar al 80% de un límite (sus tareas nuevas van al relevo)</label>
@@ -2369,7 +2369,7 @@ const mando = {
     }).join('') || '<small class="muted">Sin tareas recientes en este proyecto</small>';
 
     el.innerHTML = '<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px">' +
-      '<div class="row"><h1 style="margin:0">🚀 Mando Directo</h1><span class="chip st-en_curso">Voz + 4 IA + Control PC</span></div>' +
+      '<div class="row"><h1 style="margin:0">' + ic('rocket') + ' Mando directo</h1><span class="chip">Voz · 4 agentes · control de la PC</span></div>' +
       '<div class="row">' +
         (canEdit() ? '<button type="button" class="btn sm y" id="btnScreenPC">📸 Controlar Pantalla PC</button>' : '') +
         (canEdit() ? '<button type="button" class="btn sm" id="btnImpPC">📥 Importar Carpetas PC</button>' : '') +
@@ -2563,7 +2563,132 @@ const mando = {
   }
 };
 
-export const VIEWS = { estacion, mando, proyectos, kanban, repos, tarea, cantina, consejo, archivos, puente, config, pc };
+// ---------- Harness: los últimos chats de los 4 CLIs por proyecto (incluye Claude Desktop / Codex app) y seguirlos con cualquier agente ----------
+const HX_AG = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity', commandcode: 'CommandCode' };
+const HX_SRC = { 'claude-desktop': 'Claude Desktop', cli: 'Claude Code CLI', 'sdk-cli': 'oficina / -p', vscode: 'VS Code', exec: 'oficina / exec', codex_work_desktop: 'Codex app' };
+const HX_MODES = opts([['editar', '⚡ Editar · bypass (sin pedir permiso)'], ['plan', 'Plan · solo lectura'], ['reporte', 'Reporte (Claude, allowlist)']], 'editar');
+// "conectar" otros proyectos: el agente recibe también su estado actual (resumido)
+const hxLinkSel = (id, pid) => S.boot.projects.length > 1 ? `<label class="l" for="${id}">Conectar con otros proyectos <small class="muted">(opcional, Ctrl+clic para varios)</small></label>
+  <select id="${id}" multiple size="3">${S.boot.projects.filter(p => p.id !== pid).map(p => `<option value="${p.id}">${h(p.name)}</option>`).join('')}</select>` : '';
+// uso de la ventana de contexto del chat (como /context de Claude Code); ≈ = estimado (agy y CommandCode no guardan tokens)
+const hxCtxBar = (c, big) => !c ? (big ? '<small class="muted">Contexto: sin dato</small>' : '') :
+  `<span class="hx-ctx ${c.estimated ? 'est' : c.pct >= 80 ? 'hi' : c.pct >= 50 ? 'mid' : ''}" title="${c.estimated ? 'Estimado: este CLI no guarda tokens' : 'Tokens que entraron al modelo en la última respuesta'}">
+    <span class="hx-bar"><i style="width:${c.pct}%"></i></span><small>${big ? 'Contexto: ' : ''}${c.estimated ? '≈' : ''}${c.pct}% · ${kTok(c.used)} / ${kTok(c.window)}${big && c.pct >= 70 ? ' — conviene compactar' : ''}</small></span>`;
+let hxTimer = null;
+const harness = {
+  refreshOn: ['project.updated'],
+  event(type, d) { if (type === 'conv.updated') return 'handled'; },
+  async render(el) {
+    clearTimeout(hxTimer);
+    const pid = S.project || null;
+    el.innerHTML = `<div class="row" style="justify-content:space-between;gap:8px;margin-bottom:6px"><div><div class="lbl-up live">${h(project(pid)?.name || 'Todos los proyectos')} · en vivo</div><h1 style="margin:2px 0 0">Agentes</h1></div>
+      <button class="btn ghost sm" id="hxRef">Actualizar</button></div>
+      <p class="muted" style="margin:0 0 16px">Los últimos chats de cada agente en este proyecto, también los de Claude Desktop y Codex. Ábrelo y síguelo aquí.</p>
+      ${canEdit() ? `<details class="panel y" id="hxNew" ${S.hxNewOpen ? 'open' : ''}><summary><b>＋ Nuevo chat</b> <small class="muted">en la carpeta del proyecto, con su contexto actual</small></summary>
+        <form id="hxNF" style="margin-top:8px"><div class="field-row">
+          <div><label class="l" for="hxNP">Proyecto</label><select id="hxNP" required>${opts(S.boot.projects.filter(p => p.folders?.length).map(p => [p.id, p.name]), pid || '', '— elige —')}</select></div>
+          <div><label class="l" for="hxNA">Agente</label><select id="hxNA">${opts(agentsOn().map(a => [a.id, a.name]), S.hxAgent || agentsOn()[0]?.id)}</select></div>
+          <div><label class="l" for="hxNM">Permisos</label><select id="hxNM">${HX_MODES}</select></div></div>
+          ${hxLinkSel('hxNX', pid)}
+          <label class="l" for="hxNT">Mensaje ${micBtn('#hxNT')}</label><textarea id="hxNT" rows="3" required></textarea>
+          <div class="row" style="margin-top:8px"><button class="btn y">Iniciar chat</button></div></form></details>` : ''}
+      ${pid ? `<details class="panel" id="hxCtx" ${S.hxCtxOpen ? 'open' : ''}><summary><b>Contexto actual del proyecto</b> <small class="muted">lo que recibe un agente al empezar un chat nuevo o al tomar el de otro agente: git real, lo último de cada agente y tareas abiertas</small></summary><div id="hxCtxBody" style="margin-top:8px;white-space:pre-wrap;font-size:var(--fs-sm);max-height:40vh;overflow:auto"></div></details>` : ''}
+      <div id="hxErr"></div><div id="hxDetail"></div><div id="hxGrid" class="hx-grid"><div class="empty">Leyendo los chats de la PC…</div></div>`;
+    $('#hxRef', el).onclick = () => { load(true); ctx(); };
+    $('#hxNew', el)?.addEventListener('toggle', e => { S.hxNewOpen = e.target.open; });
+    $('#hxCtx', el)?.addEventListener('toggle', e => { S.hxCtxOpen = e.target.open; ctx(); });
+    async function ctx() {
+      const b = $('#hxCtxBody', el); if (!b || !S.hxCtxOpen) return;
+      try { b.textContent = (await get('/api/harness/context?project_id=' + pid)).text; } catch (e) { b.innerHTML = `<div class="panel r">${h(e.message)}</div>`; }
+    }
+    ctx();
+    $('#hxNF', el)?.addEventListener('submit', async e => {
+      e.preventDefault();
+      const ta = $('#hxNT', el), text = ta.value.trim(); if (!text) return;
+      S.hxAgent = +$('#hxNA', el).value;
+      try {
+        const r = await post('/api/harness/new', { project_id: +$('#hxNP', el).value, agent_id: S.hxAgent, mode: $('#hxNM', el).value, extra_projects: linked('#hxNX'), text, voz: isDictated(ta) });
+        beep('ok'); location.hash = '#/cantina/' + r.conv_id;
+      } catch (err) { fail(err); }
+    });
+    const linked = sel => [...($(sel, el)?.selectedOptions || [])].map(o => +o.value);
+    let data = null;
+    const key = s => s.agent + ':' + s.id;
+    async function load(withDetail) {
+      try { data = await get('/api/harness' + (pid ? '?project_id=' + pid : '')); } catch (e) { $('#hxErr', el).innerHTML = `<div class="panel r">${h(e.message)}</div>`; return; }
+      $('#hxErr', el).innerHTML = data.errors.map(x => `<div class="panel r" style="margin-bottom:6px">${h(x)}</div>`).join('');
+      const seen = new Set(), list = data.sessions.filter(s => !seen.has(key(s)) && seen.add(key(s)));
+      $('#hxGrid', el).innerHTML = Object.entries(HX_AG).map(([k, name]) => {
+        const ss = list.filter(s => s.agent === k);
+        return `<section class="panel hx-col"><h3 style="margin-top:0">${h(name)} <small class="muted">${ss.length}</small></h3>${ss.map(s => `
+          <button type="button" class="hx-card ${S.hxSel === key(s) ? 'on' : ''}" data-hx="${h(key(s))}">
+            <b class="ellipsis">${h(s.title || '(sin título)')}</b>
+            <small>${ago(s.updated_at)}${pid ? '' : ' · ' + h(project(s.project_id)?.name || '')}${s.source ? ' · ' + h(HX_SRC[s.source] || s.source) : ''}${s.branch ? ' · ' + h(s.branch) : ''}</small>
+            <span class="hx-prev">${h(s.preview || '')}</span>
+            ${hxCtxBar(s.ctx)}
+            <span class="row" style="gap:4px">${s.permission_mode ? `<span class="chip ${s.permission_mode === 'bypassPermissions' ? 'st-revision' : ''}">${h(s.permission_mode)}</span>` : ''}${s.conv_id ? `<span class="chip">${s.running ? '… ' : ''}en oficina #${s.conv_id}</span>` : ''}</span>
+          </button>`).join('') || '<div class="empty">Sin chats</div>'}</section>`;
+      }).join('');
+      $$('[data-hx]', el).forEach(b => b.onclick = () => { S.hxSel = b.dataset.hx; $$('.hx-card.on', el).forEach(x => x.classList.remove('on')); b.classList.add('on'); detail(true); $('#hxDetail', el).scrollIntoView({ block: 'start' }); });
+      if (withDetail) detail(false);
+    }
+    async function detail(fresh) {
+      const s = data?.sessions.find(x => key(x) === S.hxSel), box = $('#hxDetail', el);
+      if (!s) { box.innerHTML = ''; return; }
+      if (fresh || !$('#hxMsgs', box)) {
+        const sameAg = data.agents.find(a => a.adapter === s.agent);
+        box.innerHTML = `<div class="panel y" style="margin-bottom:12px"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><h2 style="margin:0">${h(HX_AG[s.agent])} · ${h(s.title)}</h2>
+          <small class="muted">${h(s.cwd)} · sesión <code>${h(s.id)}</code></small></div>
+          <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap"><div id="hxCtxNow" style="flex:1;min-width:220px">${hxCtxBar(s.ctx, true)}</div>
+            ${canEdit() ? `<button type="button" class="btn ${s.ctx?.pct >= 70 ? 'y' : 'ghost'}" id="hxCompact" title="${s.agent === 'claude' ? 'Ejecuta /compact en la misma sesión' : 'Abre una sesión nueva del mismo agente con los últimos mensajes y el contexto actual del proyecto'}">Compactar</button>` : ''}</div>
+          <div class="chat" id="hxMsgs" style="max-height:48vh;margin:10px 0"><div class="empty">Cargando conversación…</div></div>
+          ${canEdit() ? `<form id="hxF"><label class="l" for="hxText">Seguir la conversación ${micBtn('#hxText')}</label><textarea id="hxText" rows="3" required placeholder="Qué quieres que haga ahora…"></textarea>
+          <div class="field-row"><div><label class="l" for="hxAg">Con</label><select id="hxAg">${data.agents.map(a => `<option value="${a.id}" ${a.id === sameAg?.id ? 'selected' : ''}>${h(a.name)}${a.adapter === s.agent ? ' — mismo chat (sigue la sesión, sin agregar datos)' : ' — con este chat como contexto'}</option>`).join('')}</select></div>
+          <div><label class="l" for="hxMode">Permisos</label><select id="hxMode">${s.permission_mode === 'plan' ? HX_MODES.replace('value="plan"', 'value="plan" selected') : HX_MODES}</select></div></div>
+          <label class="row" id="hxWC" style="font-size:var(--fs-sm);gap:6px"><input type="checkbox" id="hxWithCtx"> Agregar a este mensaje el estado actual del proyecto (git, otros agentes; suma tokens)</label>
+          <div id="hxXBox" hidden>${hxLinkSel('hxX', s.project_id)}</div>
+          ${Date.now() - new Date(s.updated_at) < 120e3 ? '<p class="muted">⚠ Este chat se movió hace menos de 2 min: si sigue abierto en Claude Code / Desktop, espera a que termine para no pisar el turno.</p>' : ''}
+          <div class="row"><button class="btn y">Seguir aquí</button>${s.conv_id ? `<a class="btn ghost" href="#/cantina/${s.conv_id}">Abrir en la Cantina #${s.conv_id}</a>` : ''}</div></form>` : ''}</div>`;
+        $('#hxF', box)?.addEventListener('submit', async e => {
+          e.preventDefault();
+          const text = $('#hxText', box).value.trim(); if (!text) return;
+          try {
+            const r = await post('/api/harness/continue', { machine_id: s.machine_id, project_id: s.project_id, agent: s.agent, id: s.id, target_agent_id: +$('#hxAg', box).value, mode: $('#hxMode', box).value, extra_projects: linked('#hxX'), with_ctx: $('#hxWithCtx', box).checked, text, voz: isDictated($('#hxText', box)) });
+            beep('ok'); location.hash = '#/cantina/' + r.conv_id;
+          } catch (err) { fail(err); }
+        });
+        // mismo agente: por defecto solo el mensaje (casilla opcional); otro agente: siempre lleva el contexto, y ahí sirve conectar proyectos
+        const sync = () => { const same = +$('#hxAg', box).value === sameAg?.id; $('#hxWC', box).hidden = !same; $('#hxXBox', box).hidden = same && !$('#hxWithCtx', box).checked; };
+        if ($('#hxAg', box)) { $('#hxAg', box).onchange = sync; $('#hxWithCtx', box).onchange = sync; sync(); }
+        // Claude compacta su propia sesión; los otros CLIs no lo permiten desde fuera: sesión nueva con lo último (mismo resultado)
+        $('#hxCompact', box)?.addEventListener('click', async () => {
+          const claude = s.agent === 'claude';
+          if (!await confirmBox(claude ? 'Se ejecuta /compact en esta sesión de Claude: resume la conversación y libera contexto. ¿Seguir?'
+            : `${HX_AG[s.agent]} no permite compactar desde fuera: se abre una sesión nueva del mismo agente con los últimos mensajes y el contexto actual del proyecto. ¿Seguir?`)) return;
+          try {
+            const r = await post('/api/harness/continue', { machine_id: s.machine_id, project_id: s.project_id, agent: s.agent, id: s.id, mode: $('#hxMode', box)?.value || 'editar', fresh: !claude,
+              text: claude ? '/compact' : 'Sesión compactada: resume en 3 líneas dónde quedamos y qué falta, y espera instrucciones.' });
+            beep('ok'); location.hash = '#/cantina/' + r.conv_id;
+          } catch (err) { fail(err); }
+        });
+      }
+      try {
+        const t = await get(`/api/harness/transcript?machine_id=${s.machine_id}&agent=${s.agent}&id=${encodeURIComponent(s.id)}&max=60`);
+        const m = $('#hxMsgs', box); if (!m) return;
+        if (t.ctx) $('#hxCtxNow', box).innerHTML = hxCtxBar(t.ctx, true);
+        const atEnd = m.scrollTop + m.clientHeight >= m.scrollHeight - 30;
+        m.innerHTML = (t.total > t.messages.length ? `<div class="empty">… ${t.total - t.messages.length} mensajes anteriores</div>` : '') + t.messages.map(x => `<div class="msg ${x.role}"><div class="who">${x.role === 'agente' ? h(HX_AG[s.agent]) : 'TÚ'}${x.at ? ' · ' + fmtDate(x.at) : ''}</div><div class="body">${md(x.text)}</div></div>`).join('') || '<div class="empty">Sin mensajes legibles</div>';
+        if (fresh || atEnd) m.scrollTop = m.scrollHeight;
+      } catch (e) { const m = $('#hxMsgs', box); if (m) m.innerHTML = `<div class="panel r">${h(e.message)}</div>`; }
+    }
+    await load(true);
+    // ponytail: sondeo cada 15 s mientras la vista está abierta; un watcher de archivos en la PC con evento SSE si hace falta tiempo real
+    const tick = () => { hxTimer = setTimeout(async () => { if (!location.hash.startsWith('#/harness') || !el.isConnected) return; await load(true); ctx(); tick(); }, 15000); };
+    tick();
+  },
+};
+
+export const VIEWS = { estacion, mando, harness, proyectos, kanban, repos, tarea, cantina, consejo, archivos, puente, config, pc };
 
 
 // ---------- órdenes por voz desde el dock: dictar → interpretar → confirmar → ejecutar ----------
