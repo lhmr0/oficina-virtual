@@ -2620,7 +2620,7 @@ const harness = {
       const seen = new Set(), list = data.sessions.filter(s => !seen.has(key(s)) && seen.add(key(s)));
       $('#hxGrid', el).innerHTML = Object.entries(HX_AG).map(([k, name]) => {
         const ss = list.filter(s => s.agent === k);
-        return `<section class="panel hx-col"><h3 style="margin-top:0">${h(name)} <small class="muted">${ss.length}</small></h3>${ss.map(s => `
+        return `<section class="panel hx-col"><h3>${h(name)} <small class="muted">${ss.length}</small></h3>${ss.map(s => `
           <button type="button" class="hx-card ${S.hxSel === key(s) ? 'on' : ''}" data-hx="${h(key(s))}">
             <b class="ellipsis">${h(s.title || '(sin título)')}</b>
             <small>${ago(s.updated_at)}${pid ? '' : ' · ' + h(project(s.project_id)?.name || '')}${s.source ? ' · ' + h(HX_SRC[s.source] || s.source) : ''}${s.branch ? ' · ' + h(s.branch) : ''}</small>
